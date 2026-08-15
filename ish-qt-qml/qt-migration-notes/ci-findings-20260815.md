@@ -1,0 +1,33 @@
+# CI findings — 2026-08-15
+
+## External references
+
+1. Qt 6.11.1 `qmllint` documentation: https://doc.qt.io/qt-6/qtqml-tooling-qmllint.html
+
+The documentation states that `qmllint` reports QML syntax and anti-pattern warnings, supports warning severity configuration through `.qmllint.ini` and command-line category options, and uses `MaxWarnings` to control the warning threshold. The project CI therefore keeps `--max-warnings 1000000` and disables only the `import` category while the `IshQt` module metadata is generated later by CMake.
+
+2. Official iSH repository: https://github.com/ish-app/ish
+
+The current official checkout used for reference is commit `7864dd60`. It contains the original Objective-C/Objective-C++ application sources under `app/`, including `Terminal.m`, `TerminalViewController.m`, `LinuxRoot.c`, and root/theme/settings code. It does not contain files named `app/core/CoreSession.c`, `CoreClipboard.c`, `CoreLocation.c`, or `deps/sqlite/sqlite3.c`; those names in the current Qt CMake/check script are custom migration paths and need to be restored or replaced with the actual source layout.
+
+## CI observations
+
+The latest workflow run after QML syntax fixes had successful QML lint, while Linux Desktop and both Android ABI jobs failed at `ci/check-source-completeness.sh` because the custom Qt bridge and the four custom core paths are absent. The AVD job was skipped because both Android build jobs failed.
+
+## iSH core build reference
+
+The official Xcode project maps the Linux bridge target `libiSHLinux` to `app/LinuxInterop.c`, `app/PasteboardDeviceLinux.c`, `app/fakefs.c`, `app/LinuxRoot.c`, `app/LinuxTTY.c`, and `app/LinuxPTY.c`. The main `libish` target contains the emulator, fake filesystem, kernel, platform, and utility C sources; `libiSHLinuxUser` contains `linux/emu_asbestos.c`. The current Qt CMake references a custom `app/core` layout and `android/app/src/main/cpp`, neither of which exists in the checked-in snapshot. The correct migration must either create a CMake equivalent of these original targets or clearly document a temporary compatibility layer; it must not compile UIKit/Objective-C sources into Qt Android.
+
+## Runtime assets and SQLite sources
+
+The iSH Xcode configuration defines the official root filesystem source as `https://github.com/ish-app/roots/releases/download/g00712ff0a54b2839c5aa1a8ed758003ca65357dc/appstore-apk.tar.gz`; this archive was downloaded into `android-qt/assets/rootfs/root.tar.gz` and identified as gzip data (3,139,804 bytes).
+
+The official SQLite download page at `https://sqlite.org/download.html` lists SQLite amalgamation 3.53.4 as `https://sqlite.org/2026/sqlite-amalgamation-3530400.zip`. The downloaded ZIP passed `unzip -t`; `sqlite3.c` and `sqlite3.h` were copied to `upstream/ish-ios/deps/sqlite/` (the local SHA-256 values are recorded by the working tree). SQLite is public-domain and is being vendored to avoid Android system-library assumptions.
+
+The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.c` only; there is no `platform/android.c`. The Qt port therefore needs an Android-compatible platform source or a neutral platform implementation while retaining the iSH kernel/Asbestos sources.
+
+## Rootfs/fakefs contract
+المصدر المحلي المرجعي: `upstream/ish-ios/tools/fakefs.c` و`fakefs.h` و`fs/fake.c`. صيغة rootfs القابلة للتركيب هي مجلد يحوي `meta.db` و`data/`؛ `fs/fake.c` يثبت اسم `data` ثم يبحث عن `meta.db` بجواره. `tools/fakefs.c` يوفر `fakefs_import()` مع callback للتقدم، وهو المسار الصحيح لتحويل `root.tar.gz` إلى fakefs؛ لا يكفي استخراج tar مباشرة إلى مجلد الجذر. الأرشيف المضمّن الحالي `android-qt/assets/rootfs/root.tar.gz` هو tar عادي يحوي `/bin`, `/etc`, `/ish` وغيرها، لذلك يجب ربط `tools/fakefs.c` و`fakefs_import` أو توفير مسار import مكافئ داخل RootfsManager.
+
+## CMake/core progress
+نجح بناء Meson محليًا لـ`kernel=ish`, `engine=asbestos` بعد إضافة SQLite amalgamation bundled (`libsqlite3.a`) ونسخة `platform/android.c` من Linux platform. أضيفت أداة `tools/generate-offsets.py` لتوليد `cpu-offsets.h` من compiler assembly، وأعيدت كتابة `android-qt/CMakeLists.txt` لبناء VDSO وAsbestos وkernel وfakefs وCoreSession مباشرة على Linux/Android.

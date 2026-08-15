@@ -1,0 +1,16 @@
+platformServices.pasteText
+preferences.blinkCursor
+preferences.bootCommand
+preferences.encodeCommand
+preferences.fontFamily
+preferences.fontSize
+preferences.hideExtraKeysWithExternalKeyboard
+preferences.launchCommand
+preferences.terminalStyle
+preferences.themeName
+rootfsUpgrade.busy
+rootfsUpgrade.message
+rootfsUpgrade.progress
+rootfsUpgrade.reinstallBundledRootfs
+themes.themeNames
+webChannel.url

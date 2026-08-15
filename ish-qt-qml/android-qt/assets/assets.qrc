@@ -4,5 +4,6 @@
     <file alias="terminal/term.css">terminal/term.css</file>
     <file alias="terminal/term.js">terminal/term.js</file>
     <file alias="terminal/qwebchannel.js">terminal/qwebchannel.js</file>
+    <file alias="rootfs/root.tar.gz">rootfs/root.tar.gz</file>
   </qresource>
 </RCC>
