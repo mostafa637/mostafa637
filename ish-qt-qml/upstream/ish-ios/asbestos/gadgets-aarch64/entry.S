@@ -20,7 +20,9 @@ NAME(fiber_enter):
 .global fiber_ret_chain
 fiber_ret_chain:
     cmp _ip, 0
-    b.lt fiber_ret
+    b.ge 1f
+    b fiber_ret
+1:
     ldr x8, [_cpu, CPU_poked_ptr]
     ldrb w8, [x8]
     cmp w8, 0
