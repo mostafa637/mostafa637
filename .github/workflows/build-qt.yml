@@ -222,7 +222,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             apk_root="apk/ish-qt-android-x86_64"
             apk="$(find "$apk_root" -type f -name '*.apk' | grep -E '/debug/|debug.*\\.apk$' | head -n 1 || true)"
             if [ -z "$apk" ]; then

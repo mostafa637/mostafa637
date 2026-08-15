@@ -17,3 +17,7 @@ The current workflow used `runs-on: macos-latest` with an `arm64-v8a` image. The
 تُظهر مراجع GitHub الرسمية أن `macos-latest` هو runner macOS arm64، وأن nested virtualization غير مدعوم على runners macOS arm64. كما يعلن مستودع `actions/runner-images` أن `macos-15-intel` و`macos-26-intel` هما labels Intel المتاحة، وأن `macos-15-intel` هو label الانتقال من macOS 13 حتى أغسطس 2027. لذلك لا يمكن تنفيذ AVD x86_64 software test فعليًا على `macos-latest` arm64، ولا يمكن تشغيل AVD arm64 بسبب HVF unsupported؛ سيُنقل smoke test الفعلي إلى `macos-15-intel` مع صورة x86_64 و`-no-accel`، مع إبقاء البناء Android arm64-v8a وx86_64 مستقلًا.
 
 المراجع: [GitHub-hosted runners reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)، [runner-images issue #13045](https://github.com/actions/runner-images/issues/13045)، [runner-images README](https://github.com/actions/runner-images).
+
+## Android Emulator Runner
+
+توضح صفحة [ReactiveCircus Android Emulator Runner](https://github.com/marketplace/actions/android-emulator-runner) أن الإجراء يثبت SDK وAVD ويشغّل المحاكي وينتظر اكتمال boot ثم ينفذ script المستخدم. وتوصي الصفحة باستخدام `ubuntu-latest`/runners Linux الأكبر لتسريع hardware-accelerated emulators، مع تفعيل صلاحيات `/dev/kvm` بقاعدة udev. كما توضح أن الصور الحديثة Intel `x86`/`x86_64` تعتمد على تسريع VM، وأن خيار `arch: x86_64` مناسب لصورة API 35؛ أما ARM-based emulators القديمة فليست المسار الموصى به. هذا يدعم job Linux+KVM المضاف إلى workflow.
