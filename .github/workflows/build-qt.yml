@@ -43,10 +43,10 @@ jobs:
           QT_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/gcc_64
         run: |
           "$QT_ROOT/bin/qmllint" \
-            -I android-qt/qml \
-            android-qt/qml/Main.qml \
-            android-qt/qml/*.qml \
-            android-qt/qml/IshIOSStyle/*.qml
+            -I ish-qt-qml/android-qt/qml \
+            ish-qt-qml/android-qt/qml/Main.qml \
+            ish-qt-qml/android-qt/qml/*.qml \
+            ish-qt-qml/android-qt/qml/IshIOSStyle/*.qml
 
   build-linux:
     name: Linux Desktop
@@ -77,13 +77,13 @@ jobs:
             --modules $QT_MODULES
 
       - name: Check complete core bridge
-        run: ./ci/check-source-completeness.sh linux
+        run: ./ish-qt-qml/ci/check-source-completeness.sh linux
 
       - name: Configure Linux
         env:
           QT_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/gcc_64
         run: |
-          cmake -S android-qt -B build-linux -G Ninja \
+          cmake -S ish-qt-qml/android-qt -B build-linux -G Ninja \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DCMAKE_PREFIX_PATH="$QT_ROOT"
 
@@ -150,7 +150,7 @@ jobs:
             --modules $QT_MODULES
 
       - name: Check complete core bridge
-        run: ./ci/check-source-completeness.sh android
+        run: ./ish-qt-qml/ci/check-source-completeness.sh android
 
       - name: Configure Android
         env:
@@ -158,7 +158,7 @@ jobs:
           QT_ANDROID_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/${{ matrix.qt_arch }}
           ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
         run: |
-          cmake -S android-qt -B "build-${{ matrix.abi }}" -G Ninja \
+          cmake -S ish-qt-qml/android-qt -B "build-${{ matrix.abi }}" -G Ninja \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DCMAKE_PREFIX_PATH="$QT_ANDROID_ROOT" \
             -DQT_HOST_PATH="$QT_HOST_ROOT" \
