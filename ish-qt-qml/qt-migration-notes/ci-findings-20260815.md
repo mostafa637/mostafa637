@@ -83,3 +83,7 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 ## Linux AVD Runner shell behavior
 
 كشف run `31903956686` أن `reactivecircus/android-emulator-runner@v2` ينفذ قيمة `script` كسلسلة أوامر منفصلة عبر `/usr/bin/sh -c`. لذلك لم تبقَ متغيرات `apk_root` و`apk` بين الأسطر، كما انقسمت كتلة `if` وأصبح `set -o pipefail` غير مدعوم. نُقلت أوامر التثبيت والتشغيل إلى `ci/run-android-avd-smoke.sh`، ويستدعيها workflow في سطر واحد: `script: bash ci/run-android-avd-smoke.sh`. سجل التشغيل نفسه أثبت أن KVM يعمل وأن AVD x86_64 يقلع في نحو 39 ثانية؛ الفشل كان في script الاختبار فقط، لا في المحاكي أو KVM.
+
+## Linux AVD APK signing
+
+نجح run `31904503252` في إقلاع AVD x86_64 عبر KVM خلال نحو 37 ثانية، ثم فشل التثبيت فقط لأن artifact المختار كان `android-build-release-unsigned.apk` ورسالة Android كانت `INSTALL_PARSE_FAILED_NO_CERTIFICATES`. أُضيف إلى `ci/run-android-avd-smoke.sh` اختيار APK موقّع أولًا، مع fallback يقوم بإنشاء debug keystore مؤقت، ثم `zipalign` و`apksigner sign/verify` قبل `adb install`. هذا التوقيع خاص باختبار CI ولا يغيّر APK release المنشور أو مفاتيح التوزيع.
