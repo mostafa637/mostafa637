@@ -91,3 +91,9 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 ## إزالة اختبار macOS AVD
 
 بناءً على طلب المستخدم، أُزيل job `Android AVD smoke test (macOS)` من `.github/workflows/build-qt.yml`. يبقى اختبار AVD على Linux + KVM فقط؛ فهو المسار الذي أثبت إقلاع Android x86_64 وتثبيت/تشغيل APK بنجاح. تستمر وظيفتا بناء APK للمعماريتين `arm64-v8a` و`x86_64`، بينما تُحفظ ملاحظات macOS السابقة كسجل تاريخي لا كاختبار نشط.
+
+## Permanent Android APK signing
+
+أصبح توقيع APK جزءًا إلزاميًا من بناء Android نفسه عبر `QT_ANDROID_SIGN_APK=ON` في CMake، وتُمرَّر بيانات keystore إلى `androiddeployqt` من متغيرات `QT_ANDROID_KEYSTORE_*`. أُضيف keystore ثابت للمشروع باسم `ish-qt-ci-release.keystore`، وتُرفع فقط ملفات Release الموقّعة بعد تحقق `apksigner verify`. اختبار Linux KVM يرفض الآن أي artifact غير موقّع ويثبت نفس APK المرفوع.
+
+هذا المفتاح مخصص لبناء CI والتوزيع المباشر داخل المشروع. قبل نشر التطبيق في Google Play يجب استبداله بمفتاح نشر خاص محفوظ خارج المستودع، لأن المفتاح الموجود في المصدر لا يُعد سر Play Store.

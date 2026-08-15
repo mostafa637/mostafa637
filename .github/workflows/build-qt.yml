@@ -100,6 +100,11 @@ jobs:
     name: Android ${{ matrix.abi }}
     needs: qml-lint
     runs-on: ubuntu-24.04
+    env:
+      QT_ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/ish-qt-qml/ci/keys/ish-qt-ci-release.keystore
+      QT_ANDROID_KEYSTORE_ALIAS: ishqtrelease
+      QT_ANDROID_KEYSTORE_STORE_PASS: ish-qt-ci-release
+      QT_ANDROID_KEYSTORE_KEY_PASS: ish-qt-ci-release
     strategy:
       fail-fast: false
       matrix:
@@ -171,18 +176,27 @@ jobs:
             -DQT_HOST_PATH="$QT_HOST_ROOT" \
             -DCMAKE_TOOLCHAIN_FILE="$QT_TOOLCHAIN" \
             -DANDROID_ABI="${{ matrix.abi }}" \
-            -DANDROID_PLATFORM=android-28
+            -DANDROID_PLATFORM=android-28 \
+            -DQT_ANDROID_SIGN_APK=ON
 
       - name: Build Android Release
         run: cmake --build "build-${{ matrix.abi }}" --parallel 2
+
+      - name: Verify signed Android APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find "build-${{ matrix.abi }}/android-build/build/outputs/apk/release" -type f -name '*.apk' ! -name '*unsigned.apk' | head -n 1 || true)"
+          test -n "$apk"
+          test ! -e "${apk%.apk}-unsigned.apk"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose "$apk"
+          echo "Signed APK: $apk"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
         with:
           name: ish-qt-android-${{ matrix.abi }}
-          path: |
-            build-${{ matrix.abi }}/android-build/build/outputs/apk/release/*.apk
-            build-${{ matrix.abi }}/android-build/build/outputs/apk/debug/*.apk
+          path: build-${{ matrix.abi }}/android-build/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
   test-android-avd-linux:

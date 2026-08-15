@@ -297,6 +297,13 @@ if(ANDROID AND NOT ANDROID_SDK_ROOT)
     set(ANDROID_SDK_ROOT "$ENV{ANDROID_SDK_ROOT}" CACHE PATH "Android SDK root")
 endif()
 
+if(ANDROID)
+    # Qt's androiddeployqt reads the keystore path, alias, and passwords from
+    # QT_ANDROID_KEYSTORE_* environment variables during the build.
+    # Keep signing enabled for every Android package generated from this target.
+    set(QT_ANDROID_SIGN_APK ON CACHE BOOL "Always sign Android APKs")
+endif()
+
 set_target_properties(ish_qt_android PROPERTIES
     QT_ANDROID_APP_NAME "iSH Qt"
     QT_ANDROID_PACKAGE_NAME "com.mostafa637.ishqt"
