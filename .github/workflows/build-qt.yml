@@ -225,7 +225,14 @@ jobs:
         run: |
           set -euo pipefail
           adb start-server
-          emulator -avd ish-api35-arm64 \
+          android_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$android_sdk"
+          emulator_dir="$android_sdk/emulator"
+          emulator_bin="$emulator_dir/emulator"
+          test -x "$emulator_bin"
+          echo "Using emulator: $emulator_bin"
+          cd "$emulator_dir"
+          "$emulator_bin" -avd ish-api35-arm64 \
             -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data \
             -gpu swiftshader_indirect -accel off \
             > "$RUNNER_TEMP/emulator.log" 2>&1 &
