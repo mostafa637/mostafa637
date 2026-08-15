@@ -185,6 +185,72 @@ jobs:
             build-${{ matrix.abi }}/android-build/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
+  test-android-avd-linux:
+    name: Android AVD smoke test (Linux + KVM)
+    needs: build-android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable KVM group permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -e /dev/kvm
+          ls -l /dev/kvm
+
+      - name: Download Android APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ish-qt-android-*
+          path: apk
+          merge-multiple: false
+
+      - name: Run x86_64 AVD with Android Emulator Runner
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            apk_root="apk/ish-qt-android-x86_64"
+            apk="$(find "$apk_root" -type f -name '*.apk' | grep -E '/debug/|debug.*\\.apk$' | head -n 1 || true)"
+            if [ -z "$apk" ]; then
+              apk="$(find "$apk_root" -type f -name '*.apk' | head -n 1 || true)"
+            fi
+            test -n "$apk"
+            echo "Installing APK: $apk"
+            adb install -r "$apk"
+            adb shell monkey -p com.mostafa637.ishqt 1
+            sleep 15
+            adb shell dumpsys activity activities | grep -F com.mostafa637.ishqt
+            adb exec-out screencap -p > avd-linux-screenshot.png
+            adb logcat -d > avd-linux-logcat.txt
+            if grep -E "FATAL EXCEPTION|UnsatisfiedLinkError|QQmlApplicationEngine failed|module .* is not installed" avd-linux-logcat.txt; then
+              echo "Application startup errors detected"
+              exit 1
+            fi
+
+      - name: Upload Linux AVD diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-android-avd-linux-diagnostics
+          path: |
+            avd-linux-screenshot.png
+            avd-linux-logcat.txt
+          if-no-files-found: warn
+
   test-android-avd:
     name: Android AVD smoke test (macOS)
     needs: build-android

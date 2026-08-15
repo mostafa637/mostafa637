@@ -73,3 +73,9 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 حاول run `31902052669` تمرير `-qemu -accel tcg,thread=multi` إلى صورة `arm64-v8a`، لكنه انتهى بـ`HVF fatal error` داخل `hvf_init_vcpu` قبل الإقلاع. هذا يثبت أن نسخة Android Emulator الحالية على runner arm64 لا توفر مسار software arm64 قابلًا للاستخدام هنا.
 
 وفق مراجع GitHub، `macos-latest` هو arm64 مع منع nested virtualization، بينما `macos-15-intel` هو runner Intel الرسمي المتاح لاختبار x86_64. نُقل AVD smoke test إلى `macos-15-intel`، حيث يستخدم صورة `google_apis;x86_64` وAPK x86_64 مع `-no-accel`; ويظل APK arm64-v8a مبنيًا ومرفوعًا كartifact مستقل.
+
+## Android Emulator Runner on Linux + KVM
+
+أضيف job مستقلًا باسم `Android AVD smoke test (Linux + KVM)` باستخدام `reactivecircus/android-emulator-runner@v2`. قبل تشغيل الإجراء تُضبط صلاحيات `/dev/kvm` عبر قاعدة udev الرسمية، ثم يُختبر APK `x86_64` على صورة API 35 `google_apis` مع profile `pixel_6`. هذا المسار يستخدم hardware acceleration على Ubuntu، بينما يبقى job macOS Intel منفصلًا لاختبار software AVD.
+
+يُحمّل job ملفات APK الناتجة من `build-android` ولا يعيد بناء المشروع. بعد التثبيت يشغّل الحزمة `com.mostafa637.ishqt`، يلتقط screenshot وlogcat، ويفشل عند أخطاء startup مثل `FATAL EXCEPTION` أو `UnsatisfiedLinkError` أو فشل `QQmlApplicationEngine`.
