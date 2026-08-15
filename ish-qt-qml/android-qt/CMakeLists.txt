@@ -146,6 +146,7 @@ endif()
 
 set_target_properties(ish_qt_android PROPERTIES
     QT_ANDROID_APP_NAME "iSH Qt"
+    QT_ANDROID_PACKAGE_NAME "com.mostafa637.ishqt"
     QT_ANDROID_VERSION_CODE 1
     QT_ANDROID_VERSION_NAME "1.0"
     QT_ANDROID_MIN_SDK_VERSION 28

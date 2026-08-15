@@ -177,3 +177,89 @@ jobs:
             build-${{ matrix.abi }}/android-build/build/outputs/apk/release/*.apk
             build-${{ matrix.abi }}/android-build/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+  test-android-avd:
+    name: Android AVD smoke test (macOS)
+    needs: build-android
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Download arm64 APK
+        uses: actions/download-artifact@v4
+        with:
+          name: ish-qt-android-arm64-v8a
+          path: apk
+
+      - name: Install emulator and API 35 arm64 system image
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "emulator" "platforms;android-35" \
+            "system-images;android-35;google_apis;arm64-v8a"
+          echo "no" | avdmanager create avd --force \
+            --name ish-api35-arm64 \
+            --package "system-images;android-35;google_apis;arm64-v8a" \
+            --device "pixel_6"
+
+      - name: Start AVD without hardware acceleration
+        shell: bash
+        run: |
+          emulator -avd ish-api35-arm64 \
+            -no-window -no-audio -no-boot-anim -no-snapshot \
+            -gpu swiftshader_indirect -accel off \
+            > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          adb wait-for-device
+          for i in $(seq 1 90); do
+            booted="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+            if [ "$booted" = "1" ]; then break; fi
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+
+      - name: Install and launch APK
+        shell: bash
+        run: |
+          apk="$(find apk -type f -name '*.apk' | grep -E '/debug/|debug.*\.apk$' | head -n 1 || true)"
+          if [ -z "$apk" ]; then
+            apk="$(find apk -type f -name '*.apk' | head -n 1)"
+          fi
+          test -n "$apk"
+          adb install -r "$apk"
+          package="$(adb shell pm list packages | sed 's/^package://' | tr -d '\r' | grep -E 'ish|qtproject' | tail -n 1)"
+          test -n "$package"
+          echo "Detected package: $package"
+          adb shell monkey -p "$package" 1
+          sleep 15
+          adb shell dumpsys activity activities | grep -F "$package"
+          adb exec-out screencap -p > avd-screenshot.png
+          adb logcat -d > avd-logcat.txt
+          if grep -E "FATAL EXCEPTION|UnsatisfiedLinkError|QQmlApplicationEngine failed|module .* is not installed" avd-logcat.txt; then
+            echo "Application startup errors detected"
+            exit 1
+          fi
+
+      - name: Upload AVD diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-android-avd-diagnostics
+          path: |
+            avd-screenshot.png
+            avd-logcat.txt
+            ${{ runner.temp }}/emulator.log
+          if-no-files-found: warn
