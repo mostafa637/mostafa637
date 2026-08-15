@@ -48,7 +48,7 @@ add_custom_command(
             "${ISH_SOURCE_DIR}/vdso/vdso.S"
             "${ISH_SOURCE_DIR}/vdso/vdso.c"
             -nostdlib
-            -Wl,-T,"${ISH_SOURCE_DIR}/vdso/vdso.lds"
+            -Wl,-T,${ISH_SOURCE_DIR}/vdso/vdso.lds
             -Wl,--hash-style,sysv
             -shared -fPIC
     DEPENDS

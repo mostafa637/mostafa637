@@ -159,13 +159,16 @@ jobs:
         env:
           QT_HOST_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/gcc_64
           QT_ANDROID_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/${{ matrix.qt_arch }}
-          ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
+          ANDROID_NDK_VERSION: 27.2.12479018
         run: |
+          command -v ninja
+          ninja --version
+          test -f "$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION/build/cmake/android.toolchain.cmake"
           cmake -S ish-qt-qml/android-qt -B "build-${{ matrix.abi }}" -G Ninja \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DCMAKE_PREFIX_PATH="$QT_ANDROID_ROOT" \
             -DQT_HOST_PATH="$QT_HOST_ROOT" \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI="${{ matrix.abi }}" \
             -DANDROID_PLATFORM=android-28
 
