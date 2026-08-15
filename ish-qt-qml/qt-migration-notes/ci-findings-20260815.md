@@ -39,3 +39,17 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 فشلت وظائف Android أثناء `find_package(Qt6)` لأن `CMAKE_PREFIX_PATH` يشير إلى Qt Android فقط، بينما Qt6Config.cmake موجود في Qt host tools. يجب توفير مساري Qt host وQt Android معًا، مثل إضافة `QT_HOST_ROOT` و`QT_ANDROID_ROOT` إلى `CMAKE_PREFIX_PATH` أو ضبط `Qt6_DIR`/`CMAKE_FIND_ROOT_PATH_MODE_PACKAGE` بما يسمح بتحميل Config من host ثم مكونات Android. أصبح مسار NDK الصريح تحت `$ANDROID_SDK_ROOT/ndk/27.2.12479018` صحيحًا.
 
 بعد نجاح configure Linux، ظهر خطأ C++ في Qt 6.11 داخل `WebSocketTransport.h`: استخدام `QPointer<QWebSocket>` مع forward declaration فقط منع `static_cast<QObject*, QWebSocket*>` أثناء moc؛ الإصلاح هو تضمين `<QWebSocket>` في header.
+
+## Qt CMake guidance
+
+توثيق Qt 6.11 الرسمي يوصي عند البناء المتقاطع باستخدام toolchain الخاص بالمنصة بدل تمرير مسارات `Qt6_ROOT` أو `CMAKE_PREFIX_PATH` يدويًا. المصدر: https://doc.qt.io/qt-6/cmake-making-qt-available.html . لذلك يستخدم workflow الآن `android_x86_64/lib/cmake/Qt6/qt.toolchain.cmake` أو نظيره لـarm64، مع `QT_HOST_PATH` لأدوات Qt المضيفة.
+
+## CI runs 31898684107, 31899082453, and 31899358661
+
+بعد جعل `CoreSession.c` و`tty-real.c` متوافقين مع Android bionic، نجح Android `x86_64` بينما احتاج arm64 إلى توسيع فروع Asbestos الشرطية التي تجاوزت مدى `R_AARCH64_CONDBR19`. استبدلت الفروع البعيدة في `entry.S` و`memory.S` بتفرع شرطي محلي يتبعه `b` غير مشروط؛ في run `31899358661` نجح `arm64-v8a` و`x86_64` وLinux وQML lint.
+
+ظل اختبار AVD على macOS في خطوة بدء المحاكي دون الانتقال إلى `adb` أو تثبيت APK، فأُلغي التشغيل بعد التحقق من عدم وجود سجل حي مفيد. عُدّل workflow ليبدأ `adb` صراحة، يفحص خروج emulator، يفرض حدود انتظار محددة، يطبع `emulator.log` و`adb devices` وخصائص النظام عند timeout، ويستخدم `-wipe-data` لتفادي حالة AVD قديمة.
+
+## TaskTree note
+
+يظهر أثناء Configure تحذير `Could NOT find Qt6TaskTree`. لم يمنع ذلك بناء Linux أو Android، ويبدو مرتبطًا باكتشاف مكوّن اختياري ضمن Qt 6.11.1 وليس بمكوّن Qt مطلوب مباشرة من التطبيق؛ سيعاد تقييمه فقط إذا تحول إلى خطأ في دورة لاحقة.
