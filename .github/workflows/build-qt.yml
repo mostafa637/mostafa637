@@ -17,7 +17,7 @@ env:
 
 jobs:
   qml-lint:
-    name: QML lint (Qt ${{ env.QT_VERSION }})
+    name: QML lint (Qt 6.11.1)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
