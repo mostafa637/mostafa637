@@ -137,7 +137,13 @@ static void real_tty_cleanup(struct tty *tty) {
     if (tty->num != REAL_TTY_NUM)
         return;
     real_tty_reset_term();
+#if !defined(__ANDROID__)
     pthread_cancel(tty->thread);
+#else
+    // Android bionic does not expose pthread_cancel. The CoreSession pipe
+    // is closed during teardown, which wakes the detached reader with EOF.
+    (void)tty;
+#endif
 }
 
 struct tty_driver_ops real_tty_ops = {
