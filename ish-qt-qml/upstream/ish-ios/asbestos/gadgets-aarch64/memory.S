@@ -79,7 +79,9 @@ handle_\type\()_miss:
     bl NAME(tlb_handle_miss)
     mov x19, x0
     restore_c
-    cbz x19, segfault_\type
+    cbnz x19, 1f
+    b segfault_\type
+1:
     mov _xaddr, x19
     ret
 
@@ -113,7 +115,9 @@ crosspage_load:
     bl NAME(__tlb_read_cross_page)
     mov x19, x0
     restore_c
-    cbz x19, segfault_read
+    cbnz x19, 1f
+    b segfault_read
+1:
     str _addr, [_cpu, LOCAL_value_addr]
     add _xaddr, _cpu, LOCAL_value
     ret
@@ -128,5 +132,7 @@ crosspage_store:
     bl NAME(__tlb_write_cross_page)
     mov x19, x0
     restore_c
-    cbz x19, segfault_write
+    cbnz x19, 1f
+    b segfault_write
+1:
     ret

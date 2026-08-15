@@ -24,7 +24,9 @@ fiber_ret_chain:
     ldr x8, [_cpu, CPU_poked_ptr]
     ldrb w8, [x8]
     cmp w8, 0
-    b.ne poke
+    b.eq 1f
+    b poke
+1:
     sub x8, _ip, FIBER_BLOCK_code
     str x8, [_cpu, LOCAL_last_block]
     gret
