@@ -203,21 +203,45 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Download arm64 APK
-        uses: actions/download-artifact@v4
-        with:
-          name: ish-qt-android-arm64-v8a
-          path: apk
-
-      - name: Install emulator and API 35 arm64 system image
+      - name: Detect macOS host architecture
         shell: bash
         run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64|aarch64)
+              avd_abi="arm64-v8a"
+              ;;
+            x86_64|amd64)
+              avd_abi="x86_64"
+              ;;
+            *)
+              echo "Unsupported macOS runner architecture: $(uname -m)"
+              exit 1
+              ;;
+          esac
+          avd_name="ish-api35-${avd_abi}"
+          avd_image="system-images;android-35;google_apis;${avd_abi}"
+          echo "AVD_ABI=$avd_abi" >> "$GITHUB_ENV"
+          echo "AVD_NAME=$avd_name" >> "$GITHUB_ENV"
+          echo "AVD_IMAGE=$avd_image" >> "$GITHUB_ENV"
+          echo "Detected host $(uname -m); using $avd_image"
+
+      - name: Download Android APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ish-qt-android-*
+          path: apk
+          merge-multiple: false
+
+      - name: Install emulator and matching API 35 system image
+        shell: bash
+        run: |
+          set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "emulator" "platforms;android-35" \
-            "system-images;android-35;google_apis;arm64-v8a"
+          sdkmanager "platform-tools" "emulator" "platforms;android-35" "$AVD_IMAGE"
           echo "no" | avdmanager create avd --force \
-            --name ish-api35-arm64 \
-            --package "system-images;android-35;google_apis;arm64-v8a" \
+            --name "$AVD_NAME" \
+            --package "$AVD_IMAGE" \
             --device "pixel_6"
 
       - name: Start AVD without hardware acceleration
@@ -232,9 +256,9 @@ jobs:
           test -x "$emulator_bin"
           echo "Using emulator: $emulator_bin"
           cd "$emulator_dir"
-          "$emulator_bin" -avd ish-api35-arm64 \
+          "$emulator_bin" -avd "$AVD_NAME" \
             -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data \
-            -gpu swiftshader_indirect -accel off \
+            -gpu swiftshader -accel off \
             > "$RUNNER_TEMP/emulator.log" 2>&1 &
           emulator_pid=$!
           trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
@@ -282,11 +306,13 @@ jobs:
       - name: Install and launch APK
         shell: bash
         run: |
-          apk="$(find apk -type f -name '*.apk' | grep -E '/debug/|debug.*\.apk$' | head -n 1 || true)"
+          apk_root="apk/ish-qt-android-${AVD_ABI}"
+          apk="$(find "$apk_root" -type f -name '*.apk' | grep -E '/debug/|debug.*\.apk$' | head -n 1 || true)"
           if [ -z "$apk" ]; then
-            apk="$(find apk -type f -name '*.apk' | head -n 1)"
+            apk="$(find "$apk_root" -type f -name '*.apk' | head -n 1 || true)"
           fi
           test -n "$apk"
+          echo "Installing APK: $apk"
           adb install -r "$apk"
           package="$(adb shell pm list packages | sed 's/^package://' | tr -d '\r' | grep -E 'ish|qtproject' | tail -n 1)"
           test -n "$package"

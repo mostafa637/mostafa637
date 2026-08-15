@@ -53,3 +53,9 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 ## TaskTree note
 
 يظهر أثناء Configure تحذير `Could NOT find Qt6TaskTree`. لم يمنع ذلك بناء Linux أو Android، ويبدو مرتبطًا باكتشاف مكوّن اختياري ضمن Qt 6.11.1 وليس بمكوّن Qt مطلوب مباشرة من التطبيق؛ سيعاد تقييمه فقط إذا تحول إلى خطأ في دورة لاحقة.
+
+## CI run 31900560318 — AVD architecture mismatch
+
+بعد تشغيل emulator من مجلد SDK، اختفى خطأ مكتبة Qt النسبية، لكن صورة `google_apis;arm64-v8a` فشلت على runner macOS الحالي برسالة `HVF error: HV_UNSUPPORTED` و`qemu-system-aarch64-headless: failed to initialize HVF`. توثيق Android يوضح أن تسريع VM يتطلب تطابق معمارية host وصورة النظام، كما يوضح سجل GitHub issue مماثل أن هذا الخطأ يحدث مع arm64 AVD على macOS غير مناسب.
+
+أصبح اختبار AVD يكتشف `uname -m`، ويستخدم `x86_64` وartifact `ish-qt-android-x86_64` على host x64، أو `arm64-v8a` وartifact arm64 على host arm64. كما استُبدل خيار الرسوم deprecated `swiftshader_indirect` بـ`swiftshader`.
