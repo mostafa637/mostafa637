@@ -222,11 +222,14 @@ void RootfsManager::resetInstalledData()
     refreshRepositoryState();
 }
 
-QString RootfsManager::terminalUrl(const QString &webChannelUrl) const
+QString RootfsManager::terminalUrl(const QString &webChannelUrl,
+                                    const QString &pageUrl) const
 {
-    QUrl url(QStringLiteral("qrc:/ish-assets/terminal/term.html"));
+    QUrl url(pageUrl.isEmpty()
+                 ? QUrl(QStringLiteral("qrc:/ish-assets/terminal/term.html"))
+                 : QUrl(pageUrl));
     if (!webChannelUrl.isEmpty()) {
-        QUrlQuery query;
+        QUrlQuery query(url);
         query.addQueryItem(QStringLiteral("ws"), webChannelUrl);
         url.setQuery(query);
     }

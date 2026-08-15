@@ -1,21 +1,52 @@
 #include "WebChannelServer.h"
 #include "WebSocketTransport.h"
 
+#include <QFile>
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QRegularExpression>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QUrl>
 #include <QWebSocket>
 #include <QWebSocketServer>
 #include <utility>
 
+namespace {
+
+QByteArray contentTypeFor(const QString &path)
+{
+    if (path.endsWith(QStringLiteral(".html")))
+        return QByteArrayLiteral("text/html; charset=utf-8");
+    if (path.endsWith(QStringLiteral(".css")))
+        return QByteArrayLiteral("text/css; charset=utf-8");
+    if (path.endsWith(QStringLiteral(".js")))
+        return QByteArrayLiteral("application/javascript; charset=utf-8");
+    return QByteArrayLiteral("application/octet-stream");
+}
+
+bool isTerminalAsset(const QString &path)
+{
+    return path == QStringLiteral("/terminal/term.html") ||
+           path == QStringLiteral("/terminal/term.css") ||
+           path == QStringLiteral("/terminal/term.js") ||
+           path == QStringLiteral("/terminal/qwebchannel.js");
+}
+
+} // namespace
+
 WebChannelServer::WebChannelServer(QObject *parent)
     : QObject(parent),
       m_server(new QWebSocketServer(QStringLiteral("iSH Qt terminal"),
-                                    QWebSocketServer::NonSecureMode, this))
+                                    QWebSocketServer::NonSecureMode, this)),
+      m_httpServer(new QTcpServer(this))
 {
     connect(m_server, &QWebSocketServer::newConnection,
             this, &WebChannelServer::acceptConnection);
+    connect(m_httpServer, &QTcpServer::newConnection,
+            this, &WebChannelServer::acceptHttpConnection);
 }
 
 WebChannelServer::~WebChannelServer()
@@ -25,16 +56,30 @@ WebChannelServer::~WebChannelServer()
 
 bool WebChannelServer::start()
 {
-    if (m_server->isListening())
+    if (m_server->isListening() && m_httpServer->isListening())
         return true;
+
+    if (m_server->isListening())
+        m_server->close();
+    if (m_httpServer->isListening())
+        m_httpServer->close();
 
     if (!m_server->listen(QHostAddress::LocalHost, 0)) {
         emit serverError(m_server->errorString());
         return false;
     }
+    if (!m_httpServer->listen(QHostAddress::LocalHost, 0)) {
+        const QString error = m_httpServer->errorString();
+        m_server->close();
+        emit serverError(error);
+        return false;
+    }
 
     m_url = QStringLiteral("ws://127.0.0.1:%1").arg(m_server->serverPort());
+    m_pageUrl = QStringLiteral("http://127.0.0.1:%1/terminal/term.html")
+                    .arg(m_httpServer->serverPort());
     emit urlChanged();
+    emit pageUrlChanged();
     return true;
 }
 
@@ -47,11 +92,27 @@ void WebChannelServer::stop()
             transport->deleteLater();
     }
     m_transports.clear();
+
+    const auto sockets = m_httpRequests.keys();
+    for (QTcpSocket *socket : sockets) {
+        if (socket)
+            socket->close();
+        if (socket)
+            socket->deleteLater();
+    }
+    m_httpRequests.clear();
+
     if (m_server->isListening())
         m_server->close();
+    if (m_httpServer->isListening())
+        m_httpServer->close();
     if (!m_url.isEmpty()) {
         m_url.clear();
         emit urlChanged();
+    }
+    if (!m_pageUrl.isEmpty()) {
+        m_pageUrl.clear();
+        emit pageUrlChanged();
     }
 }
 
@@ -85,6 +146,77 @@ void WebChannelServer::acceptConnection()
     }
 }
 
+void WebChannelServer::acceptHttpConnection()
+{
+    while (m_httpServer->hasPendingConnections()) {
+        QTcpSocket *socket = m_httpServer->nextPendingConnection();
+        m_httpRequests.insert(socket, QByteArray());
+        connect(socket, &QTcpSocket::readyRead,
+                this, &WebChannelServer::handleHttpRequest);
+        connect(socket, &QTcpSocket::disconnected,
+                this, &WebChannelServer::removeHttpSocket);
+    }
+}
+
+void WebChannelServer::handleHttpRequest()
+{
+    auto *socket = qobject_cast<QTcpSocket *>(sender());
+    if (!socket || !m_httpRequests.contains(socket))
+        return;
+
+    QByteArray &request = m_httpRequests[socket];
+    request += socket->readAll();
+    if (!request.contains("\r\n\r\n"))
+        return;
+
+    const QByteArray requestLine = request.left(request.indexOf("\r\n"));
+    const QList<QByteArray> fields = requestLine.split(' ');
+    if (fields.size() < 2 || fields.at(0) != QByteArrayLiteral("GET")) {
+        sendHttpResponse(socket, 405, QByteArrayLiteral("Method Not Allowed"),
+                         QByteArrayLiteral("text/plain; charset=utf-8"),
+                         QByteArrayLiteral("Method Not Allowed\n"));
+        return;
+    }
+
+    const QUrl requestedUrl(QString::fromUtf8(fields.at(1)));
+    const QString path = requestedUrl.path();
+    if (!isTerminalAsset(path) || path.contains(QStringLiteral(".."))) {
+        sendHttpResponse(socket, 404, QByteArrayLiteral("Not Found"),
+                         QByteArrayLiteral("text/plain; charset=utf-8"),
+                         QByteArrayLiteral("Not Found\n"));
+        return;
+    }
+
+    QFile resource(QStringLiteral(":/ish-assets") + path);
+    if (!resource.open(QIODevice::ReadOnly)) {
+        sendHttpResponse(socket, 404, QByteArrayLiteral("Not Found"),
+                         QByteArrayLiteral("text/plain; charset=utf-8"),
+                         QByteArrayLiteral("Not Found\n"));
+        return;
+    }
+
+    sendHttpResponse(socket, 200, QByteArrayLiteral("OK"),
+                     contentTypeFor(path), resource.readAll());
+}
+
+void WebChannelServer::sendHttpResponse(QTcpSocket *socket, int status,
+                                         const QByteArray &reason,
+                                         const QByteArray &contentType,
+                                         const QByteArray &body)
+{
+    if (!socket)
+        return;
+    QByteArray response;
+    response += "HTTP/1.1 " + QByteArray::number(status) + " " + reason + "\r\n";
+    response += "Content-Type: " + contentType + "\r\n";
+    response += "Content-Length: " + QByteArray::number(body.size()) + "\r\n";
+    response += "Cache-Control: no-store\r\n";
+    response += "Connection: close\r\n\r\n";
+    response += body;
+    socket->write(response);
+    socket->disconnectFromHost();
+}
+
 void WebChannelServer::handleText(const QString &text)
 {
     const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8());
@@ -111,4 +243,13 @@ void WebChannelServer::removeTransport()
         return;
     m_transports.removeAll(transport);
     transport->deleteLater();
+}
+
+void WebChannelServer::removeHttpSocket()
+{
+    auto *socket = qobject_cast<QTcpSocket *>(sender());
+    if (!socket)
+        return;
+    m_httpRequests.remove(socket);
+    socket->deleteLater();
 }

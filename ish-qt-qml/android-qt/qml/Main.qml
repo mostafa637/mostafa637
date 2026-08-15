@@ -15,6 +15,7 @@ ApplicationWindow {
 
     property bool settingsVisible: false
     property string activePage: ""
+    property var pageStack: []
     property string editorThemeName: "Default"
     property string statusText: "Preparing iSH…"
     property bool pageReady: false
@@ -60,11 +61,11 @@ ApplicationWindow {
 
     function terminalPageUrl() {
         if (webChannel && webChannel.url) {
-            const served = rootfsManager.terminalUrl(webChannel.url)
+            const served = rootfsManager.terminalUrl(webChannel.url, webChannel.pageUrl)
             if (served && String(served).length > 0)
                 return served
         }
-        return "qrc:/ish-assets/terminal/term.html"
+        return rootfsManager.terminalUrl("", "")
     }
 
     function loadTerminalPage() {
@@ -164,16 +165,27 @@ ApplicationWindow {
     function closeSettings() {
         settingsVisible = false
         activePage = ""
+        pageStack = []
         if (terminalLoader.item && terminalLoader.item.focusTerminal)
             terminalLoader.item.focusTerminal()
     }
 
     function openPage(pageName) {
-        settingsVisible = false
+        if (!pageName || pageName.length === 0)
+            return
+        if (activePage !== "")
+            pageStack = pageStack.concat([activePage])
+        else
+            settingsVisible = false
         activePage = pageName
     }
 
     function closePage() {
+        if (pageStack.length > 0) {
+            activePage = pageStack[pageStack.length - 1]
+            pageStack = pageStack.slice(0, pageStack.length - 1)
+            return
+        }
         activePage = ""
         settingsVisible = true
     }
@@ -556,11 +568,11 @@ ApplicationWindow {
                     item.pageForeground = preferences.terminalStyle.foregroundColor
                     item.closeRequested.connect(window.closePage)
                     if (item.navigateRequested)
-                        item.navigateRequested.connect(function(pageName) { window.activePage = pageName })
+                        item.navigateRequested.connect(function(pageName) { window.openPage(pageName) })
                     if (item.editRequested)
                         item.editRequested.connect(function(themeName) {
                             window.editorThemeName = themeName
-                            window.activePage = "themeEditor"
+                            window.openPage("themeEditor")
                         })
                     if (item.bootRootRequested)
                         item.bootRootRequested.connect(function() { window.restartSession() })
@@ -705,6 +717,14 @@ ApplicationWindow {
                     id: utilityKeyGroup
                     Layout.alignment: Qt.AlignVCenter
                     spacing: 7
+
+                    AccessoryButton {
+                        text: "Back"
+                        iconName: "arrow-left"
+                        visible: window.activePage !== ""
+                        enabled: window.activePage !== ""
+                        onClicked: if (window.activePage !== "") window.closePage()
+                    }
 
                     Item {
                         Layout.preferredWidth: window.accessoryButtonSize

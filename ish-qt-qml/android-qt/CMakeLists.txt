@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(Qt6 6.11.1 REQUIRED COMPONENTS Core Gui Quick WebView WebChannel WebSockets)
+find_package(Qt6 6.11.1 REQUIRED COMPONENTS Core Gui Quick Network WebView WebChannel WebSockets)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)
@@ -286,6 +286,7 @@ target_link_libraries(ish_qt_android PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Quick
+    Qt6::Network
     Qt6::WebView
     Qt6::WebChannel
     Qt6::WebSockets

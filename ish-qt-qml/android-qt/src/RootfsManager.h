@@ -22,7 +22,8 @@ public:
 
     Q_INVOKABLE void prepare();
     Q_INVOKABLE void resetInstalledData();
-    Q_INVOKABLE QString terminalUrl(const QString &webChannelUrl) const;
+    Q_INVOKABLE QString terminalUrl(const QString &webChannelUrl,
+                                    const QString &pageUrl = QString()) const;
 
 signals:
     void preparedChanged();
