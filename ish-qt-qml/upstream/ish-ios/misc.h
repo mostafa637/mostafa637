@@ -40,7 +40,13 @@
 #define bitfield unsigned int
 #define forceinline inline __attribute__((always_inline))
 #if defined(NDEBUG) || defined(__KERNEL__)
+#if defined(__clang__)
 #define posit __builtin_assume
+#elif defined(__GNUC__)
+#define posit(x) do { if (!(x)) __builtin_unreachable(); } while (0)
+#else
+#define posit assert
+#endif
 #else
 #define posit assert
 #endif
