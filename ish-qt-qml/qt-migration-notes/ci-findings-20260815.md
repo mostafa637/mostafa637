@@ -67,3 +67,9 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 ## CI run 31901568875 — x86_64 image also requires host match
 
 بعد تحويل smoke test إلى x86_64، أثبت run `31901568875` أن runner هو `arm64` وأن emulator يرفض الصورة صراحةً: `Avd's CPU Architecture 'x86_64' is not supported by the QEMU2 emulator on aarch64 host. System image must match the host architecture.` لذلك عاد الاختبار إلى صورة host المطابقة، مع تمرير `-qemu -accel tcg,thread=multi` لمحاولة إجبار QEMU على ترجمة برمجية بدل HVF، ورفع مهلة الإقلاع لأن TCG أبطأ.
+
+## CI run 31902052669 — TCG is not available for Android arm64 emulator on hosted arm64 macOS
+
+حاول run `31902052669` تمرير `-qemu -accel tcg,thread=multi` إلى صورة `arm64-v8a`، لكنه انتهى بـ`HVF fatal error` داخل `hvf_init_vcpu` قبل الإقلاع. هذا يثبت أن نسخة Android Emulator الحالية على runner arm64 لا توفر مسار software arm64 قابلًا للاستخدام هنا.
+
+وفق مراجع GitHub، `macos-latest` هو arm64 مع منع nested virtualization، بينما `macos-15-intel` هو runner Intel الرسمي المتاح لاختبار x86_64. نُقل AVD smoke test إلى `macos-15-intel`، حيث يستخدم صورة `google_apis;x86_64` وAPK x86_64 مع `-no-accel`; ويظل APK arm64-v8a مبنيًا ومرفوعًا كartifact مستقل.

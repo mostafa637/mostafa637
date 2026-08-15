@@ -11,3 +11,9 @@
 ## Project implication
 
 The current workflow used `runs-on: macos-latest` with an `arm64-v8a` image. The log showed `qemu-system-aarch64-headless` and `HV_UNSUPPORTED`. To preserve the requested macOS AVD smoke test on the likely x64 standard runner, the next workflow revision should detect `uname -m`, select `x86_64`/`google_apis;x86_64` on x64 and `arm64-v8a` on arm64, create a matching AVD, and download the corresponding APK artifact. Use the non-deprecated `-gpu swiftshader` where supported, with a fallback only if necessary.
+
+## Runner label decision
+
+تُظهر مراجع GitHub الرسمية أن `macos-latest` هو runner macOS arm64، وأن nested virtualization غير مدعوم على runners macOS arm64. كما يعلن مستودع `actions/runner-images` أن `macos-15-intel` و`macos-26-intel` هما labels Intel المتاحة، وأن `macos-15-intel` هو label الانتقال من macOS 13 حتى أغسطس 2027. لذلك لا يمكن تنفيذ AVD x86_64 software test فعليًا على `macos-latest` arm64، ولا يمكن تشغيل AVD arm64 بسبب HVF unsupported؛ سيُنقل smoke test الفعلي إلى `macos-15-intel` مع صورة x86_64 و`-no-accel`، مع إبقاء البناء Android arm64-v8a وx86_64 مستقلًا.
+
+المراجع: [GitHub-hosted runners reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)، [runner-images issue #13045](https://github.com/actions/runner-images/issues/13045)، [runner-images README](https://github.com/actions/runner-images).

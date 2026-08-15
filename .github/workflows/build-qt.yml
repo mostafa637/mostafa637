@@ -188,7 +188,9 @@ jobs:
   test-android-avd:
     name: Android AVD smoke test (macOS)
     needs: build-android
-    runs-on: macos-latest
+    # macos-latest is arm64 and does not support nested virtualization.
+    # macos-15-intel is the supported Intel runner for x86_64 AVD software tests.
+    runs-on: macos-15-intel
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -203,24 +205,12 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Select software AVD compatible with hosted macOS
+      - name: Select Intel x86_64 software AVD
         shell: bash
         run: |
           set -euo pipefail
-          # The hosted macOS runner is currently arm64. Use a matching image
-          # and force QEMU TCG below because nested HVF is unavailable.
-          case "$(uname -m)" in
-            arm64|aarch64)
-              avd_abi="arm64-v8a"
-              ;;
-            x86_64|amd64)
-              avd_abi="x86_64"
-              ;;
-            *)
-              echo "Unsupported macOS runner architecture: $(uname -m)"
-              exit 1
-              ;;
-          esac
+          test "$(uname -m)" = "x86_64"
+          avd_abi="x86_64"
           avd_name="ish-api35-${avd_abi}"
           avd_image="system-images;android-35;google_apis;${avd_abi}"
           echo "AVD_ABI=$avd_abi" >> "$GITHUB_ENV"
@@ -261,14 +251,8 @@ jobs:
           emulator_args=(
             -avd "$AVD_NAME"
             -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data
-            -gpu swiftshader
+            -gpu swiftshader -no-accel
           )
-          if [ "$AVD_ABI" = "arm64-v8a" ]; then
-            # Pass the accelerator choice to the embedded QEMU on ARM hosts.
-            emulator_args+=( -qemu -accel tcg,thread=multi )
-          else
-            emulator_args+=( -no-accel )
-          fi
           "$emulator_bin" "${emulator_args[@]}" \
             > "$RUNNER_TEMP/emulator.log" 2>&1 &
           emulator_pid=$!
