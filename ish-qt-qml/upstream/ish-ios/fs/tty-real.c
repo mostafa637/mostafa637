@@ -21,6 +21,8 @@ static void *real_tty_read_thread(void *_tty) {
     for (;;) {
         int err = read(STDIN_FILENO, &ch, 1);
         if (err != 1) {
+            if (err == 0)
+                break;
             printk("tty read returned %d\n", err);
             if (err < 0)
                 printk("error: %s\n", strerror(errno));

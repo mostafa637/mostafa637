@@ -196,8 +196,10 @@ static void *core_worker(void *opaque) {
 
     pthread_cleanup_push(core_thread_cleanup, session);
     active_session = session;
+#if !defined(__ANDROID__)
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+#endif
 
     for (int i = 0; i < 3; ++i) {
         saved[i] = dup(i);
@@ -332,8 +334,15 @@ void ish_core_session_stop(IshCoreSession *session) {
         pthread_mutex_lock(&session->lock);
         session->stopping = true;
         pthread_mutex_unlock(&session->lock);
+#if !defined(__ANDROID__)
         pthread_cancel(session->worker);
         pthread_join(session->worker, NULL);
+#else
+        // Android bionic does not expose POSIX pthread cancellation. Closing
+        // the input pipe requests EOF; the worker is joined after the core
+        // exits through its normal session path.
+        pthread_join(session->worker, NULL);
+#endif
         session->worker_started = false;
         if (!session->state_sent)
             emit_state(session, 143);
