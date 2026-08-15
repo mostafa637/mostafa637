@@ -47,11 +47,6 @@ int main(int argc, char *argv[])
                          ishSession.sendInput(value);
                      });
 
-    // The rootfs is extracted into the application data directory, not used
-    // directly from the read-only QRC resource. This also makes the first
-    // QML load deterministic on Android and Linux.
-    rootfsManager.prepare();
-
     QQmlApplicationEngine engine;
     QQmlContext *context = engine.rootContext();
     context->setContextProperty(QStringLiteral("ishSession"), &ishSession);
@@ -68,5 +63,10 @@ int main(int argc, char *argv[])
     engine.loadFromModule(QStringLiteral("IshQt"), QStringLiteral("Main"));
     if (engine.rootObjects().isEmpty())
         return 1;
+
+    // Load QML before preparing rootfs so that progress and preparationError
+    // signals are visible in the UI. The core still starts only after the
+    // manager emits preparedChanged().
+    rootfsManager.prepare();
     return app.exec();
 }

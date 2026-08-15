@@ -23,6 +23,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate bundled iSH assets and rootfs
+        run: ./ish-qt-qml/ci/check-assets.sh
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

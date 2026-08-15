@@ -82,13 +82,20 @@ bool normalizeTarPath(const QByteArray &raw, QByteArray *out)
             return false;
         components.append(component);
     }
-    *out = components.join('/');
+
+    const QByteArray normalized = components.join('/');
+    // iSH's fakefs stores non-root paths with a leading slash.  fix_path()
+    // removes that slash only when accessing the host-backed data directory.
+    *out = normalized.isEmpty() ? QByteArray() : QByteArray("/") + normalized;
     return true;
 }
 
 QString displayPath(const QByteArray &path)
 {
-    return path.isEmpty() ? QStringLiteral("/") : QStringLiteral("/") + QString::fromUtf8(path);
+    if (path.isEmpty())
+        return QStringLiteral("/");
+    const QString value = QString::fromUtf8(path);
+    return value.startsWith('/') ? value : QStringLiteral("/") + value;
 }
 
 bool readExact(gzFile file, char *buffer, int length)
@@ -161,32 +168,44 @@ void RootfsManager::prepare()
     QDir().mkpath(m_rootPath);
 
     const QString archivePath = QDir(appData).filePath(QStringLiteral("root.tar.gz"));
-    QFile archive(archivePath);
-    if (!archive.exists()) {
-        QFile resource(QStringLiteral(":/ish-assets/rootfs/root.tar.gz"));
-        if (!resource.open(QIODevice::ReadOnly) || !archive.open(QIODevice::WriteOnly)) {
-            emit preparationError(QStringLiteral("Unable to copy bundled rootfs"));
+    QFile resource(QStringLiteral(":/ish-assets/rootfs/root.tar.gz"));
+    QSaveFile archive(archivePath);
+    if (!resource.open(QIODevice::ReadOnly) || !archive.open(QIODevice::WriteOnly)) {
+        emit preparationError(QStringLiteral("Unable to copy bundled rootfs"));
+        return;
+    }
+    while (!resource.atEnd()) {
+        const QByteArray chunk = resource.read(1024 * 1024);
+        if (chunk.isEmpty() && !resource.atEnd()) {
+            emit preparationError(QStringLiteral("Unable to read bundled rootfs"));
             return;
         }
-        while (!resource.atEnd()) {
-            const QByteArray chunk = resource.read(1024 * 1024);
-            if (chunk.isEmpty() && !resource.atEnd()) {
-                emit preparationError(QStringLiteral("Unable to read bundled rootfs"));
-                return;
-            }
-            if (archive.write(chunk) != chunk.size()) {
-                emit preparationError(QStringLiteral("Unable to write bundled rootfs"));
-                return;
-            }
+        if (archive.write(chunk) != chunk.size()) {
+            emit preparationError(QStringLiteral("Unable to write bundled rootfs"));
+            return;
         }
-        archive.close();
-        resource.close();
+    }
+    resource.close();
+    if (!archive.commit()) {
+        emit preparationError(QStringLiteral("Unable to commit bundled rootfs archive"));
+        return;
     }
 
     emit progressChanged(1, QStringLiteral("Preparing bundled rootfs"));
+    const QString temporaryRoot = QDir(appData).filePath(QStringLiteral(".rootfs-import"));
+    QDir(temporaryRoot).removeRecursively();
     QString error;
-    if (!importBundledRootfs(archivePath, m_rootPath, &error)) {
+    if (!importBundledRootfs(archivePath, temporaryRoot, &error)) {
+        QDir(temporaryRoot).removeRecursively();
+        QFile::remove(archivePath);
         emit preparationError(error);
+        return;
+    }
+    QDir(m_rootPath).removeRecursively();
+    if (!QDir().rename(temporaryRoot, m_rootPath)) {
+        QDir(temporaryRoot).removeRecursively();
+        QFile::remove(archivePath);
+        emit preparationError(QStringLiteral("Unable to install imported rootfs"));
         return;
     }
     QFile::remove(archivePath);
@@ -257,12 +276,14 @@ bool RootfsManager::importBundledRootfs(const QString &archivePath,
         const QByteArray prefix = field(header.constData() + 345, 155);
         if (!prefix.isEmpty())
             name = prefix + '/' + name;
-        if (!normalizeTarPath(name, &entry.path) ||
-            !normalizeTarPath(field(header.constData() + 157, 100), &entry.link)) {
+        if (!normalizeTarPath(name, &entry.path)) {
             localError = QStringLiteral("Rootfs contains an unsafe path");
             ok = false;
             break;
         }
+        // A symlink target is data, not a host path.  Keep its leading slash
+        // and any relative components exactly as fakefs_import() does.
+        entry.link = field(header.constData() + 157, 100);
         entry.size = octalField(header.constData() + 124, 12);
         entry.mode = static_cast<quint32>(octalField(header.constData() + 100, 8));
         entry.uid = static_cast<quint32>(octalField(header.constData() + 108, 8));
@@ -275,8 +296,10 @@ bool RootfsManager::importBundledRootfs(const QString &archivePath,
         else
             entry.mode |= 0100000;
 
-        const QString relative = QString::fromUtf8(entry.path);
-        const QString outputPath = QDir(destination).filePath(QStringLiteral("data/") + relative);
+            const QString relative = QString::fromUtf8(entry.path);
+        const QString outputPath = entry.path.isEmpty()
+            ? QDir(destination).filePath(QStringLiteral("data"))
+            : QDir(destination).filePath(QStringLiteral("data") + relative);
         if (entry.path.isEmpty()) {
             rootSeen = true;
         } else if (entry.type == '5') {
@@ -374,7 +397,6 @@ bool RootfsManager::writeMetadata(const QString &destination,
     }
 
     const char *schema =
-        "PRAGMA journal_mode=DELETE;"
         "CREATE TABLE meta (id integer unique default 0, db_inode integer);"
         "INSERT INTO meta (db_inode) VALUES (0);"
         "CREATE TABLE stats (inode integer primary key, stat blob);"
@@ -382,7 +404,9 @@ bool RootfsManager::writeMetadata(const QString &destination,
         "CREATE INDEX inode_to_path ON paths (inode, path);"
         "PRAGMA user_version=3;";
     char *sqliteMessage = nullptr;
-    bool ok = sqlite3_exec(db, "BEGIN;", nullptr, nullptr, &sqliteMessage) == SQLITE_OK;
+    bool ok = sqlite3_exec(db, "PRAGMA journal_mode=DELETE;", nullptr, nullptr, &sqliteMessage) == SQLITE_OK;
+    if (ok)
+        ok = sqlite3_exec(db, "BEGIN;", nullptr, nullptr, &sqliteMessage) == SQLITE_OK;
     if (ok)
         ok = sqlite3_exec(db, schema, nullptr, nullptr, &sqliteMessage) == SQLITE_OK;
 
