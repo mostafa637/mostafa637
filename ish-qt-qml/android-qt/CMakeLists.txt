@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(Qt6 6.11.1 REQUIRED COMPONENTS Core Gui Quick Svg WebView WebChannel WebSockets)
+find_package(Qt6 6.11.1 REQUIRED COMPONENTS Core Gui Quick WebView WebChannel WebSockets)
 qt_standard_project_setup(REQUIRES 6.8)
 
 set(ISH_ROOT "${CMAKE_CURRENT_LIST_DIR}/..")
@@ -133,7 +133,6 @@ target_link_libraries(ish_qt_android PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Quick
-    Qt6::Svg
     Qt6::WebView
     Qt6::WebChannel
     Qt6::WebSockets
