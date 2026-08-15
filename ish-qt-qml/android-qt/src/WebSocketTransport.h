@@ -2,8 +2,8 @@
 
 #include <QObject>
 #include <QPointer>
+#include <QWebSocket>
 
-class QWebSocket;
 
 class WebSocketTransport final : public QObject
 {

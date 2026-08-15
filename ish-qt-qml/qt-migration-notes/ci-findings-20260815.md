@@ -31,3 +31,11 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 
 ## CMake/core progress
 نجح بناء Meson محليًا لـ`kernel=ish`, `engine=asbestos` بعد إضافة SQLite amalgamation bundled (`libsqlite3.a`) ونسخة `platform/android.c` من Linux platform. أضيفت أداة `tools/generate-offsets.py` لتوليد `cpu-offsets.h` من compiler assembly، وأعيدت كتابة `android-qt/CMakeLists.txt` لبناء VDSO وAsbestos وkernel وfakefs وCoreSession مباشرة على Linux/Android.
+
+## CI run 31897543109 بعد commit 935b014
+
+نجح `QML lint (Qt 6.11.1)`. نجح configure Linux وبدأ البناء؛ فشل هدف VDSO لأن CMake مرّر linker script مع اقتباس حرفي (`-Wl,-T,\".../vdso.lds\"`) رغم أن الملف موجود. الإصلاح المطلوب هو تمرير `-Wl,-T,${ISH_SOURCE_DIR}/vdso/vdso.lds` بلا اقتباس داخلي.
+
+فشلت وظائف Android أثناء `find_package(Qt6)` لأن `CMAKE_PREFIX_PATH` يشير إلى Qt Android فقط، بينما Qt6Config.cmake موجود في Qt host tools. يجب توفير مساري Qt host وQt Android معًا، مثل إضافة `QT_HOST_ROOT` و`QT_ANDROID_ROOT` إلى `CMAKE_PREFIX_PATH` أو ضبط `Qt6_DIR`/`CMAKE_FIND_ROOT_PATH_MODE_PACKAGE` بما يسمح بتحميل Config من host ثم مكونات Android. أصبح مسار NDK الصريح تحت `$ANDROID_SDK_ROOT/ndk/27.2.12479018` صحيحًا.
+
+بعد نجاح configure Linux، ظهر خطأ C++ في Qt 6.11 داخل `WebSocketTransport.h`: استخدام `QPointer<QWebSocket>` مع forward declaration فقط منع `static_cast<QObject*, QWebSocket*>` أثناء moc؛ الإصلاح هو تضمين `<QWebSocket>` في header.

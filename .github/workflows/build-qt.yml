@@ -164,9 +164,14 @@ jobs:
           command -v ninja
           ninja --version
           test -f "$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION/build/cmake/android.toolchain.cmake"
+          QT6_CONFIG="$(find "$QT_ANDROID_ROOT" -type f -name Qt6Config.cmake -print -quit)"
+          test -n "$QT6_CONFIG"
+          QT6_DIR="$(dirname "$QT6_CONFIG")"
+          echo "Using Qt6_DIR=$QT6_DIR"
           cmake -S ish-qt-qml/android-qt -B "build-${{ matrix.abi }}" -G Ninja \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-            -DCMAKE_PREFIX_PATH="$QT_ANDROID_ROOT" \
+            -DCMAKE_PREFIX_PATH="$QT_ANDROID_ROOT;$QT_HOST_ROOT" \
+            -DQt6_DIR="$QT6_DIR" \
             -DQT_HOST_PATH="$QT_HOST_ROOT" \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI="${{ matrix.abi }}" \
