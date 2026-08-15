@@ -1,0 +1,8 @@
+<RCC>
+  <qresource prefix="/ish-assets">
+    <file alias="terminal/term.html">terminal/term.html</file>
+    <file alias="terminal/term.css">terminal/term.css</file>
+    <file alias="terminal/term.js">terminal/term.js</file>
+    <file alias="terminal/qwebchannel.js">terminal/qwebchannel.js</file>
+  </qresource>
+</RCC>
