@@ -79,3 +79,7 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 أضيف job مستقلًا باسم `Android AVD smoke test (Linux + KVM)` باستخدام `reactivecircus/android-emulator-runner@v2`. قبل تشغيل الإجراء تُضبط صلاحيات `/dev/kvm` عبر قاعدة udev الرسمية، ثم يُختبر APK `x86_64` على صورة API 35 `google_apis` مع profile `pixel_6`. هذا المسار يستخدم hardware acceleration على Ubuntu، بينما يبقى job macOS Intel منفصلًا لاختبار software AVD.
 
 يُحمّل job ملفات APK الناتجة من `build-android` ولا يعيد بناء المشروع. بعد التثبيت يشغّل الحزمة `com.mostafa637.ishqt`، يلتقط screenshot وlogcat، ويفشل عند أخطاء startup مثل `FATAL EXCEPTION` أو `UnsatisfiedLinkError` أو فشل `QQmlApplicationEngine`.
+
+## Linux AVD Runner shell behavior
+
+كشف run `31903956686` أن `reactivecircus/android-emulator-runner@v2` ينفذ قيمة `script` كسلسلة أوامر منفصلة عبر `/usr/bin/sh -c`. لذلك لم تبقَ متغيرات `apk_root` و`apk` بين الأسطر، كما انقسمت كتلة `if` وأصبح `set -o pipefail` غير مدعوم. نُقلت أوامر التثبيت والتشغيل إلى `ci/run-android-avd-smoke.sh`، ويستدعيها workflow في سطر واحد: `script: bash ci/run-android-avd-smoke.sh`. سجل التشغيل نفسه أثبت أن KVM يعمل وأن AVD x86_64 يقلع في نحو 39 ثانية؛ الفشل كان في script الاختبار فقط، لا في المحاكي أو KVM.
