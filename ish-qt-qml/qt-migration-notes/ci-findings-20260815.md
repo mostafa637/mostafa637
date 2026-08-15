@@ -63,3 +63,7 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 ## CI run 31901073121 — hosted macOS has no usable HVF for this smoke test
 
 اختيار صورة arm64 المطابقة للـrunner لم يحل المشكلة: run `31901073121` انتهى عند `HVF error: HV_UNSUPPORTED` و`qemu-system-aarch64-headless: failed to initialize HVF`. توثيق Android يذكر أن `-no-accel` مخصص لصور x86/x86_64، وأن عدم وجود hypervisor يفرض ترجمة برمجية بطيئة. لذلك يستخدم smoke test الآن APK `x86_64` وصورة `google_apis;x86_64` مع `-no-accel` ووقت إقلاع أطول، بينما يستمر بناء arm64-v8a وإنتاج APK الخاص به مستقلًا.
+
+## CI run 31901568875 — x86_64 image also requires host match
+
+بعد تحويل smoke test إلى x86_64، أثبت run `31901568875` أن runner هو `arm64` وأن emulator يرفض الصورة صراحةً: `Avd's CPU Architecture 'x86_64' is not supported by the QEMU2 emulator on aarch64 host. System image must match the host architecture.` لذلك عاد الاختبار إلى صورة host المطابقة، مع تمرير `-qemu -accel tcg,thread=multi` لمحاولة إجبار QEMU على ترجمة برمجية بدل HVF، ورفع مهلة الإقلاع لأن TCG أبطأ.
