@@ -203,28 +203,20 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Detect macOS host architecture
+      - name: Select software AVD compatible with hosted macOS
         shell: bash
         run: |
           set -euo pipefail
-          case "$(uname -m)" in
-            arm64|aarch64)
-              avd_abi="arm64-v8a"
-              ;;
-            x86_64|amd64)
-              avd_abi="x86_64"
-              ;;
-            *)
-              echo "Unsupported macOS runner architecture: $(uname -m)"
-              exit 1
-              ;;
-          esac
+          # GitHub-hosted macOS runners do not expose nested virtualization.
+          # Android documents -no-accel for x86/x86_64 system images, so use
+          # the x86_64 APK for the software-only smoke test on any macOS host.
+          avd_abi="x86_64"
           avd_name="ish-api35-${avd_abi}"
           avd_image="system-images;android-35;google_apis;${avd_abi}"
           echo "AVD_ABI=$avd_abi" >> "$GITHUB_ENV"
           echo "AVD_NAME=$avd_name" >> "$GITHUB_ENV"
           echo "AVD_IMAGE=$avd_image" >> "$GITHUB_ENV"
-          echo "Detected host $(uname -m); using $avd_image"
+          echo "Runner $(uname -m); using software AVD $avd_image"
 
       - name: Download Android APK artifacts
         uses: actions/download-artifact@v4
@@ -258,13 +250,13 @@ jobs:
           cd "$emulator_dir"
           "$emulator_bin" -avd "$AVD_NAME" \
             -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data \
-            -gpu swiftshader -accel off \
+            -gpu swiftshader -no-accel \
             > "$RUNNER_TEMP/emulator.log" 2>&1 &
           emulator_pid=$!
           trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
 
           device_ready=false
-          for i in $(seq 1 90); do
+          for i in $(seq 1 120); do
             if ! kill -0 "$emulator_pid" 2>/dev/null; then
               echo "Android emulator exited before becoming ready"
               cat "$RUNNER_TEMP/emulator.log" || true
@@ -284,7 +276,7 @@ jobs:
           fi
 
           booted=false
-          for i in $(seq 1 150); do
+          for i in $(seq 1 300); do
             boot_completed="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
             if [ "$boot_completed" = "1" ]; then
               booted=true

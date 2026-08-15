@@ -59,3 +59,7 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 بعد تشغيل emulator من مجلد SDK، اختفى خطأ مكتبة Qt النسبية، لكن صورة `google_apis;arm64-v8a` فشلت على runner macOS الحالي برسالة `HVF error: HV_UNSUPPORTED` و`qemu-system-aarch64-headless: failed to initialize HVF`. توثيق Android يوضح أن تسريع VM يتطلب تطابق معمارية host وصورة النظام، كما يوضح سجل GitHub issue مماثل أن هذا الخطأ يحدث مع arm64 AVD على macOS غير مناسب.
 
 أصبح اختبار AVD يكتشف `uname -m`، ويستخدم `x86_64` وartifact `ish-qt-android-x86_64` على host x64، أو `arm64-v8a` وartifact arm64 على host arm64. كما استُبدل خيار الرسوم deprecated `swiftshader_indirect` بـ`swiftshader`.
+
+## CI run 31901073121 — hosted macOS has no usable HVF for this smoke test
+
+اختيار صورة arm64 المطابقة للـrunner لم يحل المشكلة: run `31901073121` انتهى عند `HVF error: HV_UNSUPPORTED` و`qemu-system-aarch64-headless: failed to initialize HVF`. توثيق Android يذكر أن `-no-accel` مخصص لصور x86/x86_64، وأن عدم وجود hypervisor يفرض ترجمة برمجية بطيئة. لذلك يستخدم smoke test الآن APK `x86_64` وصورة `google_apis;x86_64` مع `-no-accel` ووقت إقلاع أطول، بينما يستمر بناء arm64-v8a وإنتاج APK الخاص به مستقلًا.
