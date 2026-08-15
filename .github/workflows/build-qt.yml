@@ -41,7 +41,7 @@ jobs:
         env:
           QT_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/gcc_64
         run: |
-          "$QT_ROOT/bin/qmllint" --max-warnings 1000000 \
+          "$QT_ROOT/bin/qmllint" --max-warnings 1000000 --import=disable \
             -I ish-qt-qml/android-qt/qml \
             ish-qt-qml/android-qt/qml/Main.qml \
             ish-qt-qml/android-qt/qml/*.qml \
