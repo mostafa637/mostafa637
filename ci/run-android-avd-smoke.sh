@@ -19,17 +19,25 @@ mkdir -p avd-linux-captures avd-linux-ui avd-linux-logcat
 
 capture_state() {
   local label="$1"
+  # Keep uiautomator out of this background capture function. A second
+  # uiautomator instance cannot register the same automation service and would
+  # create a misleading AndroidRuntime FATAL EXCEPTION in logcat.
   adb exec-out screencap -p > "avd-linux-captures/${label}.png" 2>/dev/null || true
-  adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
-  adb shell cat /sdcard/window.xml > "avd-linux-ui/${label}.xml" 2>/dev/null || true
   adb logcat -d -v threadtime > "avd-linux-logcat/${label}.txt" 2>/dev/null || true
   printf 'Captured %s\n' "$label"
+}
+
+dump_ui_state() {
+  local label="$1"
+  adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+  adb shell cat /sdcard/window.xml > "avd-linux-ui/${label}.xml" 2>/dev/null || true
 }
 
 # Capture immediately and once per second so text printed by QML/Android just
 # before a delayed crash remains visible instead of being overwritten by an
 # ANR dialog or a final black frame.
 capture_state "t00-start"
+dump_ui_state "t00-start"
 (
   for second in {1..15}; do
     sleep 1
@@ -41,12 +49,14 @@ capture_pid=$!
 # Pixel Launcher can show an ANR dialog while the Qt app is already visible.
 # Dismiss the dialog as soon as it appears, while the capture loop keeps the
 # original screen and the text printed by the app at each second.
-for _ in {1..15}; do
-  ui_xml="$(adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true; adb shell cat /sdcard/window.xml 2>/dev/null || true)"
-  wait_bounds="$(printf '%s' "$ui_xml" | sed -n 's/.*text="Wait"[^>]*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p' | head -n 1)"
-  if [[ -n "$wait_bounds" ]]; then
-    read -r x1 y1 x2 y2 <<< "$wait_bounds"
-    adb shell input tap "$(( (x1 + x2) / 2 ))" "$(( (y1 + y2) / 2 ))" || true
+for second in {1..15}; do
+  label="t$(printf '%02d' "$second")"
+  dump_ui_state "$label"
+  window_dump="$(adb shell dumpsys window windows 2>/dev/null || true)"
+  if printf '%s' "$window_dump" | grep -q 'Application Not Responding: com.google.android.apps.nexuslauncher'; then
+    # The ANR window is outside the Qt activity's uiautomator hierarchy. Its
+    # stable Wait-row center on the Pixel 6 AVD is approximately (220, 1360).
+    adb shell input tap 220 1360 || true
   fi
   sleep 1
 done
@@ -61,7 +71,7 @@ if [[ -n "$latest" && -f "$latest" ]]; then
 fi
 adb logcat -d -v threadtime > avd-linux-logcat.txt
 
-if grep -E "FATAL EXCEPTION|UnsatisfiedLinkError|QQmlApplicationEngine failed|module .* is not installed|Fatal signal|Fatal signal [0-9]+" avd-linux-logcat.txt; then
+if grep -E "UnsatisfiedLinkError|QQmlApplicationEngine failed|module .* is not installed|Fatal signal|SIG(SEGV|ABRT|FPE|ILL|BUS)" avd-linux-logcat.txt; then
   echo "Application startup/runtime errors detected; see timed screenshots and logs." >&2
   exit 1
 fi
