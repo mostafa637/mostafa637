@@ -27,19 +27,22 @@ capture_state() {
   printf 'Captured %s\n' "$label"
 }
 
-dump_ui_state() {
+dump_window_state() {
   local label="$1"
-  adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
-  adb shell cat /sdcard/window.xml > "avd-linux-ui/${label}.xml" 2>/dev/null || true
+  # Use dumpsys instead of uiautomator. It records the focused window without
+  # registering a UiAutomationService on every second and avoids polluting
+  # logcat with instrumentation exceptions during a long smoke test.
+  adb shell dumpsys window windows > "avd-linux-ui/${label}.txt" 2>/dev/null || true
+  adb shell dumpsys activity activities >> "avd-linux-ui/${label}.txt" 2>/dev/null || true
 }
 
-# Capture immediately and once per second so text printed by QML/Android just
-# before a delayed crash remains visible instead of being overwritten by an
-# ANR dialog or a final black frame.
+# Capture immediately and once per second for 90 seconds so text printed by
+# QML/Android just before a delayed crash remains visible instead of being
+# overwritten by an ANR dialog or a final black frame.
 capture_state "t00-start"
-dump_ui_state "t00-start"
+dump_window_state "t00-start"
 (
-  for second in {1..15}; do
+  for second in {1..90}; do
     sleep 1
     capture_state "t$(printf '%02d' "$second")"
   done
@@ -49,9 +52,9 @@ capture_pid=$!
 # Pixel Launcher can show an ANR dialog while the Qt app is already visible.
 # Dismiss the dialog as soon as it appears, while the capture loop keeps the
 # original screen and the text printed by the app at each second.
-for second in {1..15}; do
+for second in {1..90}; do
   label="t$(printf '%02d' "$second")"
-  dump_ui_state "$label"
+  dump_window_state "$label"
   window_dump="$(adb shell dumpsys window windows 2>/dev/null || true)"
   if printf '%s' "$window_dump" | grep -q 'Application Not Responding: com.google.android.apps.nexuslauncher'; then
     # The ANR window is outside the Qt activity's uiautomator hierarchy. Its
