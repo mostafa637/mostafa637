@@ -4,12 +4,19 @@
   const cursor = document.getElementById('cursor');
   let socket = null;
   let fontSize = 14;
+  let waitingForSession = true;
   const decoder = new TextDecoder('utf-8', { fatal: false });
 
   function append(value) {
     if (value == null) return;
     output.textContent += String(value);
     terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  function markSessionConnected() {
+    if (!waitingForSession) return;
+    waitingForSession = false;
+    output.textContent = 'iSH Qt terminal\r\n';
   }
 
   function send(value) {
@@ -24,8 +31,9 @@
     try {
       socket = new WebSocket(url);
       socket.binaryType = 'arraybuffer';
-      socket.onopen = () => { append('\\r\\n'); terminal.focus(); };
+      socket.onopen = () => { markSessionConnected(); append('\r\n'); terminal.focus(); };
       socket.onmessage = event => {
+        markSessionConnected();
         if (event.data instanceof ArrayBuffer) append(decoder.decode(new Uint8Array(event.data), { stream: true }));
         else {
           try {
@@ -34,20 +42,20 @@
           } catch (_) { append(event.data); }
         }
       };
-      socket.onerror = () => append('\\r\\n[WebSocket error]\\r\\n');
-      socket.onclose = () => append('\\r\\n[session closed]\\r\\n');
-    } catch (error) { append('\\r\\n[connection error: ' + error + ']\\r\\n'); }
+      socket.onerror = () => { markSessionConnected(); append('\r\n[WebSocket error]\r\n'); };
+      socket.onclose = () => append('\r\n[session closed]\r\n');
+    } catch (error) { append('\r\n[connection error: ' + error + ']\r\n'); }
   }
 
   terminal.addEventListener('keydown', event => {
-    if (event.key === 'Enter') { send('\\r'); event.preventDefault(); return; }
-    if (event.key === 'Backspace') { send('\\x7f'); event.preventDefault(); return; }
-    if (event.key === 'Tab') { send('\\t'); event.preventDefault(); return; }
-    if (event.key === 'Escape') { send('\\x1b'); event.preventDefault(); return; }
-    if (event.key === 'ArrowUp') { send('\\x1b[A'); event.preventDefault(); return; }
-    if (event.key === 'ArrowDown') { send('\\x1b[B'); event.preventDefault(); return; }
-    if (event.key === 'ArrowRight') { send('\\x1b[C'); event.preventDefault(); return; }
-    if (event.key === 'ArrowLeft') { send('\\x1b[D'); event.preventDefault(); return; }
+    if (event.key === 'Enter') { send('\r'); event.preventDefault(); return; }
+    if (event.key === 'Backspace') { send('\x7f'); event.preventDefault(); return; }
+    if (event.key === 'Tab') { send('\t'); event.preventDefault(); return; }
+    if (event.key === 'Escape') { send('\x1b'); event.preventDefault(); return; }
+    if (event.key === 'ArrowUp') { send('\x1b[A'); event.preventDefault(); return; }
+    if (event.key === 'ArrowDown') { send('\x1b[B'); event.preventDefault(); return; }
+    if (event.key === 'ArrowRight') { send('\x1b[C'); event.preventDefault(); return; }
+    if (event.key === 'ArrowLeft') { send('\x1b[D'); event.preventDefault(); return; }
     if (event.ctrlKey && event.key.length === 1) { send(String.fromCharCode(event.key.toUpperCase().charCodeAt(0) - 64)); event.preventDefault(); return; }
     if (event.key.length === 1 && !event.metaKey && !event.altKey) { send(event.key); event.preventDefault(); }
   });
@@ -60,8 +68,8 @@
   window.ishCopy = () => { const s = window.getSelection(); if (s) navigator.clipboard?.writeText(s.toString()); };
   window.ishConnect = connect;
 
-  append('iSH Qt terminal\\r\\n');
-  append('Waiting for the native session…\\r\\n');
+  append('iSH Qt terminal\r\n');
+  append('Waiting for the native session…\r\n');
   terminal.focus();
   const query = new URLSearchParams(location.search);
   if (query.get('ws')) connect(query.get('ws'));

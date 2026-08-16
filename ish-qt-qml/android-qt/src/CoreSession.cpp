@@ -146,7 +146,17 @@ bool CoreSession::start(const QString &rootPath,
 
     for (const QString &value : bootCommand)
         bootBytes.append(value.toUtf8());
-    for (const QString &value : launchCommand)
+
+    // iSH iOS starts /bin/login on a controlling pseudo-terminal. The Qt
+    // portable transport intentionally uses pipes, so retain compatibility
+    // with the old saved default without launching login on a non-tty.
+    const QStringList legacyLogin = {
+        QStringLiteral("/bin/login"), QStringLiteral("-f"), QStringLiteral("root")
+    };
+    const QStringList effectiveLaunchCommand = launchCommand == legacyLogin
+        ? QStringList{QStringLiteral("/bin/sh")}
+        : launchCommand;
+    for (const QString &value : effectiveLaunchCommand)
         launchBytes.append(value.toUtf8());
     for (const QByteArray &value : bootBytes)
         bootArgv.push_back(value.constData());

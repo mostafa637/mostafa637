@@ -52,6 +52,7 @@ private:
     QTcpServer *m_httpServer = nullptr;
     QList<WebSocketTransport *> m_transports;
     QHash<QTcpSocket *, QByteArray> m_httpRequests;
+    QByteArray m_pendingOutput;
     QString m_url;
     QString m_pageUrl;
 };

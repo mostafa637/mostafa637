@@ -92,6 +92,7 @@ void WebChannelServer::stop()
             transport->deleteLater();
     }
     m_transports.clear();
+    m_pendingOutput.clear();
 
     const auto sockets = m_httpRequests.keys();
     for (QTcpSocket *socket : sockets) {
@@ -123,6 +124,22 @@ void WebChannelServer::sendOutput(const QString &value)
 
 void WebChannelServer::sendOutputBytes(const QByteArray &value)
 {
+    if (value.isEmpty())
+        return;
+
+    if (m_transports.isEmpty()) {
+        constexpr qsizetype maxPendingOutput = 1024 * 1024;
+        if (m_pendingOutput.size() + value.size() > maxPendingOutput) {
+            const qsizetype keep = qMax<qsizetype>(0, maxPendingOutput - value.size());
+            if (keep == 0)
+                m_pendingOutput.clear();
+            else
+                m_pendingOutput = m_pendingOutput.right(keep);
+        }
+        m_pendingOutput += value;
+        return;
+    }
+
     for (WebSocketTransport *transport : std::as_const(m_transports)) {
         if (transport && transport->socket())
             transport->sendBinary(value);
@@ -135,6 +152,10 @@ void WebChannelServer::acceptConnection()
         QWebSocket *socket = m_server->nextPendingConnection();
         auto *transport = new WebSocketTransport(socket, this);
         m_transports.append(transport);
+        if (!m_pendingOutput.isEmpty()) {
+            transport->sendBinary(m_pendingOutput);
+            m_pendingOutput.clear();
+        }
         connect(transport, &WebSocketTransport::textReceived,
                 this, &WebChannelServer::handleText);
         connect(transport, &WebSocketTransport::binaryReceived,

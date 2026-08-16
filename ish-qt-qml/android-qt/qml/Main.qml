@@ -125,6 +125,20 @@ ApplicationWindow {
             Qt.inputMethod.hide()
     }
 
+    function startSession() {
+        if (!rootfsManager.prepared || ishSession.alive)
+            return
+        configureSession()
+        if (!ishSession.start(rootfsManager.rootPath,
+                              preferences.encodeCommand(preferences.bootCommand),
+                              preferences.encodeCommand(preferences.launchCommand))) {
+            window.sessionStopRequested = true
+            statusText = "Could not start session"
+            return
+        }
+        statusText = "Starting iSH…"
+    }
+
     function restartSession() {
         if (!rootfsManager.prepared) {
             statusText = "Rootfs is not ready"
@@ -296,8 +310,10 @@ ApplicationWindow {
                     item.terminalStyle = ishSession.currentStyle
                     if (window.useWebTerminal)
                         item.loadPage(window.terminalPageUrl())
-                    else
+                    else {
                         ishSession.load()
+                        window.startSession()
+                    }
                 }
             }
 
@@ -305,6 +321,7 @@ ApplicationWindow {
                 target: terminalLoader.item
                 function onReady() {
                     window.pageReady = true
+                    window.startSession()
                     window.statusText = window.useWebTerminal ? "Terminal ready" : "Host terminal ready"
                 }
                 function onFailed(message) {
@@ -679,13 +696,15 @@ ApplicationWindow {
 
                     AccessoryButton {
                         text: "Tab"
-                        fallbackText: "⇥"
+                        iconName: "tab"
+                        fallbackText: "Tab"
                         onClicked: window.sendAccessoryInput("\t")
                     }
 
                     AccessoryButton {
                         text: "Control"
-                        fallbackText: "⌃"
+                        iconName: "control"
+                        fallbackText: "Ctrl"
                         checkable: true
                         checked: window.controlModifier
                         onClicked: window.setControlModifier(!window.controlModifier)
@@ -693,7 +712,8 @@ ApplicationWindow {
 
                     AccessoryButton {
                         text: "Escape"
-                        fallbackText: "⎋"
+                        iconName: "escape"
+                        fallbackText: "Esc"
                         onClicked: window.sendAccessoryInput("\u001b")
                     }
 
@@ -735,8 +755,10 @@ ApplicationWindow {
                             anchors.fill: parent
                             text: "Settings"
                             // The iOS storyboard uses UIButtonTypeInfoLight here;
-                            // keep the same glyph without depending on SF Symbols/QtSvg.
-                            fallbackText: "ⓘ"
+                            // use a bundled rasterized copy so Android font coverage
+                            // cannot replace the original glyph with a missing symbol.
+                            iconName: "info"
+                            fallbackText: "Info"
                             onClicked: window.settingsVisible = true
                         }
                         Rectangle {

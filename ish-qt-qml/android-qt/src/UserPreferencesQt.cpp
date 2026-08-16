@@ -294,12 +294,17 @@ void UserPreferencesQt::loadFromSettings()
                             s.value(QStringLiteral("blinkCursor"), false)).toBool();
     m_bootCommand = cleanCommand(s.value(QStringLiteral("Boot Command"),
                                           s.value(QStringLiteral("bootCommand"), QStringList{QStringLiteral("/sbin/init")})).toStringList());
+    // The portable Qt session uses pipe-backed stdio rather than iSH iOS's
+    // pseudo-terminal. /bin/login requires a controlling tty and can abort
+    // the emulated process group, so use a shell as the safe portable default.
     m_launchCommand = cleanCommand(s.value(QStringLiteral("Init Command"),
-                                            s.value(QStringLiteral("launchCommand"), QStringList{QStringLiteral("/bin/login"), QStringLiteral("-f"), QStringLiteral("root")})).toStringList());
+                                            s.value(QStringLiteral("launchCommand"), QStringList{QStringLiteral("/bin/sh")})).toStringList());
     m_hostnameIsOverridden = s.contains(QStringLiteral("hostnameOverride"));
     m_hostnameOverride = s.value(QStringLiteral("hostnameOverride"), QSysInfo::machineHostName()).toString();
     if (m_bootCommand.isEmpty())
         m_bootCommand = {QStringLiteral("/sbin/init")};
+    if (m_launchCommand.isEmpty())
+        m_launchCommand = {QStringLiteral("/bin/sh")};
 }
 
 void UserPreferencesQt::reload()

@@ -38,6 +38,14 @@
     <file alias="ui/icons/paste-light.png">ui/icons/paste-light.png</file>
     <file alias="ui/icons/xmark-dark.png">ui/icons/xmark-dark.png</file>
     <file alias="ui/icons/xmark-light.png">ui/icons/xmark-light.png</file>
+    <file alias="ui/icons/tab-dark.png">ui/icons/tab-dark.png</file>
+    <file alias="ui/icons/tab-light.png">ui/icons/tab-light.png</file>
+    <file alias="ui/icons/control-dark.png">ui/icons/control-dark.png</file>
+    <file alias="ui/icons/control-light.png">ui/icons/control-light.png</file>
+    <file alias="ui/icons/escape-dark.png">ui/icons/escape-dark.png</file>
+    <file alias="ui/icons/escape-light.png">ui/icons/escape-light.png</file>
+    <file alias="ui/icons/info-dark.png">ui/icons/info-dark.png</file>
+    <file alias="ui/icons/info-light.png">ui/icons/info-light.png</file>
     <file alias="ios-icons/3d.png">ios-icons/3d.png</file>
     <file alias="ios-icons/Icons.plist">ios-icons/Icons.plist</file>
     <file alias="ios-icons/circular.png">ios-icons/circular.png</file>
