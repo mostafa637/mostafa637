@@ -15,6 +15,16 @@ echo "Installing signed APK: $apk"
 adb install -r "$apk"
 adb shell monkey -p com.mostafa637.ishqt 1
 
+# Give Qt/WebView and the native session time to become interactive, then send
+# the requested command through the focused terminal surface. Android's input
+# utility encodes spaces as %s.
+sleep 10
+adb shell input tap 420 520 || true
+sleep 1
+adb shell input text 'apk%ssadd%spython' || true
+adb shell input keyevent KEYCODE_ENTER || true
+printf 'Sent command: apk add python\n'
+
 mkdir -p avd-linux-captures avd-linux-ui
 
 capture_state() {
