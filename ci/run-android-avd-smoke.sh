@@ -15,7 +15,7 @@ echo "Installing signed APK: $apk"
 adb install -r "$apk"
 adb shell monkey -p com.mostafa637.ishqt 1
 
-mkdir -p avd-linux-captures avd-linux-ui avd-linux-logcat
+mkdir -p avd-linux-captures avd-linux-ui
 
 capture_state() {
   local label="$1"
@@ -23,7 +23,6 @@ capture_state() {
   # uiautomator instance cannot register the same automation service and would
   # create a misleading AndroidRuntime FATAL EXCEPTION in logcat.
   adb exec-out screencap -p > "avd-linux-captures/${label}.png" 2>/dev/null || true
-  adb logcat -d -v threadtime > "avd-linux-logcat/${label}.txt" 2>/dev/null || true
   printf 'Captured %s\n' "$label"
 }
 
