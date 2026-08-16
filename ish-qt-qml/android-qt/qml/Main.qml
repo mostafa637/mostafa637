@@ -35,7 +35,7 @@ ApplicationWindow {
     ErrorDialog { id: errorDialog }
 
     function iconResource(name) {
-        return "qrc:/ish-assets/ui/icons/" + name + (isDarkColor(window.terminalBackground()) ? "-dark.svg" : "-light.svg")
+        return "qrc:/ish-assets/ui/icons/" + name + (isDarkColor(window.terminalBackground()) ? "-dark.png" : "-light.png")
     }
 
     // Kept as an alias for pages/components that still use the old name.

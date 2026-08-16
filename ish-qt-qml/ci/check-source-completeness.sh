@@ -35,6 +35,7 @@ required=(
   "$root/android-qt/assets/repositories.txt"
   "$root/android-qt/android/AndroidManifest.xml"
   "$root/android-qt/android/res/xml/network_security_config.xml"
+  "$root/ci/rasterize-icons.py"
   "$root/upstream/ish-ios/tools/fakefs.c"
   "$root/upstream/ish-ios/tools/fakefs.h"
   "$root/upstream/ish-ios/app/core/CoreSession.c"
@@ -42,6 +43,22 @@ required=(
   "$root/upstream/ish-ios/app/core/CoreClipboard.c"
   "$root/upstream/ish-ios/app/core/CoreLocation.c"
   "$root/upstream/ish-ios/deps/sqlite/sqlite3.c"
+  "$root/android-qt/assets/ui/icons/arrow-down-dark.png"
+  "$root/android-qt/assets/ui/icons/arrow-down-light.png"
+  "$root/android-qt/assets/ui/icons/arrow-left-dark.png"
+  "$root/android-qt/assets/ui/icons/arrow-left-light.png"
+  "$root/android-qt/assets/ui/icons/arrow-right-dark.png"
+  "$root/android-qt/assets/ui/icons/arrow-right-light.png"
+  "$root/android-qt/assets/ui/icons/arrow-up-dark.png"
+  "$root/android-qt/assets/ui/icons/arrow-up-light.png"
+  "$root/android-qt/assets/ui/icons/checkbox-dark.png"
+  "$root/android-qt/assets/ui/icons/checkbox-light.png"
+  "$root/android-qt/assets/ui/icons/hide-keyboard-dark.png"
+  "$root/android-qt/assets/ui/icons/hide-keyboard-light.png"
+  "$root/android-qt/assets/ui/icons/paste-dark.png"
+  "$root/android-qt/assets/ui/icons/paste-light.png"
+  "$root/android-qt/assets/ui/icons/xmark-dark.png"
+  "$root/android-qt/assets/ui/icons/xmark-light.png"
 )
 
 missing=()
@@ -58,11 +75,6 @@ fi
 
 if [[ ! -f "$cmake_file" ]]; then
   echo "ERROR: missing android-qt/CMakeLists.txt" >&2
-  exit 2
-fi
-
-if ! grep -q 'Qt6::Svg' "$cmake_file"; then
-  echo "ERROR: QtSvg is not linked; Android SVG icons may be blank" >&2
   exit 2
 fi
 
