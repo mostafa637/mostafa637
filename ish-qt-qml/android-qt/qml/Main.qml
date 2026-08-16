@@ -132,6 +132,7 @@ ApplicationWindow {
         if (!ishSession.start(rootfsManager.rootPath,
                               preferences.encodeCommand(preferences.bootCommand),
                               preferences.encodeCommand(preferences.launchCommand))) {
+            platformServices.logDiagnostic("QML session", "Could not start session")
             window.sessionStopRequested = true
             statusText = "Could not start session"
             return
@@ -155,6 +156,7 @@ ApplicationWindow {
         if (!ishSession.start(rootfsManager.rootPath,
                               preferences.encodeCommand(preferences.bootCommand),
                               preferences.encodeCommand(preferences.launchCommand))) {
+            platformServices.logDiagnostic("QML session restart", "Could not start session")
             window.sessionStopRequested = true
             statusText = "Could not start session"
             return
@@ -269,6 +271,7 @@ ApplicationWindow {
         }
         function onLoaded() { window.statusText = "iSH is running" }
         function onSessionError(message) {
+            platformServices.logDiagnostic("QML session", message)
             window.sessionStopRequested = true
             window.setControlModifier(false)
             window.statusText = message

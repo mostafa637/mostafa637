@@ -39,6 +39,23 @@ int main(int argc, char *argv[])
     RootfsUpgradeController rootfsUpgrade(&rootfsManager);
     IshSession ishSession;
 
+    platformServices.installCrashHandler();
+    platformServices.logDiagnostic(QStringLiteral("startup"),
+                                   QStringLiteral("Qt application initialized; log path: %1")
+                                       .arg(platformServices.diagnosticLogPath()));
+    QObject::connect(&ishSession, &IshSession::sessionError,
+                     &platformServices, [&platformServices](const QString &message) {
+                         platformServices.logDiagnostic(QStringLiteral("native session"), message);
+                     });
+    QObject::connect(&webChannel, &WebChannelServer::serverError,
+                     &platformServices, [&platformServices](const QString &message) {
+                         platformServices.logDiagnostic(QStringLiteral("web channel"), message);
+                     });
+    QObject::connect(&rootfsManager, &RootfsManager::preparationError,
+                     &platformServices, [&platformServices](const QString &message) {
+                         platformServices.logDiagnostic(QStringLiteral("rootfs preparation"), message);
+                     });
+
     webChannel.start();
     QObject::connect(&ishSession, &IshSession::outputReady,
                      &webChannel, &WebChannelServer::sendOutput);
