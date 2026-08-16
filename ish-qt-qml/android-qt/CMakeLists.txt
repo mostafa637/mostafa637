@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.21)
 
 project(ish_qt_android VERSION 1.0 LANGUAGES C CXX ASM)
 
+include(CTest)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
@@ -254,6 +256,8 @@ set_source_files_properties("${ISH_ASSET_CPP}" PROPERTIES GENERATED TRUE)
 
 qt_add_executable(ish_qt_android
     src/main.cpp
+    src/CoreSession.cpp
+    src/CoreSession.h
     src/IshSession.cpp
     src/IshSession.h
     src/RootfsManager.cpp
@@ -293,6 +297,28 @@ target_link_libraries(ish_qt_android PRIVATE
     ZLIB::ZLIB
     ish_core_session
 )
+
+if(BUILD_TESTING AND NOT ANDROID)
+    qt_add_executable(ish_core_host_smoke
+        tests/CoreHostSmoke.cpp
+        src/CoreSession.cpp
+        src/CoreSession.h
+        src/RootfsManager.cpp
+        src/RootfsManager.h
+    )
+    target_sources(ish_core_host_smoke PRIVATE "${ISH_ASSET_CPP}")
+    target_include_directories(ish_core_host_smoke PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${ISH_SOURCE_DIR}/app/core"
+        "${ISH_SOURCE_DIR}"
+    )
+    target_link_libraries(ish_core_host_smoke PRIVATE
+        Qt6::Core
+        ZLIB::ZLIB
+        ish_core_session
+    )
+    add_test(NAME ish_core_host_smoke COMMAND ish_core_host_smoke)
+endif()
 
 if(ANDROID AND NOT ANDROID_SDK_ROOT)
     set(ANDROID_SDK_ROOT "$ENV{ANDROID_SDK_ROOT}" CACHE PATH "Android SDK root")

@@ -4,7 +4,7 @@
 #include <QVariantMap>
 #include <QStringList>
 
-struct IshCoreSession;
+#include "CoreSession.h"
 
 class IshSession final : public QObject
 {
@@ -42,15 +42,15 @@ signals:
     void sessionError(const QString &message);
     void controlModifierConsumedSignal();
 
-private:
-    static void outputCallback(void *cookie, const char *bytes, size_t length);
-    static void stateCallback(void *cookie, int exitCode);
+private slots:
     void handleOutput(const QByteArray &bytes);
     void handleState(int exitCode);
-    void setAlive(bool value);
-    void destroyCore();
+    void handleCoreError(const QString &message);
 
-    IshCoreSession *m_core = nullptr;
+private:
+    void setAlive(bool value);
+
+    CoreSession *m_core = nullptr;
     QString m_rootPath;
     QStringList m_bootCommand;
     QStringList m_launchCommand;

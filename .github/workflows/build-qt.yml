@@ -92,6 +92,9 @@ jobs:
       - name: Build Linux
         run: cmake --build build-linux --parallel 2
 
+      - name: Test iSH core on host
+        run: ctest --test-dir build-linux --output-on-failure -R '^ish_core_host_smoke$'
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:

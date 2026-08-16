@@ -15,6 +15,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "fs/fd.h"
 #include "kernel/task.h"
 #include "kernel/calls.h"
 #include "kernel/errno.h"
@@ -42,6 +43,8 @@ struct IshCoreSession {
     ish_core_output_callback output;
     ish_core_state_callback state;
     void *cookie;
+    char *resolver_config;
+    size_t resolver_config_length;
 };
 
 static _Thread_local struct IshCoreSession *active_session;
@@ -187,6 +190,24 @@ static int make_core_argv(struct IshCoreSession *session, char ***argv_out, size
     return 0;
 }
 
+static bool configure_dns(const struct IshCoreSession *session) {
+    if (session == NULL || session->resolver_config == NULL ||
+        session->resolver_config_length == 0)
+        return false;
+
+    struct fd *file = generic_open("/etc/resolv.conf",
+                                   O_WRONLY_ | O_CREAT_ | O_TRUNC_, 0666);
+    if (IS_ERR(file) || file->ops == NULL || file->ops->write == NULL) {
+        if (!IS_ERR(file) && file != NULL)
+            fd_close(file);
+        return false;
+    }
+    ssize_t written = file->ops->write(file, session->resolver_config,
+                                       session->resolver_config_length);
+    fd_close(file);
+    return written == (ssize_t)session->resolver_config_length;
+}
+
 static void *core_worker(void *opaque) {
     struct IshCoreSession *session = opaque;
     int saved[3] = {-1, -1, -1};
@@ -230,6 +251,8 @@ static void *core_worker(void *opaque) {
         goto finish;
 
     /* xX_main_Xx installs the iSH process-exit handler; replace only the hook. */
+    /* Keep the resolver configuration inside fakefs, just like iSH iOS. */
+    (void)configure_dns(session);
     exit_hook = core_exit_hook;
     status = 0;
     task_run_current();
@@ -316,6 +339,21 @@ size_t ish_core_session_write(IshCoreSession *session, const char *bytes, size_t
     return sent;
 }
 
+size_t ish_core_session_set_resolver_config(IshCoreSession *session,
+                                            const char *config,
+                                            size_t length) {
+    if (session == NULL || session->worker_started || config == NULL || length == 0)
+        return 0;
+    char *copy = malloc(length);
+    if (copy == NULL)
+        return 0;
+    memcpy(copy, config, length);
+    free(session->resolver_config);
+    session->resolver_config = copy;
+    session->resolver_config_length = length;
+    return length;
+}
+
 void ish_core_session_resize(IshCoreSession *session, int columns, int rows) {
     (void)session;
     (void)columns;
@@ -372,6 +410,7 @@ void ish_core_session_destroy(IshCoreSession *session) {
     free(session->root_path);
     free_argv(session->boot_argv, session->boot_argc);
     free_argv(session->launch_argv, session->launch_argc);
+    free(session->resolver_config);
     pthread_mutex_destroy(&session->lock);
     free(session);
 }

@@ -27,6 +27,11 @@ bool ish_core_session_start(IshCoreSession *session);
 /* Input is an arbitrary UTF-8 byte sequence. It is not interpreted or re-encoded. */
 size_t ish_core_session_write(IshCoreSession *session, const char *bytes, size_t length);
 
+/* Supplies a host-generated resolv.conf payload, typically collected by Qt. */
+size_t ish_core_session_set_resolver_config(IshCoreSession *session,
+                                            const char *config,
+                                            size_t length);
+
 /* The iSH emulated tty currently reports its size through the host tty path. */
 void ish_core_session_resize(IshCoreSession *session, int columns, int rows);
 
