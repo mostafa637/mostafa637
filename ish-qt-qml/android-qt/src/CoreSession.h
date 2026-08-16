@@ -48,4 +48,5 @@ private:
 
     IshCoreSession *m_session = nullptr;
     bool m_running = false;
+    QByteArray m_pendingOutputLine;
 };

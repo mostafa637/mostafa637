@@ -128,6 +128,7 @@ bool CoreSession::start(const QString &rootPath,
     if (m_session != nullptr)
         stop();
     destroyCore();
+    m_pendingOutputLine.clear();
 
     if (rootPath.isEmpty()) {
         emit errorOccurred(QStringLiteral("Rootfs path is empty"));
@@ -241,8 +242,39 @@ void CoreSession::stateCallback(void *cookie, int exitCode)
 
 void CoreSession::handleOutput(const QByteArray &bytes)
 {
-    if (!bytes.isEmpty())
-        emit outputReady(bytes);
+    if (bytes.isEmpty())
+        return;
+
+    // Some Android GLES stacks print informational shader-binding lines to the
+    // process stderr. CoreSession captures stderr together with the shell
+    // stream, so remove only these known diagnostic lines before forwarding
+    // output to the terminal. All user/program output is preserved.
+    static const QByteArray marker("s_glBindAttribLocation:");
+    m_pendingOutputLine += bytes;
+    QByteArray forwarded;
+    qsizetype consumed = 0;
+    while (true) {
+        const qsizetype newline = m_pendingOutputLine.indexOf('\n', consumed);
+        if (newline < 0)
+            break;
+        const QByteArray line = m_pendingOutputLine.mid(consumed, newline - consumed);
+        if (!line.contains(marker)) {
+            forwarded += line;
+            forwarded += '\n';
+        }
+        consumed = newline + 1;
+    }
+    if (consumed > 0)
+        m_pendingOutputLine.remove(0, consumed);
+
+    // Keep a partial line for the next callback, but avoid unbounded growth
+    // if a broken producer never emits a newline.
+    if (m_pendingOutputLine.size() > 64 * 1024) {
+        forwarded += m_pendingOutputLine;
+        m_pendingOutputLine.clear();
+    }
+    if (!forwarded.isEmpty())
+        emit outputReady(forwarded);
 }
 
 void CoreSession::handleState(int exitCode)
