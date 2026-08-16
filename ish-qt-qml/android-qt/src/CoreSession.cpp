@@ -10,7 +10,7 @@
 
 #if defined(Q_OS_ANDROID)
 #include <QJniObject>
-#include <QNativeInterface>
+#include <QtCore/qnativeinterface.h>
 #endif
 
 extern "C" {
