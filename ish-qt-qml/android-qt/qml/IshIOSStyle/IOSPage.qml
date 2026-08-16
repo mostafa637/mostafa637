@@ -4,8 +4,12 @@ import IshQt
 
 Controls.Page {
     id: page
-    property color pageBackground: "#f2f2f7"
-    property color pageForeground: "#1c1c1e"
+    property color pageBackground: IOSPalette.surface("#f2f2f7")
+    property color pageForeground: IOSPalette.text(page.pageBackground)
+    property real contentInset: IOSMetrics.sideInset(width)
+    property real groupedRowHeight: IOSMetrics.groupedRowHeight
+    property real sectionHeaderHeight: IOSMetrics.sectionHeaderHeight
+    property real sectionFooterHeight: IOSMetrics.sectionFooterHeight
     signal closeRequested()
     signal navigateRequested(string pageName)
     signal editRequested(string themeName)

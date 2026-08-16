@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Layouts
 import IshQt
 
 IOSPage {
@@ -27,61 +26,130 @@ IOSPage {
         }
     }
 
-    ColumnLayout {
+    Flickable {
+        id: flick
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 10
+        contentWidth: width
+        contentHeight: contentColumn.implicitHeight + 36
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
 
-        IOSLabel {
-            text: "Files in the installed rootfs"
-            font.pixelSize: 20
-        }
+        Column {
+            id: contentColumn
+            width: flick.width - 2 * root.contentInset
+            x: root.contentInset
+            y: 18
+            spacing: 18
 
-        IOSLabel {
-            text: rootfsManager.rootPath
-            Layout.fillWidth: true
-            wrapMode: Text.Wrap
-            opacity: 0.75
-        }
+            IOSLabel {
+                width: parent.width
+                height: IOSMetrics.sectionHeaderHeight
+                text: "Files in the installed rootfs"
+                color: IOSPalette.secondaryText(root.pageBackground)
+                font.pixelSize: IOSMetrics.sectionLabelSize
+                verticalAlignment: Text.AlignVCenter
+            }
 
-        ListView {
-            id: filesView
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            model: rootFilesModel
-            clip: true
-            spacing: 4
+            IOSLabel {
+                width: parent.width
+                text: rootfsManager.rootPath
+                color: IOSPalette.secondaryText(root.pageBackground)
+                font.pixelSize: IOSMetrics.rowDetailSize
+                wrapMode: Text.Wrap
+                elide: Text.ElideMiddle
+            }
 
-            delegate: Rectangle {
-                width: filesView.width
-                height: 42
-                radius: 6
-                color: pageBackground
-                border.width: 1
-                border.color: pageForeground
-                opacity: 0.9
+            Rectangle {
+                width: parent.width
+                height: Math.max(IOSMetrics.groupedRowHeight, filesView.contentHeight)
+                radius: IOSMetrics.groupedCornerRadius
+                color: IOSPalette.elevatedSurface(root.pageBackground)
+                clip: true
 
-                RowLayout {
+                ListView {
+                    id: filesView
                     anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 8
+                    model: rootFilesModel
+                    clip: true
+                    spacing: 0
+
+                    delegate: Item {
+                        width: filesView.width
+                        height: IOSMetrics.groupedRowHeight
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: fileMouse.containsMouse ? IOSPalette.separator(root.pageBackground) : "transparent"
+                        }
+
+                        IOSLabel {
+                            anchors.left: parent.left
+                            anchors.leftMargin: IOSMetrics.tableHorizontalInset
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 52
+                            text: directory ? "[DIR]" : "[FILE]"
+                            color: IOSPalette.secondaryText(root.pageBackground)
+                            font.pixelSize: IOSMetrics.rowDetailSize
+                        }
+
+                        IOSLabel {
+                            anchors.left: parent.left
+                            anchors.leftMargin: IOSMetrics.tableHorizontalInset + 58
+                            anchors.right: sizeLabel.left
+                            anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: name
+                            elide: Text.ElideMiddle
+                        }
+
+                        IOSLabel {
+                            id: sizeLabel
+                            anchors.right: parent.right
+                            anchors.rightMargin: IOSMetrics.tableHorizontalInset
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: directory ? "" : String(size)
+                            color: IOSPalette.secondaryText(root.pageBackground)
+                            font.pixelSize: IOSMetrics.rowDetailSize
+                            horizontalAlignment: Text.AlignRight
+                        }
+
+                        Rectangle {
+                            visible: index < filesView.count - 1
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: 1
+                            color: IOSPalette.separator(root.pageBackground)
+                            opacity: 0.55
+                        }
+
+                        MouseArea {
+                            id: fileMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                        }
+                    }
 
                     IOSLabel {
-                        text: directory ? "[DIR]" : "[FILE]"
-                        Layout.preferredWidth: 52
-                        opacity: 0.7
-                    }
-                    IOSLabel {
-                        text: name
-                        Layout.fillWidth: true
-                        elide: Text.ElideMiddle
-                    }
-                    IOSLabel {
-                        text: directory ? "" : String(size)
-                        opacity: 0.7
+                        anchors.centerIn: parent
+                        visible: rootFilesModel.count === 0
+                        text: "No files"
+                        color: IOSPalette.secondaryText(root.pageBackground)
+                        font.pixelSize: IOSMetrics.rowDetailSize
                     }
                 }
             }
+        }
+
+        IOSScrollBar {
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            orientation: Qt.Vertical
+            styleWindowColor: root.pageBackground
+            position: flick.visibleArea.yPosition
+            size: flick.visibleArea.heightRatio
+            onPositionChanged: if (pressed) flick.contentY = position * Math.max(0, flick.contentHeight - flick.height)
         }
     }
 }

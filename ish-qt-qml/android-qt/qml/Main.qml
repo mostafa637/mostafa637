@@ -24,10 +24,11 @@ ApplicationWindow {
     property bool sessionStopRequested: false
     property bool externalKeyboardActive: false
     property bool wideAccessory: width >= 700
-    property int accessoryHeight: wideAccessory ? 43 : 36
-    property int accessoryButtonSize: wideAccessory ? 43 : 32
-    property int accessoryHorizontalPadding: wideAccessory ? 15 : 6
-    property int accessoryVerticalPadding: wideAccessory ? 0 : 2
+    // Terminal.storyboard: 50pt accessory stack, 31pt buttons, 6pt outer inset.
+    property int accessoryHeight: IOSMetrics.accessoryBarHeight
+    property int accessoryButtonSize: IOSMetrics.accessoryButtonWidth
+    property int accessoryHorizontalPadding: IOSMetrics.accessoryOuterInset
+    property int accessoryVerticalPadding: 0
     property color accessoryBackground: isDarkColor(terminalBackground()) ? "#292929" : "#e5e5ea"
     property color accessoryForeground: isDarkColor(terminalBackground()) ? "#f5f5f7" : "#1c1c1e"
 
@@ -316,7 +317,7 @@ ApplicationWindow {
                 id: settingsPanel
                 anchors.fill: parent
                 visible: window.settingsVisible && window.activePage === ""
-                color: window.terminalBackground()
+                color: IOSPalette.surface(window.terminalBackground())
                 z: 5
 
                 ColumnLayout {
@@ -325,19 +326,19 @@ ApplicationWindow {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 44
-                        color: window.accessoryBackground
+                        Layout.preferredHeight: IOSMetrics.navigationBarHeight
+                        color: IOSPalette.elevatedSurface(window.terminalBackground())
 
                         RowLayout {
                             anchors.fill: parent
-                            anchors.leftMargin: 8
-                            anchors.rightMargin: 8
-                            spacing: 8
+                            anchors.leftMargin: IOSMetrics.accessoryOuterInset
+                            anchors.rightMargin: IOSMetrics.accessoryOuterInset
+                            spacing: IOSMetrics.accessorySpacing
 
                             IOSButton {
-                                text: "Back"
-                                implicitWidth: 36
-                                implicitHeight: 34
+                                text: ""
+                                implicitWidth: IOSMetrics.minimumTouchTarget
+                                implicitHeight: IOSMetrics.minimumTouchTarget
                                 onClicked: window.closeSettings()
                                 contentItem: Image {
                                     source: window.bitmapIcon("xmark")
@@ -352,13 +353,13 @@ ApplicationWindow {
                             IOSLabel {
                                 Layout.fillWidth: true
                                 text: "iSH Settings"
-                                color: window.accessoryForeground
-                                font.pixelSize: 17
+                                color: IOSPalette.text(window.terminalBackground())
+                                font.pixelSize: IOSMetrics.navigationTitleSize
                                 font.bold: true
                                 horizontalAlignment: Text.AlignHCenter
                             }
 
-                            Item { implicitWidth: 36; implicitHeight: 34 }
+                            Item { implicitWidth: IOSMetrics.minimumTouchTarget; implicitHeight: IOSMetrics.minimumTouchTarget }
                         }
                     }
 
@@ -366,22 +367,23 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         contentWidth: width
-                        contentHeight: settingsColumn.implicitHeight + 32
+                        contentHeight: settingsColumn.implicitHeight + 36
                         clip: true
 
                         ColumnLayout {
                             id: settingsColumn
-                            width: parent.width
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.margins: 16
-                            spacing: 12
+                            width: parent.width - 2 * IOSMetrics.sideInset(parent.width)
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            y: 18
+                            spacing: 0
 
                             IOSLabel {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: IOSMetrics.sectionHeaderHeight
                                 text: "Appearance"
-                                font.pixelSize: 21
-                                font.bold: true
-                                color: preferences.terminalStyle.foregroundColor
+                                font.pixelSize: IOSMetrics.sectionLabelSize
+                                font.bold: false
+                                color: IOSPalette.secondaryText(preferences.terminalStyle.backgroundColor)
                             }
 
                             IOSButton {
@@ -434,11 +436,11 @@ ApplicationWindow {
                                 visible: rootfsUpgrade.message.length > 0
                                 text: rootfsUpgrade.message
                                 wrapMode: Text.WordWrap
-                                color: preferences.terminalStyle.foregroundColor
+                                color: IOSPalette.text(window.terminalBackground())
                                 opacity: 0.75
                             }
 
-                            IOSLabel { text: "Theme"; color: preferences.terminalStyle.foregroundColor }
+                            IOSLabel { text: "Theme"; color: IOSPalette.text(window.terminalBackground()) }
                             IOSComboBox {
                                 Layout.fillWidth: true
                                 model: themes.themeNames
@@ -446,7 +448,7 @@ ApplicationWindow {
                                 onActivated: preferences.themeName = currentText
                             }
 
-                            IOSLabel { text: "Font family"; color: preferences.terminalStyle.foregroundColor }
+                            IOSLabel { text: "Font family"; color: IOSPalette.text(window.terminalBackground()) }
                             IOSTextField {
                                 Layout.fillWidth: true
                                 text: preferences.fontFamily
@@ -458,7 +460,7 @@ ApplicationWindow {
                                 IOSLabel {
                                     Layout.fillWidth: true
                                     text: "Font size: " + preferences.fontSize
-                                    color: preferences.terminalStyle.foregroundColor
+                                    color: IOSPalette.text(window.terminalBackground())
                                 }
                                 IOSSpinBox {
                                     from: 6
@@ -473,7 +475,7 @@ ApplicationWindow {
                                 IOSLabel {
                                     Layout.fillWidth: true
                                     text: "Blink cursor"
-                                    color: preferences.terminalStyle.foregroundColor
+                                    color: IOSPalette.text(window.terminalBackground())
                                 }
                                 IOSSwitch {
                                     checked: preferences.blinkCursor
@@ -481,14 +483,14 @@ ApplicationWindow {
                                 }
                             }
 
-                            IOSLabel { text: "Boot command"; color: preferences.terminalStyle.foregroundColor }
+                            IOSLabel { text: "Boot command"; color: IOSPalette.text(window.terminalBackground()) }
                             IOSTextField {
                                 Layout.fillWidth: true
                                 text: preferences.bootCommand.join(" ")
                                 onEditingFinished: preferences.bootCommand = text.trim().split(/\s+/)
                             }
 
-                            IOSLabel { text: "Launch command"; color: preferences.terminalStyle.foregroundColor }
+                            IOSLabel { text: "Launch command"; color: IOSPalette.text(window.terminalBackground()) }
                             IOSTextField {
                                 Layout.fillWidth: true
                                 text: preferences.launchCommand.join(" ")
@@ -519,7 +521,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 text: !rootfsManager.repositoryManaged ? "Rootfs repository metadata is unmanaged" :
                                       (rootfsManager.repositoryUpdateRequired ? "Repository metadata update is available" : "Repository metadata is current")
-                                color: preferences.terminalStyle.foregroundColor
+                                color: IOSPalette.text(window.terminalBackground())
                                 opacity: 0.7
                                 wrapMode: Text.WordWrap
                             }
@@ -539,7 +541,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 wrapMode: Text.WordWrap
                                 text: window.statusText
-                                color: preferences.terminalStyle.foregroundColor
+                                color: IOSPalette.text(window.terminalBackground())
                                 opacity: 0.7
                             }
                         }
@@ -593,13 +595,13 @@ ApplicationWindow {
                      !(preferences.hideExtraKeysWithExternalKeyboard && window.externalKeyboardActive)
             color: window.accessoryBackground
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: window.accessoryHorizontalPadding
-                anchors.rightMargin: window.accessoryHorizontalPadding
-                anchors.topMargin: window.accessoryVerticalPadding
-                anchors.bottomMargin: window.accessoryVerticalPadding
-                spacing: 10
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: window.accessoryHorizontalPadding
+                                anchors.rightMargin: window.accessoryHorizontalPadding
+                                anchors.topMargin: window.accessoryVerticalPadding
+                                anchors.bottomMargin: window.accessoryVerticalPadding
+                                spacing: IOSMetrics.accessorySpacing
 
                 component AccessoryButton: IOSButton {
                     id: accessoryButton
@@ -619,8 +621,8 @@ ApplicationWindow {
                     contentItem: Item {
                         Image {
                             id: vectorImage
-                            width: Math.min(26, window.accessoryButtonSize * 0.58)
-                            height: Math.min(26, window.accessoryButtonSize * 0.58)
+                            width: Math.min(20, window.accessoryButtonSize * 0.65)
+                            height: Math.min(20, window.accessoryButtonSize * 0.65)
                             anchors.centerIn: parent
                             z: 2
                             source: accessoryButton.iconName.length > 0 ? window.vectorIcon(accessoryButton.iconName) : ""
@@ -633,8 +635,8 @@ ApplicationWindow {
                         }
                         Image {
                             id: bitmapImage
-                            width: Math.min(26, window.accessoryButtonSize * 0.58)
-                            height: Math.min(26, window.accessoryButtonSize * 0.58)
+                            width: Math.min(20, window.accessoryButtonSize * 0.65)
+                            height: Math.min(20, window.accessoryButtonSize * 0.65)
                             anchors.centerIn: parent
                             z: 2
                             source: accessoryButton.bitmapIconName.length > 0 ? window.bitmapIcon(accessoryButton.bitmapIconName) : ""
@@ -670,10 +672,10 @@ ApplicationWindow {
                 // iSH's original left cluster: Tab, Control, Escape, then one
                 // compound ArrowBarButton. Keeping it as a group preserves the
                 // visual rhythm and touch target sizes of the iOS accessory bar.
-                RowLayout {
+                    RowLayout {
                     id: primaryKeyGroup
                     Layout.alignment: Qt.AlignVCenter
-                    spacing: 7
+                    spacing: IOSMetrics.accessorySpacing
 
                     AccessoryButton {
                         text: "Tab"
@@ -713,10 +715,10 @@ ApplicationWindow {
                 // on desktop it scales without stretching individual buttons.
                 Item { Layout.fillWidth: true; Layout.minimumWidth: 8 }
 
-                RowLayout {
+                    RowLayout {
                     id: utilityKeyGroup
                     Layout.alignment: Qt.AlignVCenter
-                    spacing: 7
+                    spacing: IOSMetrics.accessorySpacing
 
                     AccessoryButton {
                         text: "Back"
@@ -736,9 +738,9 @@ ApplicationWindow {
                             onClicked: window.settingsVisible = true
                         }
                         Rectangle {
-                            width: 9
-                            height: 9
-                            radius: 4.5
+                                width: 12
+                                height: 12
+                                radius: 6
                             anchors.right: parent.right
                             anchors.top: parent.top
                             anchors.rightMargin: -1

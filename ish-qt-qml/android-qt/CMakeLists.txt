@@ -354,6 +354,7 @@ set_target_properties(ish_qt_android PROPERTIES
 
 set_source_files_properties(
     qml/IshIOSStyle/IOSPalette.qml
+    qml/IshIOSStyle/IOSMetrics.qml
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -378,6 +379,7 @@ qt_add_qml_module(ish_qt_android
         qml/AppearancePage.qml
         qml/ErrorDialog.qml
         qml/IshIOSStyle/IOSPalette.qml
+        qml/IshIOSStyle/IOSMetrics.qml
         qml/IshIOSStyle/IOSButton.qml
         qml/IshIOSStyle/IOSToolButton.qml
         qml/IshIOSStyle/IOSToolBar.qml
