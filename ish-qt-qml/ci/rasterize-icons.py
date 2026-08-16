@@ -39,35 +39,35 @@ def rect(draw, box, color, width=7, radius=8):
 def make_tab(color):
     image, color = canvas(color)
     draw = ImageDraw.Draw(image)
-    line(draw, [(34, 64), (93, 64)], color)
-    line(draw, [(72, 43), (93, 64), (72, 85)], color)
-    line(draw, [(94, 32), (94, 96)], color)
+    line(draw, [(16, 64), (108, 64)], color)
+    line(draw, [(78, 34), (108, 64), (78, 94)], color)
+    line(draw, [(110, 18), (110, 110)], color)
     return image
 
 
 def make_control(color):
     image, color = canvas(color)
     draw = ImageDraw.Draw(image)
-    line(draw, [(35, 78), (64, 46), (93, 78)], color)
+    line(draw, [(18, 92), (64, 26), (110, 92)], color)
     return image
 
 
 def make_escape(color):
     image, color = canvas(color)
     draw = ImageDraw.Draw(image)
-    rect(draw, (48, 34, 96, 94), color)
-    line(draw, [(72, 64), (31, 64)], color)
-    line(draw, [(31, 64), (48, 47)], color)
-    line(draw, [(31, 64), (48, 81)], color)
+    rect(draw, (58, 24, 112, 104), color)
+    line(draw, [(72, 64), (18, 64)], color)
+    line(draw, [(18, 64), (40, 42)], color)
+    line(draw, [(18, 64), (40, 86)], color)
     return image
 
 
 def make_info(color):
     image, color = canvas(color)
     draw = ImageDraw.Draw(image)
-    ellipse(draw, (30, 30, 98, 98), color)
-    draw.ellipse((61 * S, 43 * S, 67 * S, 49 * S), fill=color)
-    line(draw, [(64, 58), (64, 83)], color, width=8)
+    ellipse(draw, (18, 18, 110, 110), color)
+    draw.ellipse((60 * S, 34 * S, 68 * S, 42 * S), fill=color)
+    line(draw, [(64, 54), (64, 92)], color, width=8)
     return image
 
 

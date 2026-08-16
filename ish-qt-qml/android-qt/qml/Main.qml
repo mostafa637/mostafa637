@@ -29,13 +29,24 @@ ApplicationWindow {
     property int accessoryButtonSize: IOSMetrics.accessoryButtonWidth
     property int accessoryHorizontalPadding: IOSMetrics.accessoryOuterInset
     property int accessoryVerticalPadding: 0
-    property color accessoryBackground: isDarkColor(terminalBackground()) ? "#292929" : "#e5e5ea"
-    property color accessoryForeground: isDarkColor(terminalBackground()) ? "#f5f5f7" : "#1c1c1e"
+    // The iSH accessory bar follows the interface/keyboard appearance, not
+    // the WebView terminal palette (the Android terminal page is always black).
+    property bool accessoryDarkMode: preferences && preferences.colorScheme === 2
+    property color accessoryBackground: accessoryDarkMode ? "#2c2c2e" : "#f2f2f7"
+    property color accessoryForeground: accessoryDarkMode ? "#f5f5f7" : "#1c1c1e"
 
     ErrorDialog { id: errorDialog }
 
     function iconResource(name) {
         return "qrc:/ish-assets/ui/icons/" + name + (isDarkColor(window.terminalBackground()) ? "-dark.png" : "-light.png")
+    }
+
+    // Accessory buttons follow the bar surface, not the WebView terminal surface.
+    // Android's terminal page is intentionally black even when the selected
+    // application palette is light, so using terminalBackground here can make
+    // light icons disappear on the light iOS-style accessory bar.
+    function accessoryIcon(name) {
+        return "qrc:/ish-assets/ui/icons/" + name + (isDarkColor(window.accessoryBackground) ? "-dark.png" : "-light.png")
     }
 
     // Kept as an alias for pages/components that still use the old name.
@@ -641,11 +652,11 @@ ApplicationWindow {
                     contentItem: Item {
                         Image {
                             id: vectorImage
-                            width: Math.min(20, window.accessoryButtonSize * 0.65)
-                            height: Math.min(20, window.accessoryButtonSize * 0.65)
+                            width: Math.min(24, window.accessoryButtonSize * 0.72)
+                            height: Math.min(24, window.accessoryButtonSize * 0.72)
                             anchors.centerIn: parent
                             z: 2
-                            source: accessoryButton.iconName.length > 0 ? window.vectorIcon(accessoryButton.iconName) : ""
+                            source: accessoryButton.iconName.length > 0 ? window.accessoryIcon(accessoryButton.iconName) : ""
                             visible: accessoryButton.iconName.length > 0 && status === Image.Ready
                             fillMode: Image.PreserveAspectFit
                             asynchronous: false
@@ -655,11 +666,11 @@ ApplicationWindow {
                         }
                         Image {
                             id: bitmapImage
-                            width: Math.min(20, window.accessoryButtonSize * 0.65)
-                            height: Math.min(20, window.accessoryButtonSize * 0.65)
+                            width: Math.min(24, window.accessoryButtonSize * 0.72)
+                            height: Math.min(24, window.accessoryButtonSize * 0.72)
                             anchors.centerIn: parent
                             z: 2
-                            source: accessoryButton.bitmapIconName.length > 0 ? window.bitmapIcon(accessoryButton.bitmapIconName) : ""
+                            source: accessoryButton.bitmapIconName.length > 0 ? window.accessoryIcon(accessoryButton.bitmapIconName) : ""
                             visible: accessoryButton.bitmapIconName.length > 0 && status === Image.Ready
                             fillMode: Image.PreserveAspectFit
                             asynchronous: false
@@ -726,9 +737,9 @@ ApplicationWindow {
                         Layout.preferredHeight: window.accessoryButtonSize
                         buttonSize: window.accessoryButtonSize
                         foreground: window.accessoryForeground
-                        darkMode: window.isDarkColor(window.terminalBackground())
-                        normalColor: window.isDarkColor(window.terminalBackground()) ? "#555555" : "#f2f2f7"
-                        pressedColor: window.isDarkColor(window.terminalBackground()) ? "#707070" : "#b8b8bd"
+                        darkMode: window.isDarkColor(window.accessoryBackground)
+                        normalColor: window.accessoryDarkMode ? "#555555" : "#ffffff"
+                        pressedColor: window.accessoryDarkMode ? "#707070" : "#d1d1d6"
                         onDirectionRequested: function(escapeSequence) { window.sendAccessoryInput(escapeSequence) }
                     }
                 }
