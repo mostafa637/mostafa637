@@ -1,5 +1,6 @@
 #include "RootfsManager.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -458,19 +459,105 @@ bool RootfsManager::writeMetadata(const QString &destination,
     return ok;
 }
 
-void RootfsManager::refreshRepositoryState()
+bool RootfsManager::writeTextFile(const QString &path, const QByteArray &contents)
+{
+    QSaveFile output(path);
+    if (!output.open(QIODevice::WriteOnly))
+        return false;
+    if (output.write(contents) != contents.size())
+        return false;
+    return output.commit();
+}
+
+bool RootfsManager::updateOnlyRepositoriesFile()
 {
     const QString data = QDir(m_rootPath).filePath(QStringLiteral("data"));
-    const bool managed = QFileInfo::exists(QDir(data).filePath(QStringLiteral("etc/apk/repositories")));
-    if (m_repositoryManaged != managed) {
-        m_repositoryManaged = managed;
+    const QString repositoriesPath = QDir(data).filePath(QStringLiteral("etc/apk/repositories"));
+    QFile resource(QStringLiteral(":/ish-assets/repositories.txt"));
+    if (!resource.open(QIODevice::ReadOnly))
+        return QFileInfo::exists(repositoriesPath);
+
+    const QByteArray header =
+        "# This file contains pinned repositories managed by iSH. If the /ish directory\n"
+        "# exists, iSH uses the metadata stored in it to keep this file up to date (by\n"
+        "# overwriting the contents on boot.)\n";
+    const QByteArray repositories = header + resource.readAll();
+    QDir().mkpath(QFileInfo(repositoriesPath).absolutePath());
+    return writeTextFile(repositoriesPath, repositories);
+}
+
+void RootfsManager::initializeFilesystemMetadata()
+{
+    const QString data = QDir(m_rootPath).filePath(QStringLiteral("data"));
+    const QString ishDirectory = QDir(data).filePath(QStringLiteral("ish"));
+    const QString versionPath = QDir(ishDirectory).filePath(QStringLiteral("version"));
+    const QString apkVersionPath = QDir(ishDirectory).filePath(QStringLiteral("apk-version"));
+
+    int ishVersion = 0;
+    int apkVersion = 0;
+    QFile versionFile(versionPath);
+    if (versionFile.open(QIODevice::ReadOnly))
+        ishVersion = versionFile.readAll().trimmed().toInt();
+    QFile apkFile(apkVersionPath);
+    if (apkFile.open(QIODevice::ReadOnly))
+        apkVersion = apkFile.readAll().trimmed().toInt();
+
+    const QFileInfo versionInfo(versionPath);
+    const bool managed = versionInfo.exists() && ishVersion > 0;
+    if (managed && ishVersion < 1) {
+        ishVersion = 1;
+        QDir().mkpath(ishDirectory);
+        writeTextFile(versionPath, QByteArrayLiteral("1\n"));
+    }
+
+    const QString appVersion = QCoreApplication::applicationVersion();
+    bool appVersionOk = false;
+    const int numericAppVersion = appVersion.toInt(&appVersionOk);
+    if (managed && appVersionOk && numericAppVersion > ishVersion) {
+        ishVersion = numericAppVersion;
+        writeTextFile(versionPath, QByteArray::number(ishVersion) + '\n');
+    }
+
+    m_ishVersion = ishVersion;
+    m_apkVersion = apkVersion;
+    m_repositoryManaged = managed;
+    m_repositoryUpdateRequired = managed && apkVersion < kCurrentApkVersion;
+
+    if (managed && apkVersion >= kCurrentApkVersion)
+        updateOnlyRepositoriesFile();
+}
+
+void RootfsManager::refreshRepositoryState()
+{
+    const bool oldManaged = m_repositoryManaged;
+    const bool oldUpdateRequired = m_repositoryUpdateRequired;
+    const int oldIshVersion = m_ishVersion;
+    const int oldApkVersion = m_apkVersion;
+    initializeFilesystemMetadata();
+    if (oldManaged != m_repositoryManaged)
         emit repositoryManagedChanged();
-    }
-    const bool updateRequired = false;
-    if (m_repositoryUpdateRequired != updateRequired) {
-        m_repositoryUpdateRequired = updateRequired;
+    if (oldUpdateRequired != m_repositoryUpdateRequired)
         emit repositoryUpdateRequiredChanged();
-    }
+    if (oldIshVersion != m_ishVersion || oldApkVersion != m_apkVersion)
+        emit repositoryStateChanged();
+}
+
+bool RootfsManager::updateRepositories()
+{
+    if (!m_repositoryManaged)
+        return false;
+    if (!updateOnlyRepositoriesFile())
+        return false;
+    const QString data = QDir(m_rootPath).filePath(QStringLiteral("data"));
+    const QString ishDirectory = QDir(data).filePath(QStringLiteral("ish"));
+    QDir().mkpath(ishDirectory);
+    if (!writeTextFile(QDir(ishDirectory).filePath(QStringLiteral("apk-version")),
+                       QByteArray::number(kCurrentApkVersion) + '\n'))
+        return false;
+    QDir(QDir(ishDirectory).filePath(QStringLiteral("apk"))).removeRecursively();
+    refreshRepositoryState();
+    emit repositoriesUpdated();
+    return true;
 }
 
 void RootfsManager::setPrepared(bool value)

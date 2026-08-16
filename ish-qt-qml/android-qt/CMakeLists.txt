@@ -15,6 +15,9 @@ find_package(Qt6 6.11.1 REQUIRED COMPONENTS Core Gui Quick Network WebView WebCh
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)
+if(NOT ANDROID)
+    find_library(ISH_ARCHIVE_LIBRARY archive REQUIRED)
+endif()
 qt_standard_project_setup(REQUIRES 6.8)
 
 set(ISH_ROOT "${CMAKE_CURRENT_LIST_DIR}/..")
@@ -286,6 +289,10 @@ target_include_directories(ish_qt_android PRIVATE
     "${ISH_SOURCE_DIR}/app/core"
     "${ISH_SOURCE_DIR}"
 )
+if(NOT ANDROID)
+    target_sources(ish_qt_android PRIVATE "${ISH_SOURCE_DIR}/tools/fakefs.c")
+endif()
+
 target_link_libraries(ish_qt_android PRIVATE
     Qt6::Core
     Qt6::Gui
@@ -297,6 +304,9 @@ target_link_libraries(ish_qt_android PRIVATE
     ZLIB::ZLIB
     ish_core_session
 )
+if(NOT ANDROID)
+    target_link_libraries(ish_qt_android PRIVATE "${ISH_ARCHIVE_LIBRARY}")
+endif()
 
 if(BUILD_TESTING AND NOT ANDROID)
     qt_add_executable(ish_core_host_smoke
