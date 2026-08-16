@@ -250,5 +250,10 @@ jobs:
           name: ish-android-avd-linux-diagnostics
           path: |
             avd-linux-screenshot.png
+            avd-linux-captures/**
+            avd-linux-ui/**
+            avd-linux-logcat/**
             avd-linux-logcat.txt
+            avd-linux-activity.txt
+            ish-qt-errors-device.log
           if-no-files-found: warn
