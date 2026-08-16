@@ -12,7 +12,7 @@ permissions:
 
 env:
   QT_VERSION: 6.11.1
-  QT_MODULES: qtwebview qtwebchannel qtwebsockets
+  QT_MODULES: qtsvg qtwebview qtwebchannel qtwebsockets
   BUILD_TYPE: Release
 
 jobs:

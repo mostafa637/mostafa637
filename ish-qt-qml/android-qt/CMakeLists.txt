@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(Qt6 6.11.1 REQUIRED COMPONENTS Core Gui Quick Network WebView WebChannel WebSockets)
+find_package(Qt6 6.11.1 REQUIRED COMPONENTS Core Gui Quick Svg Network WebView WebChannel WebSockets)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)
@@ -297,6 +297,7 @@ target_link_libraries(ish_qt_android PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Quick
+    Qt6::Svg
     Qt6::Network
     Qt6::WebView
     Qt6::WebChannel
@@ -342,6 +343,7 @@ if(ANDROID)
 endif()
 
 set_target_properties(ish_qt_android PROPERTIES
+    QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
     QT_ANDROID_APP_NAME "iSH Qt"
     QT_ANDROID_PACKAGE_NAME "com.mostafa637.ishqt"
     QT_ANDROID_VERSION_CODE 1

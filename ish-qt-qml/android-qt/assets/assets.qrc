@@ -6,7 +6,13 @@
     <file alias="terminal/qwebchannel.js">terminal/qwebchannel.js</file>
     <file alias="rootfs/root.tar.gz">rootfs/root.tar.gz</file>
     <file alias="repositories.txt">repositories.txt</file>
+    <file alias="ui/icons/arrow-down-dark.svg">ui/icons/arrow-down-dark.svg</file>
     <file alias="ui/icons/arrow-down-light.svg">ui/icons/arrow-down-light.svg</file>
+    <file alias="ui/icons/arrow-left-dark.svg">ui/icons/arrow-left-dark.svg</file>
+    <file alias="ui/icons/arrow-left-light.svg">ui/icons/arrow-left-light.svg</file>
+    <file alias="ui/icons/arrow-right-dark.svg">ui/icons/arrow-right-dark.svg</file>
+    <file alias="ui/icons/arrow-right-light.svg">ui/icons/arrow-right-light.svg</file>
+    <file alias="ui/icons/arrow-up-dark.svg">ui/icons/arrow-up-dark.svg</file>
     <file alias="ui/icons/arrow-up-light.svg">ui/icons/arrow-up-light.svg</file>
     <file alias="ui/icons/checkbox-dark.svg">ui/icons/checkbox-dark.svg</file>
     <file alias="ui/icons/checkbox-light.svg">ui/icons/checkbox-light.svg</file>

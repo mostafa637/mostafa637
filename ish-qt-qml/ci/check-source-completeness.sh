@@ -33,6 +33,8 @@ required=(
   "$root/android-qt/src/RootfsUpgradeController.cpp"
   "$root/android-qt/src/RootfsUpgradeController.h"
   "$root/android-qt/assets/repositories.txt"
+  "$root/android-qt/android/AndroidManifest.xml"
+  "$root/android-qt/android/res/xml/network_security_config.xml"
   "$root/upstream/ish-ios/tools/fakefs.c"
   "$root/upstream/ish-ios/tools/fakefs.h"
   "$root/upstream/ish-ios/app/core/CoreSession.c"
@@ -56,6 +58,11 @@ fi
 
 if [[ ! -f "$cmake_file" ]]; then
   echo "ERROR: missing android-qt/CMakeLists.txt" >&2
+  exit 2
+fi
+
+if ! grep -q 'Qt6::Svg' "$cmake_file"; then
+  echo "ERROR: QtSvg is not linked; Android SVG icons may be blank" >&2
   exit 2
 fi
 
