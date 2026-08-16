@@ -23,6 +23,9 @@ ApplicationWindow {
     property bool controlModifier: false
     property bool sessionStopRequested: false
     property bool externalKeyboardActive: false
+    // Android uses the bundled iSH-style QML keyboard instead of the system IME.
+    // Keep it visible by default, matching iSH iOS after the terminal becomes first responder.
+    property bool virtualKeyboardVisible: Qt.platform.os === "android"
     property bool wideAccessory: width >= 700
     // Terminal.storyboard: 50pt accessory stack, 31pt buttons, 6pt outer inset.
     property int accessoryHeight: IOSMetrics.accessoryBarHeight
@@ -128,12 +131,18 @@ ApplicationWindow {
         }
     }
 
-    function hideKeyboardFromToolbar() {
-        const item = terminalLoader.item
-        if (item && item.hideKeyboard)
-            item.hideKeyboard()
-        else
+    function toggleVirtualKeyboard() {
+        if (Qt.platform.os !== "android") {
             Qt.inputMethod.hide()
+            return
+        }
+        window.virtualKeyboardVisible = !window.virtualKeyboardVisible
+        // The WebView terminal is not an editable text control, but explicitly
+        // hide the platform IME so the bundled QML keyboard owns the layout.
+        Qt.inputMethod.hide()
+        const item = terminalLoader.item
+        if (item && item.focusTerminal)
+            item.focusTerminal()
     }
 
     function startSession() {
@@ -182,12 +191,11 @@ ApplicationWindow {
     }
 
     function updateExternalKeyboardState() {
-        if (Qt.platform.os !== "android") {
-            window.externalKeyboardActive = false
-            return
-        }
-        window.externalKeyboardActive = terminalLoader.item && terminalLoader.item.visible &&
-                                        !Qt.inputMethod.visible
+        // Qt.inputMethod.visible describes the platform IME, not a hardware
+        // keyboard. The bundled iSH keyboard is intentionally independent of
+        // that flag, so do not hide the accessory bar merely because the
+        // platform IME is absent.
+        window.externalKeyboardActive = false
     }
 
     function closeSettings() {
@@ -797,12 +805,23 @@ ApplicationWindow {
                     }
 
                     AccessoryButton {
-                        text: "Hide Keyboard"
+                        text: window.virtualKeyboardVisible ? "Hide Keyboard" : "Keyboard"
                         bitmapIconName: "hide-keyboard"
-                        onClicked: window.hideKeyboardFromToolbar()
+                        onClicked: window.toggleVirtualKeyboard()
                     }
                 }
             }
+        }
+
+        IshVirtualKeyboard {
+            id: virtualKeyboard
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible
+                                         ? Math.min(310, Math.max(226, window.width * 0.58))
+                                         : 0
+            visible: window.useWebTerminal && window.virtualKeyboardVisible && !window.settingsVisible
+            darkMode: window.accessoryDarkMode
+            onInputRequested: function(value) { window.sendAccessoryInput(value) }
         }
     }
 }

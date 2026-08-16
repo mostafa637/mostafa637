@@ -364,6 +364,7 @@ qt_add_qml_module(ish_qt_android
     VERSION 1.0
     QML_FILES
         qml/Main.qml
+        qml/IshVirtualKeyboard.qml
         qml/TerminalWeb.qml
         qml/TerminalDesktop.qml
         qml/TerminalScrollBar.qml
