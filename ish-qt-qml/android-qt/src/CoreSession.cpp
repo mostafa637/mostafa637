@@ -9,8 +9,8 @@
 #include <vector>
 
 #if defined(Q_OS_ANDROID)
+#include <QCoreApplication>
 #include <QJniObject>
-#include <QtCore/qnativeinterface.h>
 #endif
 
 extern "C" {
