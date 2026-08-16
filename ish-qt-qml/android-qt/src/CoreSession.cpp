@@ -267,10 +267,18 @@ void CoreSession::handleOutput(const QByteArray &bytes)
     if (consumed > 0)
         m_pendingOutputLine.remove(0, consumed);
 
-    // Keep a partial line for the next callback, but avoid unbounded growth
-    // if a broken producer never emits a newline.
-    if (m_pendingOutputLine.size() > 64 * 1024) {
+    // Shell prompts and other terminal output are commonly not terminated by
+    // a newline. Forward a normal partial line immediately so the WebView can
+    // display the prompt and accept input. Keep only a partial known GLES
+    // diagnostic line until its newline arrives, otherwise it could leak into
+    // the terminal while being assembled across callbacks.
+    if (!m_pendingOutputLine.isEmpty() && !m_pendingOutputLine.contains(marker)) {
         forwarded += m_pendingOutputLine;
+        m_pendingOutputLine.clear();
+    }
+
+    // Avoid unbounded growth if a diagnostic producer never emits a newline.
+    if (m_pendingOutputLine.size() > 64 * 1024) {
         m_pendingOutputLine.clear();
     }
     if (!forwarded.isEmpty())
