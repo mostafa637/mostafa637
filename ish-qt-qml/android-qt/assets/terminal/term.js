@@ -21,9 +21,8 @@
 
   function send(value) {
     if (!value) return;
-    if (socket && socket.readyState === WebSocket.OPEN) {
+    if (socket && socket.readyState === WebSocket.OPEN)
       socket.send(JSON.stringify({ type: 'input', data: value }));
-    }
   }
 
   function connect(url) {
@@ -34,7 +33,8 @@
       socket.onopen = () => { markSessionConnected(); append('\r\n'); terminal.focus(); };
       socket.onmessage = event => {
         markSessionConnected();
-        if (event.data instanceof ArrayBuffer) append(decoder.decode(new Uint8Array(event.data), { stream: true }));
+        if (event.data instanceof ArrayBuffer)
+          append(decoder.decode(new Uint8Array(event.data), { stream: true }));
         else {
           try {
             const msg = JSON.parse(event.data);
@@ -47,17 +47,36 @@
     } catch (error) { append('\r\n[connection error: ' + error + ']\r\n'); }
   }
 
+  function controlCharacter(key) {
+    if (!key || key.length !== 1) return '';
+    const ch = key.toLowerCase();
+    if (ch === ' ' || ch === '2') return '\x00';
+    if (ch === '6') return '\x1e';
+    if (ch === '-') return '\x1f';
+    const code = ch.charCodeAt(0);
+    if ((code >= 97 && code <= 122) || '@^[\\]_'.includes(ch))
+      return String.fromCharCode(code & 0x1f);
+    return '';
+  }
+
   terminal.addEventListener('keydown', event => {
-    if (event.key === 'Enter') { send('\r'); event.preventDefault(); return; }
-    if (event.key === 'Backspace') { send('\x7f'); event.preventDefault(); return; }
-    if (event.key === 'Tab') { send('\t'); event.preventDefault(); return; }
-    if (event.key === 'Escape') { send('\x1b'); event.preventDefault(); return; }
-    if (event.key === 'ArrowUp') { send('\x1b[A'); event.preventDefault(); return; }
-    if (event.key === 'ArrowDown') { send('\x1b[B'); event.preventDefault(); return; }
-    if (event.key === 'ArrowRight') { send('\x1b[C'); event.preventDefault(); return; }
-    if (event.key === 'ArrowLeft') { send('\x1b[D'); event.preventDefault(); return; }
-    if (event.ctrlKey && event.key.length === 1) { send(String.fromCharCode(event.key.toUpperCase().charCodeAt(0) - 64)); event.preventDefault(); return; }
-    if (event.key.length === 1 && !event.metaKey && !event.altKey) { send(event.key); event.preventDefault(); }
+    let value = '';
+    if (event.key === 'Enter') value = '\r';
+    else if (event.key === 'Backspace') value = '\x7f';
+    else if (event.key === 'Tab') value = '\t';
+    else if (event.key === 'Escape') value = '\x1b';
+    else if (event.key === 'ArrowUp') value = '\x1b[A';
+    else if (event.key === 'ArrowDown') value = '\x1b[B';
+    else if (event.key === 'ArrowRight') value = '\x1b[C';
+    else if (event.key === 'ArrowLeft') value = '\x1b[D';
+    else if (event.ctrlKey && event.key.length === 1) value = controlCharacter(event.key);
+    else if (event.altKey && event.key.length === 1) value = '\x1b' + event.key;
+    else if (event.key.length === 1 && !event.metaKey) value = event.key;
+    if (value) {
+      send(value);
+      event.preventDefault();
+      event.stopPropagation();
+    }
   });
 
   window.ishSendInput = send;
