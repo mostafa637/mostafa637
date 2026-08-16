@@ -8,10 +8,6 @@
     <!-- %%INSERT_PERMISSIONS -->
     <!-- %%INSERT_FEATURES -->
 
-    <uses-sdk
-        android:minSdkVersion="-- %%INSERT_MIN_SDK_VERSION%% --"
-        android:targetSdkVersion="-- %%INSERT_TARGET_SDK_VERSION%% --" />
-
     <supports-screens
         android:anyDensity="true"
         android:largeScreens="true"

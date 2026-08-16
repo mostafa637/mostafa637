@@ -128,7 +128,7 @@ Rectangle {
         anchors.bottom: parent.verticalCenter
         anchors.bottomMargin: -root.buttonSize * 0.06
         opacity: root.selected && root.direction !== "up" ? 0.25 : 1
-        source: "qrc:/ish-assets/ui/icons/arrow-up-" + (root.darkMode ? "dark" : "light") + ".svg"
+        source: "qrc:/ish-assets/ui/icons/arrow-up-" + (root.darkMode ? "dark" : "light") + ".png"
         sourceSize: Qt.size(24, 24)
         fillMode: Image.PreserveAspectFit
         smooth: true
@@ -140,7 +140,7 @@ Rectangle {
         anchors.top: parent.verticalCenter
         anchors.topMargin: -root.buttonSize * 0.06
         opacity: root.selected && root.direction !== "down" ? 0.25 : 1
-        source: "qrc:/ish-assets/ui/icons/arrow-down-" + (root.darkMode ? "dark" : "light") + ".svg"
+        source: "qrc:/ish-assets/ui/icons/arrow-down-" + (root.darkMode ? "dark" : "light") + ".png"
         sourceSize: Qt.size(24, 24)
         fillMode: Image.PreserveAspectFit
         smooth: true
@@ -152,7 +152,7 @@ Rectangle {
         anchors.rightMargin: -root.buttonSize * 0.06
         anchors.verticalCenter: parent.verticalCenter
         opacity: root.selected && root.direction !== "left" ? 0.25 : 1
-        source: "qrc:/ish-assets/ui/icons/arrow-left-" + (root.darkMode ? "dark" : "light") + ".svg"
+        source: "qrc:/ish-assets/ui/icons/arrow-left-" + (root.darkMode ? "dark" : "light") + ".png"
         sourceSize: Qt.size(24, 24)
         fillMode: Image.PreserveAspectFit
         smooth: true
@@ -164,7 +164,7 @@ Rectangle {
         anchors.leftMargin: -root.buttonSize * 0.06
         anchors.verticalCenter: parent.verticalCenter
         opacity: root.selected && root.direction !== "right" ? 0.25 : 1
-        source: "qrc:/ish-assets/ui/icons/arrow-right-" + (root.darkMode ? "dark" : "light") + ".svg"
+        source: "qrc:/ish-assets/ui/icons/arrow-right-" + (root.darkMode ? "dark" : "light") + ".png"
         sourceSize: Qt.size(24, 24)
         fillMode: Image.PreserveAspectFit
         smooth: true

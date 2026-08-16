@@ -679,13 +679,13 @@ ApplicationWindow {
 
                     AccessoryButton {
                         text: "Tab"
-                        iconName: "tab"
+                        fallbackText: "⇥"
                         onClicked: window.sendAccessoryInput("\t")
                     }
 
                     AccessoryButton {
                         text: "Control"
-                        iconName: "control"
+                        fallbackText: "⌃"
                         checkable: true
                         checked: window.controlModifier
                         onClicked: window.setControlModifier(!window.controlModifier)
@@ -693,7 +693,7 @@ ApplicationWindow {
 
                     AccessoryButton {
                         text: "Escape"
-                        iconName: "escape"
+                        fallbackText: "⎋"
                         onClicked: window.sendAccessoryInput("\u001b")
                     }
 
@@ -734,7 +734,9 @@ ApplicationWindow {
                         AccessoryButton {
                             anchors.fill: parent
                             text: "Settings"
-                            iconName: "gear"
+                            // The iOS storyboard uses UIButtonTypeInfoLight here;
+                            // keep the same glyph without depending on SF Symbols/QtSvg.
+                            fallbackText: "ⓘ"
                             onClicked: window.settingsVisible = true
                         }
                         Rectangle {
