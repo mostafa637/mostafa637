@@ -16,6 +16,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QUrl>
+#include <QtWebView/QtWebView>
 
 namespace {
 
@@ -45,6 +46,8 @@ void suppressChromiumDiagnostics()
 
 int main(int argc, char *argv[])
 {
+    // Qt WebView must be initialized before QGuiApplication, especially on Android.
+    QtWebView::initialize();
     suppressChromiumDiagnostics();
     QGuiApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("iSH"));
