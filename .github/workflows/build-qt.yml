@@ -115,7 +115,8 @@ jobs:
           command -v cmake
           command -v ninja
           command -v clang
-          command -v ld.lld
+          ld_lld="$(command -v ld.lld || command -v ld.lld-18 || command -v ld.lld-17 || true)"
+          test -n "$ld_lld"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
