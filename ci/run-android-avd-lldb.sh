@@ -19,8 +19,15 @@ elif [[ -x "$lldb_root/bin/lldb" ]]; then
   lldb="$lldb_root/bin/lldb"
 fi
 # The first lldb-server found in the NDK may be the host executable. For an
-# x86_64 AVD, use the Android target binary under lib64/clang/.../lib/linux/x86_64.
-lldb_server="$(find "$lldb_root/lib64/clang" -type f -path '*/lib/linux/x86_64/lldb-server' -print -quit 2>/dev/null || true)"
+# x86_64 AVD, use the Android target binary under lib/clang/.../lib/linux/x86_64.
+# NDK r27 uses lib/clang; older NDKs used lib64/clang, so retain a fallback.
+lldb_server="$(find "$lldb_root/lib/clang" -type f -path '*/lib/linux/x86_64/lldb-server' -print -quit 2>/dev/null || true)"
+if [[ -z "$lldb_server" ]]; then
+  lldb_server="$(find "$lldb_root/lib64/clang" -type f -path '*/lib/linux/x86_64/lldb-server' -print -quit 2>/dev/null || true)"
+fi
+if [[ -z "$lldb_server" ]]; then
+  lldb_server="$(find "$lldb_root/lib/clang" -type f -path '*/lib/linux/i386/lldb-server' -print -quit 2>/dev/null || true)"
+fi
 if [[ -z "$lldb_server" ]]; then
   lldb_server="$(find "$lldb_root/lib64/clang" -type f -path '*/lib/linux/i386/lldb-server' -print -quit 2>/dev/null || true)"
 fi
