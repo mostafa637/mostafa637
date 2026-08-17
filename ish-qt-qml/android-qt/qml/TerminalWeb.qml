@@ -74,7 +74,7 @@ Item {
                 // screenshots reveal why the session never becomes active.
                 view.runJavaScript("(" + function() {
                     try {
-                        const ws = window.ishWsDiagnostic ? window.ishWsDiagnostic() : "not available";
+                        var ws = window.ishWsDiagnostic ? window.ishWsDiagnostic() : "not available";
                         // If the WebSocket never opened, ask term.js to retry
                         // connecting explicitly in case the first attempt raced
                         // with the native session startup.
