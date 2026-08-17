@@ -281,13 +281,15 @@ if(NOT ANDROID)
     target_sources(ish_qt_android PRIVATE "${ISH_SOURCE_DIR}/tools/fakefs.c")
 endif()
 
-# Register the shared asset catalog (terminal HTML/JS/CSS, UI icons, iOS
-# icons) through Qt's resource system so androiddeployqt includes the
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/assets/assets.qrc"
-    PROPERTIES QT_RESOURCE_ALIAS "assets.qrc")
-qt_add_resources(ish_qt_android "ish-assets"
-    FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/assets.qrc"
-)
+# expands assets.qrc into generated C++ source code (all terminal HTML/JS,
+# UI icons and iOS icons), then link it into the executable. The target
+# variant qt_add_resources(target ... FILES file.qrc) only embeds the qrc
+# file itself without expanding its contents, and the previous hand-rolled
+# custom command produced a source that the Android resource bundler
+# never picked up.
+set(ISH_ASSET_SOURCES "")
+qt_add_resources(ISH_ASSET_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/assets/assets.qrc")
+target_sources(ish_qt_android PRIVATE ${ISH_ASSET_SOURCES})
 
 target_link_libraries(ish_qt_android PRIVATE
     Qt6::Core
