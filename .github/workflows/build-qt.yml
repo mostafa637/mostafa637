@@ -310,6 +310,15 @@ jobs:
           path: apk
           merge-multiple: false
 
+      - name: Install pinned NDK for Android LLDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "ndk;27.2.12479018"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          test -x "$ANDROID_SDK_ROOT/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/lldb.sh"
+          test -f "$ANDROID_SDK_ROOT/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/x86_64/lldb-server"
+
       - name: Run x86_64 AVD with Android Emulator Runner
         uses: reactivecircus/android-emulator-runner@v2
         with:

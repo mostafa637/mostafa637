@@ -97,9 +97,10 @@ adb forward tcp:5039 tcp:5039
 # Use platform mode instead of the direct gdbserver attach mode. On the NDK
 # shipped by the runner, direct `g --attach` can crash before the handshake;
 # platform mode lets the host LLDB perform the attach operation itself.
-adb shell "/data/local/tmp/ish-lldb-server platform --listen '*:5039' --server" > avd-linux-logcat/lldb-server.log 2>&1 &
+adb shell "nohup /data/local/tmp/ish-lldb-server platform --listen 0.0.0.0:5039 --server >/data/local/tmp/ish-lldb-server.log 2>&1 </dev/null &" > avd-linux-logcat/lldb-server.log 2>&1 &
 server_pid=$!
-sleep 2
+sleep 3
+adb shell cat /data/local/tmp/ish-lldb-server.log > avd-linux-logcat/lldb-server.log 2>/dev/null || true
 (
   {
     echo '=== LLDB attach ==='
@@ -140,6 +141,7 @@ done
 wait "$capture_pid" || true
 wait "$lldb_pid" || true
 kill "$server_pid" 2>/dev/null || true
+adb shell cat /data/local/tmp/ish-lldb-server.log > avd-linux-logcat/lldb-server.log 2>/dev/null || true
 adb shell dumpsys activity activities > avd-linux-activity.txt 2>&1 || true
 adb exec-out cat /sdcard/Android/data/com.mostafa637.ishqt/files/ish-qt-errors.log > ish-qt-errors-device.log 2>/dev/null || true
 adb exec-out screencap -p > avd-linux-screenshot.png 2>/dev/null || true
