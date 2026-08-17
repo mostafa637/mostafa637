@@ -227,6 +227,10 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        // iSH iOS behaviour (Roots.m): import the bundled default rootfs
+        // automatically on first launch when no rootfs is installed yet.
+        if (!rootfsManager.prepared)
+            rootfsManager.prepare()
         loadTerminalPage()
         Qt.callLater(updateExternalKeyboardState)
     }
