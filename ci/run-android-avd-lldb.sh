@@ -94,13 +94,15 @@ echo "Android application pid=$pid"
 adb push "$lldb_server" /data/local/tmp/ish-lldb-server >/dev/null
 adb shell chmod 700 /data/local/tmp/ish-lldb-server
 adb forward tcp:5039 tcp:5039
+# The platform server uses a second port for the per-process gdbserver.
+adb forward tcp:5040 tcp:5040
 # Use platform mode instead of the direct gdbserver attach mode. On the NDK
 # shipped by the runner, direct `g --attach` can crash before the handshake;
 # platform mode lets the host LLDB perform the attach operation itself.
 # Keep the adb shell attached while the platform server is listening. The
 # official LLDB syntax uses '*:port'; detaching the remote shell can terminate
 # the server before the host-side LLDB connects.
-adb shell "/data/local/tmp/ish-lldb-server platform --listen '*:5039' --server" > avd-linux-logcat/lldb-server.log 2>&1 &
+adb shell "/data/local/tmp/ish-lldb-server platform --listen '*:5039' --server --gdbserver-port 5040" > avd-linux-logcat/lldb-server.log 2>&1 &
 server_pid=$!
 sleep 3
 adb shell ps -A | grep -F ish-lldb-server >> avd-linux-logcat/lldb-server.log 2>&1 || true
