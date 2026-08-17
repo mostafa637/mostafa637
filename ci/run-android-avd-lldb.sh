@@ -107,17 +107,19 @@ adb shell "run-as com.mostafa637.ishqt ps -A | grep -F ish-lldb-server" >> avd-l
   {
     echo '=== LLDB attach ==='
     echo 'process connect/attach: application pid='"$pid"
+    lldb_rc=0
     timeout --signal=SIGINT 175s "$lldb" --batch \
+      -o 'settings set interpreter.stop-command-source-on-error false' \
       -o 'gdb-remote 5039' \
       -o 'process status' \
       -o 'thread list' \
-      -o 'image list' \
       -o 'thread backtrace all' \
       -o 'process continue' \
       -o 'process status' \
       -o 'thread backtrace all' \
       -o 'process detach' \
-      2>&1
+      2>&1 || lldb_rc=$?
+    echo "LLDB exit code: $lldb_rc"
     echo '=== LLDB session complete ==='
   } > avd-linux-logcat/lldb-full-runtime.log
 ) &
@@ -161,7 +163,7 @@ if ! grep -q '=== LLDB session complete ===' avd-linux-logcat/lldb-full-runtime.
   echo 'LLDB did not complete its full lifecycle session.' >&2
   exit 5
 fi
-if grep -E 'Connection shut down|PLEASE submit a bug report|segfault|error:.*failed' avd-linux-logcat/lldb-full-runtime.log avd-linux-logcat/lldb-server.log; then
+if grep -E 'Connection shut down|PLEASE submit a bug report|segfault|error:.*failed|attach failed' avd-linux-logcat/lldb-full-runtime.log avd-linux-logcat/lldb-server.log; then
   echo 'LLDB reported an attach/server failure; see the full reports.' >&2
   exit 6
 fi
