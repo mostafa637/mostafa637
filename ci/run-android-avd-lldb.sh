@@ -110,7 +110,7 @@ adb shell ps -A | grep -F ish-lldb-server >> avd-linux-logcat/lldb-server.log 2>
     echo 'process connect/attach: application pid='"$pid"
     timeout --signal=SIGINT 175s "$lldb" --batch \
       -o 'platform select remote-android' \
-      -o 'platform connect connect://127.0.0.1:5039' \
+      -o 'platform connect connect://:5039' \
       -o 'process attach --pid '"$pid" \
       -o 'process status' \
       -o 'thread list' \
