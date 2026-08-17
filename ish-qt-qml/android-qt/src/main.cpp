@@ -12,12 +12,40 @@
 #include <QCoreApplication>
 #include <QFontDatabase>
 #include <QGuiApplication>
+#include <QProcessEnvironment>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QUrl>
 
+namespace {
+
+// Qt WebView embeds Chromium, which dumps repetitive crashpad/gpu diagnostic
+// lines into the process stderr. Capture this stderr early via the iSH core
+// transport, so suppress the messages at the Chromium source when Chromium
+// flags are accepted. Keep any user-provided flags intact.
+void suppressChromiumDiagnostics()
+{
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    const QString existing = env.value(QStringLiteral("QT_CHROMIUM_FLAGS")).simplified();
+    QString flags = existing;
+    const QStringList extra = {
+        QStringLiteral("--no-sandbox"),
+        QStringLiteral("--disable-gpu"),
+        QStringLiteral("--disable-extensions")
+    };
+    for (const QString &flag : extra) {
+        if (!existing.contains(flag))
+            flags += ' ' + flag;
+    }
+    if (!flags.simplified().isEmpty())
+        qputenv("QT_CHROMIUM_FLAGS", flags.simplified().toUtf8());
+}
+
+} // namespace
+
 int main(int argc, char *argv[])
 {
+    suppressChromiumDiagnostics();
     QGuiApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("iSH"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("ish.app"));

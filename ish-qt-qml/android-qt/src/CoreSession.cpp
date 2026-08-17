@@ -245,11 +245,31 @@ void CoreSession::handleOutput(const QByteArray &bytes)
     if (bytes.isEmpty())
         return;
 
-    // Some Android GLES stacks print informational shader-binding lines to the
-    // process stderr. CoreSession captures stderr together with the shell
-    // stream, so remove only these known diagnostic lines before forwarding
-    // output to the terminal. All user/program output is preserved.
-    static const QByteArray marker("s_glBindAttribLocation:");
+    // Chromium/QtWebEngine prints repetitive diagnostic lines to the process
+    // stderr (e.g. `[mmdd/hhmmss.xxx:ERROR:third_party/crashpad/...]` or GLES
+    // shader-binding lines). CoreSession captures stderr together with the
+    // shell stream, so drop these known Chromium/GLES diagnostic lines before
+    // forwarding output to the terminal. All user/program output is preserved.
+    static const char *const kDroppedPrefixes[] = {
+        "s_glBindAttribLocation:",
+        "third_party/crashpad/",
+        "third_party/blink/",
+        "ERROR:crashpad",
+        "ERROR:gpu",
+        "INFO:crashpad"
+    };
+    static const QRegularExpression crashpadRe(
+        QStringLiteral("^\\[\\d\\d\\d\\d/\\d\\d\\d\\d\\d\\d\\.\\d+:"),
+        QRegularExpression::DotMatchesEverythingOption);
+    auto isDiagnostic = [](const QByteArray &line) {
+        if (line.isEmpty())
+            return false;
+        for (const char *prefix : kDroppedPrefixes) {
+            if (line.startsWith(prefix))
+                return true;
+        }
+        return crashpadRe.match(line).hasMatch();
+    };
     m_pendingOutputLine += bytes;
     QByteArray forwarded;
     qsizetype consumed = 0;
@@ -258,7 +278,7 @@ void CoreSession::handleOutput(const QByteArray &bytes)
         if (newline < 0)
             break;
         const QByteArray line = m_pendingOutputLine.mid(consumed, newline - consumed);
-        if (!line.contains(marker)) {
+        if (!isDiagnostic(line)) {
             forwarded += line;
             forwarded += '\n';
         }
@@ -272,7 +292,7 @@ void CoreSession::handleOutput(const QByteArray &bytes)
     // display the prompt and accept input. Keep only a partial known GLES
     // diagnostic line until its newline arrives, otherwise it could leak into
     // the terminal while being assembled across callbacks.
-    if (!m_pendingOutputLine.isEmpty() && !m_pendingOutputLine.contains(marker)) {
+    if (!m_pendingOutputLine.isEmpty() && !isDiagnostic(m_pendingOutputLine)) {
         forwarded += m_pendingOutputLine;
         m_pendingOutputLine.clear();
     }
