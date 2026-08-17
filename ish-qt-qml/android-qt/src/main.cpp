@@ -11,6 +11,7 @@
 
 #include <QCoreApplication>
 #include <QFontDatabase>
+#include <csignal>
 #include <QGuiApplication>
 #include <QProcessEnvironment>
 #include <QQmlApplicationEngine>
@@ -49,6 +50,12 @@ int main(int argc, char *argv[])
     // Qt WebView must be initialized before QGuiApplication, especially on Android.
     QtWebView::initialize();
     suppressChromiumDiagnostics();
+    // The iSH kernel runs as a pthread inside the Qt process. With the
+    // default SIGINT disposition, Ctrl+C (or an inherited SIGINT) would be
+    // delivered to the kernel thread, whose signal path dereferences an
+    // uninitialised task->signal mutex and segfaults. Ignore SIGINT so the
+    // kernel can only be stopped gracefully through the input pipe.
+    std::signal(SIGINT, SIG_IGN);
     QGuiApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("iSH"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("ish.app"));

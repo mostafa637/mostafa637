@@ -215,8 +215,20 @@ bool CoreSession::start(const QString &rootPath,
 
 void CoreSession::stop()
 {
-    if (m_session != nullptr)
-        ish_core_session_stop(m_session);
+    // Match the iSH iOS Android shutdown path: closing the input pipe
+    // delivers EOF to the kernel shell, which exits normally so that the
+    // fakefs mounts are unmounted and the sqlite metadata database is
+    // closed cleanly. pthread_cancel would abort the worker mid-session,
+    // leaving the sqlite WAL lock behind and crashing the next mount.
+    if (m_session != nullptr) {
+        struct IshCoreSession *session = m_session;
+        ish_core_session_stop(session);
+#if defined(__ANDROID__)
+        (void)session;
+#else
+        (void)session;
+#endif
+    }
     setRunning(false);
 }
 

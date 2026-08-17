@@ -150,8 +150,13 @@ QString sqliteError(sqlite3 *db, const QString &fallback)
 RootfsManager::RootfsManager(QObject *parent)
     : QObject(parent)
 {
+    // The iSH kernel derives the sqlite database path from the mount source by
+    // replacing its basename with "meta.db" and asserts that the basename is
+    // exactly "data" (fakefs_mount in upstream fs/fake.c). Mirror iSH iOS, whose
+    // root directory is itself named "data" (e.g. ~/Documents/data); otherwise
+    // the kernel assertion fails and aborts the process.
     m_rootPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
-                     .filePath(QStringLiteral("rootfs"));
+                     .filePath(QStringLiteral("data"));
     refreshRepositoryState();
 }
 
@@ -420,7 +425,13 @@ bool RootfsManager::writeMetadata(const QString &destination,
         "CREATE INDEX inode_to_path ON paths (inode, path);"
         "PRAGMA user_version=3;";
     char *sqliteMessage = nullptr;
-    bool ok = sqlite3_exec(db, "PRAGMA journal_mode=DELETE;", nullptr, nullptr, &sqliteMessage) == SQLITE_OK;
+    // Match the journal mode the iSH kernel expects (fake_db_init sets
+    // pragma journal_mode=wal). Using WAL here avoids a stale rollback
+    // journal after an unclean exit and keeps the metadata database
+    // compatible with what the kernel opens on the next session start.
+    bool ok = sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, &sqliteMessage) == SQLITE_OK;
+    if (ok)
+        ok = sqlite3_exec(db, "PRAGMA foreign_keys=ON;", nullptr, nullptr, &sqliteMessage) == SQLITE_OK;
     if (ok)
         ok = sqlite3_exec(db, "BEGIN;", nullptr, nullptr, &sqliteMessage) == SQLITE_OK;
     if (ok)

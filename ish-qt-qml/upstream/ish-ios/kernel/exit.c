@@ -133,12 +133,18 @@ noreturn void do_exit_group(int status) {
         status = group->group_exit_code;
     }
 
-    // kill everyone else in the group
+    // kill everyone else in the group. A task may already have released
+    // its sighand in do_exit() (current->sighand = NULL), and delivering
+    // SIGKILL to such a task would dereference a NULL sighand lock and
+    // crash the kernel. Skip tasks whose sighand is already gone — they
+    // are exiting anyway and will be reaped normally.
     struct task *task;
     list_for_each_entry(&group->threads, task, group_links) {
-        deliver_signal(task, SIGKILL_, SIGINFO_NIL);
-        task->group->stopped = false;
-        notify(&task->group->stopped_cond);
+        if (task->sighand) {
+            deliver_signal(task, SIGKILL_, SIGINFO_NIL);
+            task->group->stopped = false;
+            notify(&task->group->stopped_cond);
+        }
     }
 
     unlock(&group->lock);
@@ -156,10 +162,10 @@ static void halt_system(void) {
                 tasks_found++;
                 switch (state) {
                 case 0:
-                    deliver_signal(task, SIGTERM_, SIGINFO_NIL);
+                    if (task->sighand) { deliver_signal(task, SIGTERM_, SIGINFO_NIL); }
                     break;
                 case 1:
-                    deliver_signal(task, SIGKILL_, SIGINFO_NIL);
+                    if (task->sighand) { deliver_signal(task, SIGKILL_, SIGINFO_NIL); }
                     break;
                 case 2:
                     pthread_kill(task->thread, SIGTERM);

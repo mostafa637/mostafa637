@@ -227,6 +227,16 @@ target_compile_definitions(ish_core_session PRIVATE
     ENGINE_ASBESTOS=1
     LOG_HANDLER_DPRINTF=1
 )
+# The iSH core worker on Linux/macOS uses pthread_cancel for session stop,
+# which aborts the worker mid-session and leaves the sqlite metadata
+# database locked (mounts are not unmounted). This crashes the next kernel
+# mount (fake_db_init die) on restart loops. The Android bionic path closes
+# the input pipe instead so the shell exits cleanly through its normal path
+# (mounts are unmounted, sqlite is closed). Use the graceful Android path on
+# all Qt host platforms for stability.
+if(NOT ANDROID)
+    target_compile_definitions(ish_core_session PRIVATE __ANDROID__=1)
+endif()
 target_compile_options(ish_core_session PRIVATE
     -Wno-switch
     -Wno-unused-parameter
@@ -307,6 +317,10 @@ if(NOT ANDROID)
 endif()
 
 if(BUILD_TESTING AND NOT ANDROID)
+    # Expand the shared asset catalog (rootfs archive + terminal assets) into
+    # generated C++ source code and link it into the host smoke test binary.
+    set(ISH_ASSET_CPP "")
+    qt_add_resources(ISH_ASSET_CPP "${CMAKE_CURRENT_SOURCE_DIR}/assets/assets.qrc")
     qt_add_executable(ish_core_host_smoke
         tests/CoreHostSmoke.cpp
         src/CoreSession.cpp
