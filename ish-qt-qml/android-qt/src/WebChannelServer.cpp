@@ -65,11 +65,13 @@ bool WebChannelServer::start()
         m_httpServer->close();
 
     if (!m_server->listen(QHostAddress::LocalHost, 0)) {
+        qWarning() << "[ish-qt] WebChannelServer: ws listen failed:" << m_server->errorString();
         emit serverError(m_server->errorString());
         return false;
     }
     if (!m_httpServer->listen(QHostAddress::LocalHost, 0)) {
         const QString error = m_httpServer->errorString();
+        qWarning() << "[ish-qt] WebChannelServer: http listen failed:" << error;
         m_server->close();
         emit serverError(error);
         return false;
@@ -78,6 +80,7 @@ bool WebChannelServer::start()
     m_url = QStringLiteral("ws://127.0.0.1:%1").arg(m_server->serverPort());
     m_pageUrl = QStringLiteral("http://127.0.0.1:%1/terminal/term.html")
                     .arg(m_httpServer->serverPort());
+    qWarning() << "[ish-qt] WebChannelServer listening: ws=" << m_url << "page=" << m_pageUrl;
     emit urlChanged();
     emit pageUrlChanged();
     return true;

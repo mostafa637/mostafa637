@@ -125,12 +125,15 @@ bool CoreSession::start(const QString &rootPath,
                         const QStringList &bootCommand,
                         const QStringList &launchCommand)
 {
+    qWarning() << "[ish-qt] CoreSession::start() rootPath=" << rootPath
+               << "boot=" << bootCommand << "launch=" << launchCommand;
     if (m_session != nullptr)
         stop();
     destroyCore();
     m_pendingOutputLine.clear();
 
     if (rootPath.isEmpty()) {
+        qWarning() << "[ish-qt] CoreSession::start FAILED: rootfs path is empty";
         emit errorOccurred(QStringLiteral("Rootfs path is empty"));
         return false;
     }
@@ -154,9 +157,20 @@ bool CoreSession::start(const QString &rootPath,
     const QStringList legacyLogin = {
         QStringLiteral("/bin/login"), QStringLiteral("-f"), QStringLiteral("root")
     };
-    const QStringList effectiveLaunchCommand = launchCommand == legacyLogin
+    QStringList effectiveLaunchCommand = launchCommand == legacyLogin
         ? QStringList{QStringLiteral("/bin/sh")}
         : launchCommand;
+
+    // POSIX shells enter non-interactive mode without a controlling tty,
+    // read commands from stdin, and exit at EOF — leaving an empty
+    // terminal with no prompt. Force interactive mode for the default
+    // /bin/sh launch so the shell keeps reading from the input pipe and
+    // prints prompts, matching the iSH iOS pseudo-terminal behaviour.
+    if (effectiveLaunchCommand.isEmpty())
+        effectiveLaunchCommand = {QStringLiteral("/bin/sh"), QStringLiteral("-i")};
+    else if (effectiveLaunchCommand.first() == QStringLiteral("/bin/sh") &&
+             !effectiveLaunchCommand.contains(QStringLiteral("-i")))
+        effectiveLaunchCommand.append(QStringLiteral("-i"));
     for (const QString &value : effectiveLaunchCommand)
         launchBytes.append(value.toUtf8());
     for (const QByteArray &value : bootBytes)
@@ -170,11 +184,14 @@ bool CoreSession::start(const QString &rootPath,
         launchArgv.empty() ? nullptr : launchArgv.data(), launchArgv.size(),
         &CoreSession::outputCallback, &CoreSession::stateCallback, this);
     if (!m_session) {
+        qWarning() << "[ish-qt] CoreSession::start FAILED: ish_core_session_create returned null";
         emit errorOccurred(QStringLiteral("Unable to allocate iSH core session"));
         return false;
     }
+    qWarning() << "[ish-qt] ish_core_session_create OK";
 
     const QByteArray resolverConfig = hostResolverConfig();
+    qWarning() << "[ish-qt] hostResolverConfig size=" << resolverConfig.size();
     if (!resolverConfig.isEmpty() &&
         ish_core_session_set_resolver_config(m_session,
                                              resolverConfig.constData(),
@@ -186,11 +203,13 @@ bool CoreSession::start(const QString &rootPath,
     }
 
     if (!ish_core_session_start(m_session)) {
+        qWarning() << "[ish-qt] CoreSession::start FAILED: ish_core_session_start returned false";
         emit errorOccurred(QStringLiteral("Unable to start iSH core session"));
         destroyCore();
         return false;
     }
     setRunning(true);
+    qWarning() << "[ish-qt] CoreSession::start SUCCEEDED, running=" << m_running;
     return true;
 }
 
@@ -244,6 +263,7 @@ void CoreSession::handleOutput(const QByteArray &bytes)
 {
     if (bytes.isEmpty())
         return;
+    qWarning() << "[ish-qt] CoreSession::handleOutput bytes=" << bytes.size();
 
     // Chromium/QtWebEngine prints repetitive diagnostic lines to the process
     // stderr (e.g. `[mmdd/hhmmss.xxx:ERROR:third_party/crashpad/...]` or GLES

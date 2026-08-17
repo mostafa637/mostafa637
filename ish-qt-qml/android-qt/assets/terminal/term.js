@@ -135,7 +135,12 @@ function scriptLoadFailed(tag) {
     }
     attempts += 1;
     connect(wsParam);
-    if (attempts >= 30) clearInterval(timer);
+    if (attempts >= 120) {
+      clearInterval(timer);
+      append('\r\n[gave up after ' + attempts + ' connection attempts]\r\n');
+    } else if (attempts % 5 === 1) {
+      append('\r\n[retrying connection attempt ' + attempts + ']\r\n');
+    }
   };
 
   append('iSH Qt terminal\r\n');

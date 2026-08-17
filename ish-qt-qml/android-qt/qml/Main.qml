@@ -22,6 +22,9 @@ ApplicationWindow {
     property bool useWebTerminal: Qt.platform.os === "android"
     property bool controlModifier: false
     property bool sessionStopRequested: false
+    // Guard against a rapid restart loop if the core session exits
+    // repeatedly; log diagnostics instead of spinning the event loop.
+    property int consecutiveRestarts: 0
     property bool externalKeyboardActive: false
     // Android uses the bundled iSH-style QML keyboard instead of the system IME.
     // Keep it visible by default, matching iSH iOS after the terminal becomes first responder.
@@ -69,6 +72,8 @@ ApplicationWindow {
     }
 
     function configureSession() {
+        if (ishSession.alive)
+            console.warn("[ish-qt] configureSession while alive; will stop current session");
         ishSession.configure(rootfsManager.rootPath,
                              preferences.encodeCommand(preferences.bootCommand),
                              preferences.encodeCommand(preferences.launchCommand))
@@ -161,8 +166,15 @@ ApplicationWindow {
     }
 
     function restartSession() {
+        console.warn("[ish-qt] restartSession called, consecutiveRestarts=" + window.consecutiveRestarts + " alive=" + ishSession.alive);
         if (!rootfsManager.prepared) {
             statusText = "Rootfs is not ready"
+            return
+        }
+        window.consecutiveRestarts += 1
+        if (window.consecutiveRestarts > 10) {
+            platformServices.logDiagnostic("QML session", "Too many consecutive session restarts; giving up")
+            statusText = "Session exited repeatedly"
             return
         }
         // Mark the intentional stop before calling stop(): stop() emits
@@ -187,6 +199,7 @@ ApplicationWindow {
     function stopSession() {
         window.sessionStopRequested = true
         window.setControlModifier(false)
+        window.consecutiveRestarts = 0
         ishSession.stop()
     }
 
@@ -286,6 +299,7 @@ ApplicationWindow {
             window.statusText = alive ? "iSH is running" : "Session ended"
             if (alive) {
                 window.sessionStopRequested = false
+                window.consecutiveRestarts = 0
                 return
             }
             window.setControlModifier(false)

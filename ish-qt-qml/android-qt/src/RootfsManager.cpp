@@ -157,6 +157,8 @@ RootfsManager::RootfsManager(QObject *parent)
 
 void RootfsManager::prepare()
 {
+    qWarning() << "[ish-qt] RootfsManager::prepare() called, alreadyPrepared=" << m_prepared
+               << "rootPath=" << m_rootPath;
     if (m_prepared)
         return;
 
@@ -170,8 +172,11 @@ void RootfsManager::prepare()
 
     const QString archivePath = QDir(appData).filePath(QStringLiteral("root.tar.gz"));
     QFile resource(QStringLiteral(":/ish-assets/rootfs/root.tar.gz"));
+    qWarning() << "[ish-qt] bundled rootfs resource exists:" << resource.exists()
+               << "archivePath=" << archivePath;
     QSaveFile archive(archivePath);
     if (!resource.open(QIODevice::ReadOnly) || !archive.open(QIODevice::WriteOnly)) {
+        qWarning() << "[ish-qt] FAILED to copy bundled rootfs (resource open or archive open)";
         emit preparationError(QStringLiteral("Unable to copy bundled rootfs"));
         return;
     }
@@ -197,6 +202,7 @@ void RootfsManager::prepare()
     QDir(temporaryRoot).removeRecursively();
     QString error;
     if (!importBundledRootfs(archivePath, temporaryRoot, &error)) {
+        qWarning() << "[ish-qt] rootfs import failed:" << error;
         QDir(temporaryRoot).removeRecursively();
         QFile::remove(archivePath);
         emit preparationError(error);
@@ -204,6 +210,7 @@ void RootfsManager::prepare()
     }
     QDir(m_rootPath).removeRecursively();
     if (!QDir().rename(temporaryRoot, m_rootPath)) {
+        qWarning() << "[ish-qt] FAILED to install imported rootfs (rename)";
         QDir(temporaryRoot).removeRecursively();
         QFile::remove(archivePath);
         emit preparationError(QStringLiteral("Unable to install imported rootfs"));
@@ -213,6 +220,8 @@ void RootfsManager::prepare()
     refreshRepositoryState();
     setPrepared(true);
     emit progressChanged(100, QStringLiteral("Rootfs is ready"));
+    qWarning() << "[ish-qt] rootfs prepared successfully: prepared=" << m_prepared
+               << "rootPath=" << m_rootPath;
 }
 
 void RootfsManager::resetInstalledData()
@@ -251,9 +260,11 @@ bool RootfsManager::importBundledRootfs(const QString &archivePath,
 
     gzFile archive = gzopen(QFile::encodeName(archivePath).constData(), "rb");
     if (!archive) {
+        qWarning() << "[ish-qt] gzopen failed for" << archivePath;
         if (error) *error = QStringLiteral("Unable to open bundled rootfs archive");
         return false;
     }
+    qWarning() << "[ish-qt] rootfs import started:" << archivePath << "->" << destination;
 
     const qint64 archiveSize = QFileInfo(archivePath).size();
     qint64 approximateRead = 0;
@@ -367,6 +378,7 @@ bool RootfsManager::importBundledRootfs(const QString &archivePath,
         }
     }
     gzclose(archive);
+    qWarning() << "[ish-qt] rootfs import finished ok=" << ok << "rootSeen=" << rootSeen;
 
     if (ok && !rootSeen) {
         metadataPaths.append(QByteArray());

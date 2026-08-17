@@ -1,5 +1,7 @@
 #include "IshSession.h"
 
+#include <QDebug>
+
 IshSession::IshSession(QObject *parent)
     : QObject(parent),
       m_core(new CoreSession(this))
@@ -46,6 +48,7 @@ bool IshSession::start(const QString &rootPath,
     if (!m_core->start(m_rootPath, m_bootCommand, m_launchCommand))
         return false;
     setAlive(true);
+    qWarning() << "[ish-qt] IshSession::start SUCCEEDED alive=" << m_alive;
     return true;
 }
 
@@ -97,6 +100,7 @@ void IshSession::handleOutput(const QByteArray &bytes)
 
 void IshSession::handleState(int exitCode)
 {
+    qWarning() << "[ish-qt] IshSession::handleState exitCode=" << exitCode << "stopRequested=" << m_stopRequested;
     setAlive(false);
     if (!m_stopRequested && exitCode != 0)
         emit sessionError(QStringLiteral("iSH session ended with status %1").arg(exitCode));
@@ -112,5 +116,6 @@ void IshSession::setAlive(bool value)
     if (m_alive == value)
         return;
     m_alive = value;
+    qWarning() << "[ish-qt] IshSession aliveChanged:" << m_alive;
     emit aliveChanged(m_alive);
 }
