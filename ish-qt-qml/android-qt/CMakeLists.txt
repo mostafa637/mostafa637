@@ -237,25 +237,14 @@ target_compile_options(ish_core_session PRIVATE
 target_link_libraries(ish_core_session PUBLIC ish_kernel ish_emu ish_fakefs ish_sqlite Threads::Threads ZLIB::ZLIB)
 
 set(ISH_ASSET_QRC "${CMAKE_CURRENT_SOURCE_DIR}/assets/assets.qrc")
-set(ISH_ASSET_CPP "${CMAKE_CURRENT_BINARY_DIR}/qrc_assets.cpp")
+if(NOT EXISTS "${ISH_ASSET_QRC}")
+    message(FATAL_ERROR "Terminal asset catalog missing: ${ISH_ASSET_QRC}")
+endif()
+# Register the shared asset catalog (terminal HTML/JS/CSS, UI icons, iOS
 set(ISH_HOST_RCC "${QT_HOST_PATH}/libexec/rcc")
 if(NOT EXISTS "${ISH_HOST_RCC}")
     set(ISH_HOST_RCC "${QT_HOST_PATH}/bin/rcc")
 endif()
-if(NOT EXISTS "${ISH_HOST_RCC}")
-    get_filename_component(_qt_prefix "${Qt6Core_DIR}/../../.." ABSOLUTE)
-    set(ISH_HOST_RCC "${_qt_prefix}/libexec/rcc")
-endif()
-if(NOT EXISTS "${ISH_HOST_RCC}")
-    message(FATAL_ERROR "Unable to locate Qt resource compiler (rcc)")
-endif()
-add_custom_command(
-    OUTPUT "${ISH_ASSET_CPP}"
-    COMMAND "${ISH_HOST_RCC}" --no-zstd --name assets --output "${ISH_ASSET_CPP}" "${ISH_ASSET_QRC}"
-    DEPENDS "${ISH_ASSET_QRC}"
-    VERBATIM
-)
-set_source_files_properties("${ISH_ASSET_CPP}" PROPERTIES GENERATED TRUE)
 
 qt_add_executable(ish_qt_android
     src/main.cpp
@@ -284,7 +273,6 @@ qt_add_executable(ish_qt_android
     src/RootfsUpgradeController.cpp
     src/RootfsUpgradeController.h
 )
-target_sources(ish_qt_android PRIVATE "${ISH_ASSET_CPP}")
 target_include_directories(ish_qt_android PRIVATE
     "${ISH_SOURCE_DIR}/app/core"
     "${ISH_SOURCE_DIR}"
@@ -292,6 +280,14 @@ target_include_directories(ish_qt_android PRIVATE
 if(NOT ANDROID)
     target_sources(ish_qt_android PRIVATE "${ISH_SOURCE_DIR}/tools/fakefs.c")
 endif()
+
+# Register the shared asset catalog (terminal HTML/JS/CSS, UI icons, iOS
+# icons) through Qt's resource system so androiddeployqt includes the
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/assets/assets.qrc"
+    PROPERTIES QT_RESOURCE_ALIAS "assets.qrc")
+qt_add_resources(ish_qt_android "ish-assets"
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/assets.qrc"
+)
 
 target_link_libraries(ish_qt_android PRIVATE
     Qt6::Core
