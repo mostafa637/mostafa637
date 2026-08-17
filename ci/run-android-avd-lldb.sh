@@ -145,8 +145,28 @@ adb exec-out cat /sdcard/Android/data/com.mostafa637.ishqt/files/ish-qt-errors.l
 adb exec-out screencap -p > avd-linux-screenshot.png 2>/dev/null || true
 adb logcat -d -v threadtime > avd-linux-logcat.txt
 
-# Do not fail merely because LLDB observed a normal stop; fail for actual
-# native/runtime errors while retaining every diagnostic artifact.
+# Print a compact but complete-debugger summary into the Actions log so the
+# LLDB session can be reviewed without downloading the large screenshot zip.
+echo '=== LLDB lifecycle report ==='
+cat avd-linux-logcat/lldb-full-runtime.log || true
+echo '=== lldb-server report ==='
+cat avd-linux-logcat/lldb-server.log || true
+echo '=== iSH lifecycle markers ==='
+grep -E '\[ish-qt\]' avd-linux-logcat.txt | head -120 || true
+
+# Require a real platform attach and a normal LLDB session. A successful app
+# smoke test alone is not enough for this diagnostic job.
+if ! grep -q '=== LLDB session complete ===' avd-linux-logcat/lldb-full-runtime.log; then
+  echo 'LLDB did not complete its full lifecycle session.' >&2
+  exit 5
+fi
+if grep -E 'Connection shut down|PLEASE submit a bug report|segfault|error:.*failed' avd-linux-logcat/lldb-full-runtime.log avd-linux-logcat/lldb-server.log; then
+  echo 'LLDB reported an attach/server failure; see the full reports.' >&2
+  exit 6
+fi
+
+# Do not fail merely because the application emitted ordinary warnings; fail
+# for actual native/runtime errors while retaining every diagnostic artifact.
 if grep -E 'Fatal signal|SIG(SEGV|ABRT|FPE|ILL|BUS)|UnsatisfiedLinkError|QQmlApplicationEngine failed|module .* is not installed' avd-linux-logcat.txt; then
   echo 'Application startup/runtime errors detected; see complete LLDB and lifecycle logs.' >&2
   exit 4
