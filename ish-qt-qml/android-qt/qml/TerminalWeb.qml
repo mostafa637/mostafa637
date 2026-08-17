@@ -82,7 +82,11 @@ Item {
                         return "[page loaded: " + location.href + " | ws state: " + ws + "]";
                     } catch (e) { return "[page loaded, diagnostic failed: " + e + "]"; }
                 } + ")()", function(result) {
-                    if (result && result.length)
+                    // Only forward the diagnostic text if it really came from
+                    // the IIFE above; Qt WebView can return a stringified
+                    // "null" when the script evaluates to null, which would
+                    // otherwise be injected into the shell as a literal "null".
+                    if (typeof result === "string" && result.indexOf("[page loaded") === 0)
                         view.runJavaScript("window.ishSendInput ? window.ishSendInput(" + JSON.stringify("\r\n" + result + "\r\n") + ") : 0")
                 })
             } else if (loadRequest.status === WebView.LoadFailedStatus) {
