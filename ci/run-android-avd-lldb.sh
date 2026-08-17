@@ -92,7 +92,11 @@ echo "Android application pid=$pid"
 # Push a device-side LLDB server and attach without stopping the normal smoke
 # sequence. LLDB output is recorded for the whole interval, not only crashes.
 adb push "$lldb_server" /data/local/tmp/ish-lldb-server >/dev/null
-adb shell chmod 700 /data/local/tmp/ish-lldb-server
+# run-as requires the device-side binary to be readable/executable by the
+# debuggable application's UID; the server must share that UID to ptrace the
+# native Qt process on Android.
+adb shell chmod 755 /data/local/tmp/ish-lldb-server
+adb shell run-as com.mostafa637.ishqt id
 adb forward tcp:5039 tcp:5039
 # The platform server uses a second port for the per-process gdbserver.
 adb forward tcp:5040 tcp:5040
@@ -102,7 +106,7 @@ adb forward tcp:5040 tcp:5040
 # Keep the adb shell attached while the platform server is listening. The
 # official LLDB syntax uses '*:port'; detaching the remote shell can terminate
 # the server before the host-side LLDB connects.
-adb shell "/data/local/tmp/ish-lldb-server platform --listen '*:5039' --server --gdbserver-port 5040" > avd-linux-logcat/lldb-server.log 2>&1 &
+adb shell "run-as com.mostafa637.ishqt /data/local/tmp/ish-lldb-server platform --listen '*:5039' --server --gdbserver-port 5040" > avd-linux-logcat/lldb-server.log 2>&1 &
 server_pid=$!
 sleep 3
 adb shell ps -A | grep -F ish-lldb-server >> avd-linux-logcat/lldb-server.log 2>&1 || true
