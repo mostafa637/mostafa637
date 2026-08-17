@@ -314,7 +314,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager "ndk;27.2.12479018"
+          sdkmanager_bin="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -path '*/bin/sdkmanager' -print -quit 2>/dev/null || true)"
+          if [[ -z "$sdkmanager_bin" ]]; then
+            echo "sdkmanager was not found below $ANDROID_SDK_ROOT/cmdline-tools" >&2
+            exit 127
+          fi
+          "$sdkmanager_bin" "ndk;27.2.12479018"
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
           test -x "$ANDROID_SDK_ROOT/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/lldb.sh"
           test -f "$ANDROID_SDK_ROOT/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/x86_64/lldb-server"
