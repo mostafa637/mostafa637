@@ -3,6 +3,10 @@ window.onerror = function (message, source, lineno, colno, error) {
   if (node) node.textContent = '[JS ERROR] ' + String(message) + ' @ ' + String(source) + ':' + lineno + ':' + colno + '\r\n';
   return false;
 };
+function scriptLoadFailed(tag) {
+  var node = document.getElementById('jsError');
+  if (node) node.textContent = '[SCRIPT FAILED] ' + tag + '\r\n';
+}
 (function () {
   var output = document.getElementById('output');
   var terminal = document.getElementById('terminal');

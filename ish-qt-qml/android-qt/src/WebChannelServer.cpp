@@ -232,6 +232,7 @@ void WebChannelServer::sendHttpResponse(QTcpSocket *socket, int status,
     response += "Content-Type: " + contentType + "\r\n";
     response += "Content-Length: " + QByteArray::number(body.size()) + "\r\n";
     response += "Cache-Control: no-store\r\n";
+    response += "Access-Control-Allow-Origin: *\r\n";
     response += "Connection: close\r\n\r\n";
     response += body;
     socket->write(response);
