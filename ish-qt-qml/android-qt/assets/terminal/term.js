@@ -1,3 +1,8 @@
+window.onerror = function (message, source, lineno, colno, error) {
+  var node = document.getElementById('jsError');
+  if (node) node.textContent = '[JS ERROR] ' + String(message) + ' @ ' + String(source) + ':' + lineno + ':' + colno + '\r\n';
+  return false;
+};
 (function () {
   var output = document.getElementById('output');
   var terminal = document.getElementById('terminal');
