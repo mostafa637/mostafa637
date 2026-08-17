@@ -96,15 +96,10 @@ adb push "$lldb_server" /data/local/tmp/ish-lldb-server >/dev/null
 # binary directly from /data/local/tmp on this AVD image.
 adb shell "run-as com.mostafa637.ishqt sh -c 'cp /data/local/tmp/ish-lldb-server ./ish-lldb-server && chmod 700 ./ish-lldb-server && id'"
 adb forward tcp:5039 tcp:5039
-# The platform server uses a second port for the per-process gdbserver.
-adb forward tcp:5040 tcp:5040
-# Use platform mode instead of the direct gdbserver attach mode. On the NDK
-# shipped by the runner, direct `g --attach` can crash before the handshake;
-# platform mode lets the host LLDB perform the attach operation itself.
-# Keep the adb shell attached while the platform server is listening. The
-# official LLDB syntax uses '*:port'; detaching the remote shell can terminate
-# the server before the host-side LLDB connects.
-adb shell "run-as com.mostafa637.ishqt ./ish-lldb-server platform --listen '*:5039' --server --gdbserver-port 5040" > avd-linux-logcat/lldb-server.log 2>&1 &
+# Direct gdb-remote mode avoids the platform server's second-port launch,
+# which is unreliable on this AVD. Running it as the app UID still permits
+# ptrace of the debuggable Qt process.
+adb shell "run-as com.mostafa637.ishqt ./ish-lldb-server g '*:5039' --attach $pid" > avd-linux-logcat/lldb-server.log 2>&1 &
 server_pid=$!
 sleep 3
 adb shell "run-as com.mostafa637.ishqt ps -A | grep -F ish-lldb-server" >> avd-linux-logcat/lldb-server.log 2>&1 || true
@@ -113,9 +108,7 @@ adb shell "run-as com.mostafa637.ishqt ps -A | grep -F ish-lldb-server" >> avd-l
     echo '=== LLDB attach ==='
     echo 'process connect/attach: application pid='"$pid"
     timeout --signal=SIGINT 175s "$lldb" --batch \
-      -o 'platform select remote-android' \
-      -o 'platform connect connect://:5039' \
-      -o 'process attach --pid '"$pid" \
+      -o 'gdb-remote 5039' \
       -o 'process status' \
       -o 'thread list' \
       -o 'image list' \
@@ -155,14 +148,14 @@ adb logcat -d -v threadtime > avd-linux-logcat.txt
 
 # Print a compact but complete-debugger summary into the Actions log so the
 # LLDB session can be reviewed without downloading the large screenshot zip.
-echo '=== LLDB lifecycle report ==='
+echo '=== LLDB lifecycle report (gdb-remote) ==='
 cat avd-linux-logcat/lldb-full-runtime.log || true
 echo '=== lldb-server report ==='
 cat avd-linux-logcat/lldb-server.log || true
 echo '=== iSH lifecycle markers ==='
 grep -E '\[ish-qt\]' avd-linux-logcat.txt | head -120 || true
 
-# Require a real platform attach and a normal LLDB session. A successful app
+# Require a real gdb-remote attach and a normal LLDB session. A successful app
 # smoke test alone is not enough for this diagnostic job.
 if ! grep -q '=== LLDB session complete ===' avd-linux-logcat/lldb-full-runtime.log; then
   echo 'LLDB did not complete its full lifecycle session.' >&2
