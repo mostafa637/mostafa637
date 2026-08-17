@@ -110,10 +110,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build tooling
+      - name: Check build tooling
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build clang lld
+          command -v cmake
+          command -v ninja
+          command -v clang
+          command -v ld.lld
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
