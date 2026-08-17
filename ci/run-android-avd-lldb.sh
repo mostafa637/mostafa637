@@ -12,12 +12,22 @@ fi
 sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?ANDROID_SDK_ROOT is not set}}"
 ndk_root="${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME:-${sdk_root}/ndk/27.2.12479018}}"
 lldb_root="$ndk_root/toolchains/llvm/prebuilt/linux-x86_64"
-lldb="$(find "$lldb_root/bin" -maxdepth 1 -type f -name lldb -print -quit 2>/dev/null || true)"
-lldb_server="$(find "$lldb_root" -type f -name lldb-server -print -quit 2>/dev/null || true)"
+lldb=""
+if [[ -x "$lldb_root/bin/lldb.sh" ]]; then
+  lldb="$lldb_root/bin/lldb.sh"
+elif [[ -x "$lldb_root/bin/lldb" ]]; then
+  lldb="$lldb_root/bin/lldb"
+fi
+# The first lldb-server found in the NDK may be the host executable. For an
+# x86_64 AVD, use the Android target binary under lib64/clang/.../lib/linux/x86_64.
+lldb_server="$(find "$lldb_root/lib64/clang" -type f -path '*/lib/linux/x86_64/lldb-server' -print -quit 2>/dev/null || true)"
+if [[ -z "$lldb_server" ]]; then
+  lldb_server="$(find "$lldb_root/lib64/clang" -type f -path '*/lib/linux/i386/lldb-server' -print -quit 2>/dev/null || true)"
+fi
 
 if [[ -z "$lldb" || -z "$lldb_server" ]]; then
-  echo "Unable to find host lldb or device lldb-server under $lldb_root" >&2
-  find "$ndk_root/toolchains/llvm/prebuilt" -type f \( -name lldb -o -name lldb-server \) -print 2>/dev/null || true
+  echo "Unable to find compatible host lldb or Android x86_64 lldb-server under $lldb_root" >&2
+  find "$ndk_root/toolchains/llvm/prebuilt" -type f \( -name lldb.sh -o -name lldb-server \) -print 2>/dev/null || true
   exit 2
 fi
 
