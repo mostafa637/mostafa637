@@ -43,7 +43,11 @@
         }
       };
       socket.onerror = () => { markSessionConnected(); append('\r\n[WebSocket error]\r\n'); };
-      socket.onclose = () => append('\r\n[session closed]\r\n');
+      socket.onclose = event => {
+        markSessionConnected();
+        const code = event != null && typeof event.code === 'number' ? String(event.code) : '?';
+        append('\r\n[session closed: code=' + code + ']\r\n');
+      };
     } catch (error) { append('\r\n[connection error: ' + error + ']\r\n'); }
   }
 
@@ -86,10 +90,33 @@
   window.ishClear = () => { output.textContent = ''; };
   window.ishCopy = () => { const s = window.getSelection(); if (s) navigator.clipboard?.writeText(s.toString()); };
   window.ishConnect = connect;
+  window.ishWsDiagnostic = () => {
+    if (!socket) return "none";
+    const names = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"];
+    return names[socket.readyState] ?? String(socket.readyState);
+  };
 
   append('iSH Qt terminal\r\n');
-  append('Waiting for the native session…\r\n');
   terminal.focus();
   const query = new URLSearchParams(location.search);
-  if (query.get('ws')) connect(query.get('ws'));
+  const wsParam = query.get('ws');
+  if (wsParam) {
+    let attempts = 0;
+    let timer = null;
+    const retry = () => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        clearInterval(timer);
+        return;
+      }
+      attempts += 1;
+      connect(wsParam);
+      if (attempts >= 30) clearInterval(timer);
+    };
+    retry();
+    timer = setInterval(retry, 2000);
+    window.ishReconnect = () => { attempts = 0; retry(); };
+  } else {
+    append('Waiting for the native session…\r\n');
+    append('[no ws= parameter: loaded without session URL]\r\n');
+  }
 })();

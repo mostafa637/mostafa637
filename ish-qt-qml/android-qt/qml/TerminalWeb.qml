@@ -70,6 +70,21 @@ Item {
             if (loadRequest.status === WebView.LoadSucceededStatus) {
                 root.ready()
                 root.focusTerminal()
+                // Print diagnostic state visible in the terminal so AVD
+                // screenshots reveal why the session never becomes active.
+                view.runJavaScript("(" + function() {
+                    try {
+                        const ws = window.ishWsDiagnostic ? window.ishWsDiagnostic() : "not available";
+                        // If the WebSocket never opened, ask term.js to retry
+                        // connecting explicitly in case the first attempt raced
+                        // with the native session startup.
+                        if (window.ishReconnect && ws !== "OPEN") window.ishReconnect();
+                        return "[page loaded: " + location.href + " | ws state: " + ws + "]";
+                    } catch (e) { return "[page loaded, diagnostic failed: " + e + "]"; }
+                } + ")()", function(result) {
+                    if (result && result.length)
+                        view.runJavaScript("window.ishSendInput ? window.ishSendInput(" + JSON.stringify("\r\n" + result + "\r\n") + ") : 0")
+                })
             } else if (loadRequest.status === WebView.LoadFailedStatus) {
                 root.failed("WebView failed to load: " + loadRequest.errorString)
             }
