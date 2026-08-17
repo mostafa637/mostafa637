@@ -94,7 +94,10 @@ echo "Android application pid=$pid"
 adb push "$lldb_server" /data/local/tmp/ish-lldb-server >/dev/null
 adb shell chmod 700 /data/local/tmp/ish-lldb-server
 adb forward tcp:5039 tcp:5039
-adb shell "/data/local/tmp/ish-lldb-server g :5039 --attach $pid" > avd-linux-logcat/lldb-server.log 2>&1 &
+# Use platform mode instead of the direct gdbserver attach mode. On the NDK
+# shipped by the runner, direct `g --attach` can crash before the handshake;
+# platform mode lets the host LLDB perform the attach operation itself.
+adb shell "/data/local/tmp/ish-lldb-server platform --listen '*:5039' --server" > avd-linux-logcat/lldb-server.log 2>&1 &
 server_pid=$!
 sleep 2
 (
@@ -102,7 +105,9 @@ sleep 2
     echo '=== LLDB attach ==='
     echo 'process connect/attach: application pid='"$pid"
     timeout --signal=SIGINT 175s "$lldb" --batch \
-      -o 'gdb-remote 127.0.0.1:5039' \
+      -o 'platform select remote-android' \
+      -o 'platform connect connect://127.0.0.1:5039' \
+      -o 'process attach --pid '"$pid" \
       -o 'process status' \
       -o 'thread list' \
       -o 'image list' \
