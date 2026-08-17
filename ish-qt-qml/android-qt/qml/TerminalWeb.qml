@@ -72,22 +72,18 @@ Item {
                 root.focusTerminal()
                 // Print diagnostic state visible in the terminal so AVD
                 // screenshots reveal why the session never becomes active.
-                view.runJavaScript("(" + function() {
-                    try {
-                        var ws = window.ishWsDiagnostic ? window.ishWsDiagnostic() : "not available";
-                        // If the WebSocket never opened, ask term.js to retry
-                        // connecting explicitly in case the first attempt raced
-                        // with the native session startup.
-                        if (window.ishReconnect && ws !== "OPEN") window.ishReconnect();
-                        return "[page loaded: " + location.href + " | ws state: " + ws + "]";
-                    } catch (e) { return "[page loaded, diagnostic failed: " + e + "]"; }
-                } + ")()", function(result) {
-                    // Only forward the diagnostic text if it really came from
-                    // the IIFE above; Qt WebView can return a stringified
-                    // "null" when the script evaluates to null, which would
-                    // otherwise be injected into the shell as a literal "null".
-                    if (typeof result === "string" && result.indexOf("[page loaded") === 0)
-                        view.runJavaScript("window.ishSendInput ? window.ishSendInput(" + JSON.stringify("\r\n" + result + "\r\n") + ") : 0")
+                // Use only flat, single-statement scripts (no injected
+                // function expressions) because older embedded WebViews can
+                // fail to parse injected IIFE text as inline scripts.
+                var wsState = "none"
+                view.runJavaScript("(window.ishWsDiagnostic ? window.ishWsDiagnostic() : 'none')", function(r) {
+                    if (typeof r === "string") wsState = r
+                })
+                Qt.callLater(function() {
+                    if (wsState !== "OPEN")
+                        view.runJavaScript("(window.ishReconnect ? window.ishReconnect() : undefined)")
+                    var diag = "[page loaded | ws state: " + wsState + "]"
+                    view.runJavaScript("(window.ishSendInput ? window.ishSendInput(" + JSON.stringify("\r\n" + diag + "\r\n") + ") : undefined)")
                 })
             } else if (loadRequest.status === WebView.LoadFailedStatus) {
                 root.failed("WebView failed to load: " + loadRequest.errorString)
