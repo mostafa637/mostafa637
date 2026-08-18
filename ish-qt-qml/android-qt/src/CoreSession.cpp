@@ -238,8 +238,14 @@ qint64 CoreSession::write(const QByteArray &bytes)
 {
     if (m_session == nullptr || bytes.isEmpty() || !m_running)
         return 0;
+
+    // The portable Qt transport feeds the core through a pipe rather than a
+    // kernel pseudo-terminal. Normalize Return from WebView/iOS-style input
+    // (CR) to LF so /bin/sh actually completes the command line.
+    QByteArray normalized = bytes;
+    normalized.replace('\r', '\n');
     return static_cast<qint64>(ish_core_session_write(
-        m_session, bytes.constData(), static_cast<size_t>(bytes.size())));
+        m_session, normalized.constData(), static_cast<size_t>(normalized.size())));
 }
 
 void CoreSession::resize(int columns, int rows)
