@@ -74,18 +74,6 @@ Item {
     function clearScrollback() { view.runJavaScript("window.ishClear && window.ishClear()") }
     function copySelection() { view.runJavaScript("window.ishCopy && window.ishCopy()") }
 
-    Timer {
-        id: uiActionPoll
-        interval: 250
-        repeat: true
-        running: root.htmlKeyboardEnabled && root.pageUrl.toString().length > 0
-        onTriggered: view.runJavaScript("window.ishConsumeUiAction ? window.ishConsumeUiAction() : ''",
-                                        function(result) {
-                                            if (String(result || "") === "settings")
-                                                root.settingsRequested()
-                                        })
-    }
-
     WebView {
         id: view
         anchors.fill: parent
@@ -93,24 +81,22 @@ Item {
         focus: true
         onLoadingChanged: function(loadRequest) {
             if (loadRequest.status === WebView.LoadSucceededStatus) {
+                // Keep the WebView lifecycle one-way.  Qt WebView callbacks
+                // scheduled from QML can outlive the Chromium surface on
+                // Android and trigger a QV4 property-lookup crash.
                 root.ready()
                 root.focusTerminal()
                 root.setVirtualKeyboardVisible(true)
-                // Print diagnostic state visible in the terminal so AVD
-                // screenshots reveal why the session never becomes active.
-                var wsState = "none"
-                view.runJavaScript("(window.ishWsDiagnostic ? window.ishWsDiagnostic() : 'none')", function(r) {
-                    if (typeof r === "string") wsState = r
-                })
-                Qt.callLater(function() {
-                    if (wsState !== "OPEN")
-                        view.runJavaScript("(window.ishReconnect ? window.ishReconnect() : undefined)")
-                    var diag = "[page loaded | ws state: " + wsState + "]"
-                    view.runJavaScript("(window.ishSendInput ? window.ishSendInput(" + JSON.stringify("\r\n" + diag + "\r\n") + ") : undefined)")
-                })
             } else if (loadRequest.status === WebView.LoadFailedStatus) {
                 root.failed("WebView failed to load: " + loadRequest.errorString)
             }
+        }
+        onTitleChanged: {
+            // HTML toolbar actions cross the WebView boundary through the
+            // title property.  This is synchronous and one-shot, unlike the
+            // old runJavaScript polling callback that could outlive WebView.
+            if (title.indexOf("ish-settings:") === 0)
+                root.settingsRequested()
         }
     }
 }

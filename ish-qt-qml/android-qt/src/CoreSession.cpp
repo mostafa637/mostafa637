@@ -131,6 +131,8 @@ bool CoreSession::start(const QString &rootPath,
         stop();
     destroyCore();
     m_pendingOutputLine.clear();
+    m_probeOutput.clear();
+    m_pythonProbeReported = false;
 
     if (rootPath.isEmpty()) {
         qWarning() << "[ish-qt] CoreSession::start FAILED: rootfs path is empty";
@@ -276,6 +278,24 @@ void CoreSession::handleOutput(const QByteArray &bytes)
     if (bytes.isEmpty())
         return;
     qWarning() << "[ish-qt] CoreSession::handleOutput bytes=" << bytes.size();
+
+    // The AVD smoke test sends `python3 --version` after installing the
+    // package.  Output is delivered in arbitrary chunks, so retain a small
+    // bounded probe buffer and emit a log marker only after the shell has
+    // actually produced a Python version (or an explicit not-found result).
+    if (!m_pythonProbeReported) {
+        m_probeOutput += bytes;
+        if (m_probeOutput.size() > 8192)
+            m_probeOutput.remove(0, m_probeOutput.size() - 8192);
+        if (m_probeOutput.contains("Python 3.")) {
+            qWarning() << "[ish-qt] APK_PYTHON_VERSION=PASS";
+            m_pythonProbeReported = true;
+        } else if (m_probeOutput.contains("python3: not found") ||
+                   m_probeOutput.contains("python3: not found\\r")) {
+            qWarning() << "[ish-qt] APK_PYTHON_VERSION=FAIL";
+            m_pythonProbeReported = true;
+        }
+    }
 
     // Chromium/QtWebEngine prints repetitive diagnostic lines to the process
     // stderr (e.g. `[mmdd/hhmmss.xxx:ERROR:third_party/crashpad/...]` or GLES

@@ -40,9 +40,30 @@ fi
 
 "$sdk_root/build-tools/36.0.0/apksigner" verify "$apk"
 adb install -r "$apk"
-adb shell am force-stop com.mostafa637.ishqt || true
+app_id='com.mostafa637.ishqt'
+activity_component="$(adb shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER "$app_id" 2>/dev/null | tr -d '\r' | grep -E "^${app_id}/" | tail -n 1 || true)"
+if [[ -z "$activity_component" ]]; then
+  echo "Unable to resolve launcher activity for $app_id" >&2
+  exit 3
+fi
+adb shell am force-stop "$app_id" || true
 adb logcat -c
-adb shell monkey -p com.mostafa637.ishqt 1
+adb shell am start -W -n "$activity_component" | tee avd-launch.txt
+
+app_is_foreground() {
+  adb shell dumpsys activity activities 2>/dev/null \
+    | grep -E 'mResumedActivity|topResumedActivity' \
+    | grep -Fq "$app_id"
+}
+wait_for_foreground() {
+  for _ in $(seq 1 30); do
+    if app_is_foreground; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
 
 mkdir -p avd-linux-captures avd-linux-ui avd-linux-logcat
 adb logcat -v threadtime > avd-linux-logcat/full-runtime.log 2>&1 &
@@ -88,6 +109,12 @@ if [[ -z "$pid" ]]; then
   exit 3
 fi
 echo "Android application pid=$pid"
+if ! wait_for_foreground; then
+  echo "Application process started but its activity is not foreground" >&2
+  adb shell dumpsys activity activities >&2 || true
+  exit 3
+fi
+echo "Android activity foreground: $activity_component"
 
 # Push a device-side LLDB server and attach without stopping the normal smoke
 # sequence. LLDB output is recorded for the whole interval, not only crashes.
@@ -127,10 +154,16 @@ lldb_pid=$!
 # Allow the UI and WebView to initialize, then run the same user-level command
 # used by the smoke test while LLDB and the lifecycle capture continue running.
 sleep 15
+if ! wait_for_foreground; then
+  echo "Application lost foreground before command injection" >&2
+  adb shell dumpsys activity activities >&2 || true
+  exit 3
+fi
 adb shell input tap 420 520 || true
 sleep 1
-# Android `input text` treats punctuation/encoding differently across API images;
-# type each token separately and insert real spaces with KEYCODE_SPACE.
+# Android input text encoding differs across API images. Type each token
+# separately and insert real spaces with key events, so no literal `%s` can
+# reach the Alpine shell.
 adb shell input text apk || true
 adb shell input keyevent KEYCODE_SPACE || true
 adb shell input text add || true
@@ -138,6 +171,15 @@ adb shell input keyevent KEYCODE_SPACE || true
 adb shell input text python3 || true
 adb shell input keyevent KEYCODE_ENTER || true
 echo 'Sent command: apk add python3'
+# Wait for apk to finish, then execute a second command whose output is
+# unambiguous. CoreSession emits APK_PYTHON_VERSION=PASS only after it receives
+# the real `Python 3.x` output from the shell.
+sleep 8
+adb shell input text python3 || true
+adb shell input keyevent KEYCODE_SPACE || true
+adb shell input text --version || true
+adb shell input keyevent KEYCODE_ENTER || true
+echo 'Sent command: python3 --version'
 
 # Keep monitoring until the full interval completes, including activity state
 # and crash buffer, even if the process exits or LLDB detaches early.
@@ -179,5 +221,16 @@ if grep -E 'Fatal signal|SIG(SEGV|ABRT|FPE|ILL|BUS)|UnsatisfiedLinkError|QQmlApp
   echo 'Application startup/runtime errors detected; see complete LLDB and lifecycle logs.' >&2
   exit 4
 fi
+if ! app_is_foreground; then
+  echo 'Application is no longer foreground at the end of the lifecycle capture.' >&2
+  adb shell dumpsys activity activities >&2 || true
+  exit 7
+fi
+if ! grep -q 'APK_PYTHON_VERSION=PASS' avd-linux-logcat.txt; then
+  echo 'python3 --version did not produce a PASS marker from the native shell.' >&2
+  grep -E 'APK_PYTHON_VERSION|Python 3|python3: not found' avd-linux-logcat.txt >&2 || true
+  exit 8
+fi
 
+echo 'APK_PYTHON_VERSION=PASS'
 echo 'ANDROID_LLDB_FULL_RUNTIME=PASS'

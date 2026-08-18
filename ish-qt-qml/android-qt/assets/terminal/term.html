@@ -60,7 +60,11 @@ function scriptLoadFailed(tag) {
   var keyboardState = { shifted: false, symbols: false, control: false, visible: true };
   var pendingUiAction = '';
 
-  function queueUiAction(action) { pendingUiAction = action || ''; }
+  function queueUiAction(action) {
+    pendingUiAction = action || '';
+    if (pendingUiAction === 'settings')
+      document.title = 'ish-settings:' + Date.now();
+  }
   window.ishConsumeUiAction = function () {
     var action = pendingUiAction;
     pendingUiAction = '';

@@ -49,4 +49,6 @@ private:
     IshCoreSession *m_session = nullptr;
     bool m_running = false;
     QByteArray m_pendingOutputLine;
+    QByteArray m_probeOutput;
+    bool m_pythonProbeReported = false;
 };
