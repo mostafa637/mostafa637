@@ -14,8 +14,6 @@
 #include <csignal>
 #include <QGuiApplication>
 #include <QProcessEnvironment>
-#include <QQuickWindow>
-#include <QSGRendererInterface>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QUrl>
@@ -52,13 +50,6 @@ int main(int argc, char *argv[])
     // Qt WebView must be initialized before QGuiApplication, especially on Android.
     QtWebView::initialize();
     suppressChromiumDiagnostics();
-#ifdef Q_OS_ANDROID
-    // The Android emulator/older GPU drivers can corrupt clipped Qt Quick
-    // batches into large gray triangles. The terminal UI is lightweight, and
-    // the WebView has its own renderer, so use Qt Quick's software backend for
-    // deterministic keyboard/tool-bar rendering on Android.
-    QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
-#endif
     // The iSH kernel runs as a pthread inside the Qt process. With the
     // default SIGINT disposition, Ctrl+C (or an inherited SIGINT) would be
     // delivered to the kernel thread, whose signal path dereferences an

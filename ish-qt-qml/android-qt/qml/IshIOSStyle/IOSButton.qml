@@ -17,9 +17,12 @@ Controls.Button {
         elide: Text.ElideRight
     }
     background: Rectangle {
-        radius: IOSMetrics.controlCornerRadius
+        // Rounded clipped batches are corrupted by some Android emulator RHI
+        // configurations; use flat controls there while preserving iOS styling
+        // on desktop and other platforms.
+        radius: Qt.platform.os === "android" ? 0 : IOSMetrics.controlCornerRadius
         color: control.pressed ? IOSPalette.separator(control.styleWindowColor) : IOSPalette.elevatedSurface(control.styleWindowColor)
-        border.width: 1
+        border.width: Qt.platform.os === "android" ? 0 : 1
         border.color: IOSPalette.separator(control.styleWindowColor)
         opacity: control.enabled ? 1 : .55
     }

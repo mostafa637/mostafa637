@@ -30,10 +30,11 @@ Rectangle {
 
     implicitHeight: 286
     color: panelColor
-    // Keep children inside the iOS-style keyboard panel. On Android the
-    // application selects Qt Quick's software backend before QML is loaded,
-    // avoiding the emulator RHI clipping corruption seen with this panel.
-    clip: true
+    // Keys are laid out wholly inside the panel. Avoid a clipped scenegraph
+    // batch on Android; the emulator's RHI can turn clipped rounded delegates
+    // into gray triangles.
+    clip: false
+    property bool flatAndroidDecorations: Qt.platform.os === "android"
 
     function unitWidth() {
         return Math.max(20, (width - panelPadding * 2 - keyGap * 9) / 10)
@@ -60,9 +61,9 @@ Rectangle {
         signal activated()
         property bool pressedState: false
 
-        radius: 7
+        radius: root.flatAndroidDecorations ? 0 : 7
         color: pressedState ? root.pressedKeyColor : (special ? root.specialKeyColor : root.keyColor)
-        border.width: 1
+        border.width: root.flatAndroidDecorations ? 0 : 1
         border.color: root.darkMode ? "#6d6d70" : "#c7c7cc"
         opacity: enabled ? 1.0 : 0.65
 
