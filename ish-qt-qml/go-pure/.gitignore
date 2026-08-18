@@ -1,0 +1,16 @@
+bin/
+*.apk
+*.aab
+*.so
+*.aar
+
+# Go and IDE output
+*.test
+*.out
+coverage.out
+.vscode/
+.idea/
+
+# Local caches and generated files
+.gocache/
+.gomodcache/
