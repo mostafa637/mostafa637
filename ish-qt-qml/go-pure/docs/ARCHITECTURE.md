@@ -12,7 +12,7 @@
 | `internal/terminal` | نموذج الشاشة، parser adapter، الألوان، cursor، resize | لا يملك process lifecycle |
 | `internal/session` | عقدة جلسة عامة للكتابة والقراءة وresize والإغلاق | لا يعرف تفاصيل Gio |
 | `internal/platform` | تنفيذ PTY الخاص بالمنصة | لا يحتوي عناصر UI |
-| `internal/core` | نقطة فصل مستقبلية لربط iSH C core عبر cgo أو backend آخر | لا يخلط C مع renderer |
+| `internal/core` | إعادة كتابة iSH core تدريجيًا في Go، وتشمل storage وfakefs وCPU/emu/FPU وsession | لا يخلط core مع renderer ولا يستخدم CGo |
 | `assets` | الأيقونات والموارد المرئية | لا يحتوي كود تشغيل |
 | `tests` | اختبارات التكامل والـ smoke | لا يعتمد على ملفات build مولدة |
 
@@ -40,7 +40,7 @@ internal/session
 
 ## قرار iSH core
 
-إعادة كتابة الواجهة Pure Go لا تعني إعادة كتابة محرك iSH C في Go. في المرحلة الأولى يُحافظ على iSH C core خلف واجهة `internal/core`. يمكن لاحقًا توفير backend محلي أو backend cgo، دون تغيير Gio أو gritty أو session API.
+هذا الفرع مخصص لإعادة كتابة iSH core في Go، وليس مجرد adapter لـC. بدأ النقل بطبقة التخزين المتوافقة مع fakefs وبحد FPU 80-bit المعزول داخل `internal/core/emu/fpu`. تبقى نسخة C في مجلد `upstream` مرجعًا للمقارنة والاختبارات، لكنها ليست اعتمادًا للبناء. لا يجوز إدخال CGo إلى `go-pure`; أما فرع Qt/QML فيبقى مستقلًا ولا يتأثر بهذا القرار.
 
 ## قواعد التنظيم
 
