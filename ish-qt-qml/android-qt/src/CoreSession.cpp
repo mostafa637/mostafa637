@@ -281,9 +281,11 @@ void CoreSession::handleOutput(const QByteArray &bytes)
         if (m_probeOutput.size() > 8192)
             m_probeOutput.remove(0, m_probeOutput.size() - 8192);
         if (m_probeOutput.contains("Python 3.")) {
+            qWarning() << "[ish-qt] APK_PYTHON_VERSION=PASS";
             m_pythonProbeReported = true;
         } else if (m_probeOutput.contains("python3: not found") ||
                    m_probeOutput.contains("python3: not found\\r")) {
+            qWarning() << "[ish-qt] APK_PYTHON_VERSION=FAIL";
             m_pythonProbeReported = true;
         }
     }
