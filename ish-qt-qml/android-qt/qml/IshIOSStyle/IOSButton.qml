@@ -21,6 +21,8 @@ Controls.Button {
         // configurations; use flat controls there while preserving iOS styling
         // on desktop and other platforms.
         radius: Qt.platform.os === "android" ? 0 : IOSMetrics.controlCornerRadius
+        layer.enabled: Qt.platform.os === "android"
+        layer.smooth: true
         color: control.pressed ? IOSPalette.separator(control.styleWindowColor) : IOSPalette.elevatedSurface(control.styleWindowColor)
         border.width: Qt.platform.os === "android" ? 0 : 1
         border.color: IOSPalette.separator(control.styleWindowColor)

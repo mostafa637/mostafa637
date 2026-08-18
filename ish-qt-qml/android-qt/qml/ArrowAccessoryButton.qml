@@ -19,6 +19,8 @@ Rectangle {
     implicitWidth: root.buttonSize
     implicitHeight: root.buttonSize
     radius: Qt.platform.os === "android" ? 0 : 9
+    layer.enabled: Qt.platform.os === "android"
+    layer.smooth: true
     color: root.selected ? root.pressedColor : root.normalColor
 
     function sequenceFor(value) {

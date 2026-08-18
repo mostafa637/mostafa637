@@ -717,6 +717,8 @@ ApplicationWindow {
                     }
                     background: Rectangle {
                         radius: Qt.platform.os === "android" ? 0 : 9
+                        layer.enabled: Qt.platform.os === "android"
+                        layer.smooth: true
                         color: accessoryButton.pressed || accessoryButton.checked
                                ? (window.isDarkColor(window.terminalBackground()) ? "#666666" : "#b8b8bd")
                                : (window.isDarkColor(window.terminalBackground()) ? "#555555" : "#f2f2f7")

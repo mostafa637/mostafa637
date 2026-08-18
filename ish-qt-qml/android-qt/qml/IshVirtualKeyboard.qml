@@ -62,6 +62,8 @@ Rectangle {
         property bool pressedState: false
 
         radius: root.flatAndroidDecorations ? 0 : 7
+        layer.enabled: root.flatAndroidDecorations
+        layer.smooth: true
         color: pressedState ? root.pressedKeyColor : (special ? root.specialKeyColor : root.keyColor)
         border.width: root.flatAndroidDecorations ? 0 : 1
         border.color: root.darkMode ? "#6d6d70" : "#c7c7cc"
