@@ -159,37 +159,22 @@ if ! wait_for_foreground; then
   adb shell dumpsys activity activities >&2 || true
   exit 3
 fi
-adb shell input tap 420 520 || true
-sleep 1
-# Send actual Android key events so the WebView's keydown listener receives
-# the command. `adb shell input text` is not reliable for a custom HTML
-# terminal and previously leaked literal `%s` tokens into /bin/sh.
-send_key_sequence() {
-  local text="$1"
-  local i ch key
-  for ((i = 0; i < ${#text}; i++)); do
-    ch="${text:i:1}"
-    case "$ch" in
-      ' ') key=KEYCODE_SPACE ;;
-      '-') key=KEYCODE_MINUS ;;
-      [a-z]) key="KEYCODE_${ch^^}" ;;
-      [A-Z]) key="KEYCODE_${ch}" ;;
-      [0-9]) key="KEYCODE_${ch}" ;;
-      *) echo "Unsupported smoke-test character: $ch" >&2; return 1 ;;
-    esac
-    adb shell input keyevent "$key" || return 1
-  done
-}
-send_key_sequence 'apk add python3'
-adb shell input keyevent KEYCODE_ENTER || true
-echo 'Sent command: apk add python3'
-# Allow apk repository/network work to complete, then execute a second command
-# whose output is unambiguous. CoreSession emits APK_PYTHON_VERSION=PASS only
-# after it receives the real `Python 3.x` output from the shell.
-sleep 30
-send_key_sequence 'python3 --version'
-adb shell input keyevent KEYCODE_ENTER || true
-echo 'Sent command: python3 --version'
+# Use the same localhost WebSocket transport as the terminal page, but through
+# an adb forward. This exercises WebChannelServer -> IshSession -> CoreSession
+# directly and avoids focus/IME races in Chromium and Android key injection.
+ws_port=""
+for _ in $(seq 1 30); do
+  ws_port="$(sed -n 's/.*ws= *"ws:\/\/127\.0\.0\.1:\([0-9][0-9]*\)".*/\1/p' avd-linux-logcat/full-runtime.log | tail -n 1)"
+  [[ -n "$ws_port" ]] && break
+  sleep 1
+done
+if [[ -z "$ws_port" ]]; then
+  echo 'WebSocketServer port was not reported by the application.' >&2
+  exit 3
+fi
+adb forward tcp:47111 "tcp:${ws_port}"
+python3 ci/send-websocket-input.py 47111 'apk add python3' 'python3 --version' 30
+echo 'Sent commands through the native WebSocket transport'
 
 # Keep monitoring until the full interval completes, including activity state
 # and crash buffer, even if the process exits or LLDB detaches early.
