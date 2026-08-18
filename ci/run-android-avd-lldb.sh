@@ -161,23 +161,33 @@ if ! wait_for_foreground; then
 fi
 adb shell input tap 420 520 || true
 sleep 1
-# Android input text encoding differs across API images. Type each token
-# separately and insert real spaces with key events, so no literal `%s` can
-# reach the Alpine shell.
-adb shell input text apk || true
-adb shell input keyevent KEYCODE_SPACE || true
-adb shell input text add || true
-adb shell input keyevent KEYCODE_SPACE || true
-adb shell input text python3 || true
+# Send actual Android key events so the WebView's keydown listener receives
+# the command. `adb shell input text` is not reliable for a custom HTML
+# terminal and previously leaked literal `%s` tokens into /bin/sh.
+send_key_sequence() {
+  local text="$1"
+  local i ch key
+  for ((i = 0; i < ${#text}; i++)); do
+    ch="${text:i:1}"
+    case "$ch" in
+      ' ') key=KEYCODE_SPACE ;;
+      '-') key=KEYCODE_MINUS ;;
+      [a-z]) key="KEYCODE_${ch^^}" ;;
+      [A-Z]) key="KEYCODE_${ch}" ;;
+      [0-9]) key="KEYCODE_${ch}" ;;
+      *) echo "Unsupported smoke-test character: $ch" >&2; return 1 ;;
+    esac
+    adb shell input keyevent "$key" || return 1
+  done
+}
+send_key_sequence 'apk add python3'
 adb shell input keyevent KEYCODE_ENTER || true
 echo 'Sent command: apk add python3'
-# Wait for apk to finish, then execute a second command whose output is
-# unambiguous. CoreSession emits APK_PYTHON_VERSION=PASS only after it receives
-# the real `Python 3.x` output from the shell.
-sleep 8
-adb shell input text python3 || true
-adb shell input keyevent KEYCODE_SPACE || true
-adb shell input text --version || true
+# Allow apk repository/network work to complete, then execute a second command
+# whose output is unambiguous. CoreSession emits APK_PYTHON_VERSION=PASS only
+# after it receives the real `Python 3.x` output from the shell.
+sleep 30
+send_key_sequence 'python3 --version'
 adb shell input keyevent KEYCODE_ENTER || true
 echo 'Sent command: python3 --version'
 
