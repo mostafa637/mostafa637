@@ -26,8 +26,8 @@ ApplicationWindow {
     // repeatedly; log diagnostics instead of spinning the event loop.
     property int consecutiveRestarts: 0
     property bool externalKeyboardActive: false
-    // Android uses the bundled iSH-style QML keyboard instead of the system IME.
-    // Keep it visible by default, matching iSH iOS after the terminal becomes first responder.
+    // Android renders the iSH-style keyboard inside the WebView; non-WebView
+    // terminal paths retain the QML keyboard implementation below.
     property bool virtualKeyboardVisible: Qt.platform.os === "android"
     property bool wideAccessory: width >= 700
     // Terminal.storyboard: 50pt accessory stack, 31pt buttons, 6pt outer inset.
@@ -142,10 +142,12 @@ ApplicationWindow {
             return
         }
         window.virtualKeyboardVisible = !window.virtualKeyboardVisible
-        // The WebView terminal is not an editable text control, but explicitly
-        // hide the platform IME so the bundled QML keyboard owns the layout.
+        // On Android the keyboard is rendered inside the WebView so it shares
+        // one composited surface with the terminal and cannot corrupt Qt Quick.
         Qt.inputMethod.hide()
         const item = terminalLoader.item
+        if (item && item.setVirtualKeyboardVisible)
+            item.setVirtualKeyboardVisible(window.virtualKeyboardVisible)
         if (item && item.focusTerminal)
             item.focusTerminal()
     }
@@ -359,6 +361,9 @@ ApplicationWindow {
 
             Connections {
                 target: terminalLoader.item
+                function onSettingsRequested() {
+                    window.settingsVisible = true
+                }
                 function onReady() {
                     window.pageReady = true
                     window.startSession()
@@ -644,12 +649,14 @@ ApplicationWindow {
             }
         }
 
-        Rectangle {
-            id: accessoryBar
-            Layout.fillWidth: true
-            Layout.preferredHeight: window.accessoryHeight
-            visible: !window.settingsVisible &&
-                     !(preferences.hideExtraKeysWithExternalKeyboard && window.externalKeyboardActive)
+                    Rectangle {
+                id: accessoryBar
+                Layout.fillWidth: true
+                Layout.preferredHeight: window.accessoryHeight
+                visible: !window.settingsVisible &&
+                         !window.useWebTerminal &&
+                         !(preferences.hideExtraKeysWithExternalKeyboard && window.externalKeyboardActive)
+
             color: window.accessoryBackground
 
                             RowLayout {
@@ -839,7 +846,7 @@ ApplicationWindow {
             Layout.preferredHeight: visible
                                          ? Math.min(310, Math.max(226, window.width * 0.58))
                                          : 0
-            visible: window.useWebTerminal && window.virtualKeyboardVisible && !window.settingsVisible
+            visible: !window.useWebTerminal && window.virtualKeyboardVisible && !window.settingsVisible
             darkMode: window.accessoryDarkMode
             onInputRequested: function(value) { window.sendAccessoryInput(value) }
         }

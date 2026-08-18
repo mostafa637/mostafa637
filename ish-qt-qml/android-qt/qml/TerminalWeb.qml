@@ -4,11 +4,14 @@ import IshQt
 
 Item {
     id: root
+
     property var terminalStyle: ({})
     property url pageUrl: ""
     property bool controlModifier: false
     signal ready()
     signal failed(string message)
+    signal settingsRequested()
+    property bool htmlKeyboardEnabled: Qt.platform.os === "android"
 
     function loadPage(url) {
         if (!url || String(url).length === 0) {
@@ -38,6 +41,15 @@ Item {
 
     function setControlModifier(active) {
         root.controlModifier = Boolean(active)
+        view.runJavaScript("window.ishSetControlModifier && window.ishSetControlModifier(" +
+                           JSON.stringify(root.controlModifier) + ")")
+    }
+
+    function setVirtualKeyboardVisible(visible) {
+        if (!root.htmlKeyboardEnabled)
+            return
+        view.runJavaScript("window.ishSetVirtualKeyboardVisible && window.ishSetVirtualKeyboardVisible(" +
+                           JSON.stringify(Boolean(visible)) + ")")
     }
 
     function sendAccessoryInput(value) {
@@ -53,6 +65,7 @@ Item {
         view.runJavaScript("window.ishSendInput && window.ishSendInput(" + JSON.stringify(input) + ")")
         root.focusTerminal()
     }
+
     function paste() { view.runJavaScript("window.ishPaste && window.ishPaste()") }
     function hideKeyboard() { Qt.inputMethod.hide() }
     function increaseFontSize() { view.runJavaScript("window.ishFontStep && window.ishFontStep(1)") }
@@ -60,6 +73,18 @@ Item {
     function resetFontSize() { view.runJavaScript("window.ishFontReset && window.ishFontReset()") }
     function clearScrollback() { view.runJavaScript("window.ishClear && window.ishClear()") }
     function copySelection() { view.runJavaScript("window.ishCopy && window.ishCopy()") }
+
+    Timer {
+        id: uiActionPoll
+        interval: 250
+        repeat: true
+        running: root.htmlKeyboardEnabled && root.pageUrl.toString().length > 0
+        onTriggered: view.runJavaScript("window.ishConsumeUiAction ? window.ishConsumeUiAction() : ''",
+                                        function(result) {
+                                            if (String(result || "") === "settings")
+                                                root.settingsRequested()
+                                        })
+    }
 
     WebView {
         id: view
@@ -70,11 +95,9 @@ Item {
             if (loadRequest.status === WebView.LoadSucceededStatus) {
                 root.ready()
                 root.focusTerminal()
+                root.setVirtualKeyboardVisible(true)
                 // Print diagnostic state visible in the terminal so AVD
                 // screenshots reveal why the session never becomes active.
-                // Use only flat, single-statement scripts (no injected
-                // function expressions) because older embedded WebViews can
-                // fail to parse injected IIFE text as inline scripts.
                 var wsState = "none"
                 view.runJavaScript("(window.ishWsDiagnostic ? window.ishWsDiagnostic() : 'none')", function(r) {
                     if (typeof r === "string") wsState = r

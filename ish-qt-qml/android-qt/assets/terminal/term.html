@@ -10,8 +10,12 @@
   <main id="terminal" tabindex="0" aria-label="iSH terminal">
     <pre id="jsError" style="color:#ff5252;"></pre><pre id="output"></pre><span id="cursor">▌</span>
   </main>
-  
-  
+
+  <section id="iosSurface" aria-label="iSH keyboard and accessory">
+    <div id="iosAccessory" class="ios-accessory"></div>
+    <div id="iosKeyboard" aria-label="iSH virtual keyboard"></div>
+  </section>
+
 <script>
 (function(global) {
   'use strict';
@@ -53,6 +57,134 @@ function scriptLoadFailed(tag) {
   var fontSize = 14;
   var waitingForSession = true;
   var decoder = new TextDecoder('utf-8', { fatal: false });
+  var keyboardState = { shifted: false, symbols: false, control: false, visible: true };
+  var pendingUiAction = '';
+
+  function queueUiAction(action) { pendingUiAction = action || ''; }
+  window.ishConsumeUiAction = function () {
+    var action = pendingUiAction;
+    pendingUiAction = '';
+    return action;
+  };
+
+  function keyboardSend(value) {
+    if (!value) return;
+    if (keyboardState.control && value.length === 1) {
+      var control = controlCharacter(value);
+      if (control) value = control;
+      keyboardState.control = false;
+    }
+    send(value);
+  }
+
+  function makeKey(parent, label, action, value, special, className) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ios-key' + (special ? ' special' : '') + (className ? ' ' + className : '');
+    button.textContent = label;
+    button.dataset.action = action || '';
+    if (value !== undefined) button.dataset.value = value;
+    parent.appendChild(button);
+    return button;
+  }
+
+  function makeRow(className, values, specialIndex) {
+    var row = document.createElement('div');
+    row.className = 'ios-row ' + className;
+    values.forEach(function (item, index) {
+      makeKey(row, item.label, item.action || 'key', item.value,
+              specialIndex && specialIndex.indexOf(index) >= 0, item.className || '');
+    });
+    return row;
+  }
+
+  function renderIosSurface() {
+    var surface = document.getElementById('iosSurface');
+    var accessory = document.getElementById('iosAccessory');
+    var keyboard = document.getElementById('iosKeyboard');
+    if (!surface || !accessory || !keyboard) return;
+    accessory.innerHTML = '';
+    keyboard.innerHTML = '';
+
+    [
+      ['Tab', 'tab', '\t'], ['Ctrl', 'control', ''], ['Esc', 'escape', '\x1b'],
+      ['↑', 'up', '\x1b[A'], ['↓', 'down', '\x1b[B'],
+      ['←', 'left', '\x1b[D'], ['→', 'right', '\x1b[C']
+    ].forEach(function (item) {
+      if (Array.isArray(item)) makeKey(accessory, item[0], item[1], item[2], true);
+    });
+    var spacer = document.createElement('span');
+    spacer.className = 'ios-spacer';
+    accessory.appendChild(spacer);
+    makeKey(accessory, 'i', 'settings', '', true);
+    makeKey(accessory, 'Paste', 'paste', '', true);
+    makeKey(accessory, keyboardState.visible ? '⌄' : '⌃', 'hide', '', true);
+
+    var letters1 = ['q','w','e','r','t','y','u','i','o','p'];
+    var letters2 = ['a','s','d','f','g','h','j','k','l'];
+    var letters3 = ['z','x','c','v','b','n','m'];
+    var symbols1 = ['1','2','3','4','5','6','7','8','9','0'];
+    var symbols2 = ['-','/',':',';','(',')','$','&','@','"'];
+    var symbols3 = ['.',',','?','!',"'",'"','#'];
+    var lower = keyboardState.symbols ? symbols1 : letters1;
+    var middle = keyboardState.symbols ? symbols2 : letters2;
+    var lowerLast = keyboardState.symbols ? symbols3 : letters3;
+    function keyItems(values) {
+      return values.map(function (value) {
+        var label = keyboardState.symbols ? value : (keyboardState.shifted ? value.toUpperCase() : value.toUpperCase());
+        return { label: label, value: keyboardState.symbols ? value : (keyboardState.shifted ? value.toUpperCase() : value) };
+      });
+    }
+    keyboard.appendChild(makeRow('ios-row-one', keyItems(lower)));
+    keyboard.appendChild(makeRow('ios-row-two', keyItems(middle)));
+
+    var third = document.createElement('div');
+    third.className = 'ios-row ios-row-three';
+    makeKey(third, keyboardState.symbols ? 'ABC' : '⇧', keyboardState.symbols ? 'abc' : 'shift', '', true, 'special');
+    keyItems(lowerLast).forEach(function (item) { makeKey(third, item.label, 'key', item.value, false); });
+    makeKey(third, '⌫', 'backspace', '\x7f', true, 'special');
+    keyboard.appendChild(third);
+
+    var fourth = document.createElement('div');
+    fourth.className = 'ios-row ios-row-four';
+    makeKey(fourth, keyboardState.symbols ? 'ABC' : '123', keyboardState.symbols ? 'abc' : 'symbols', '', true, 'numeric');
+    makeKey(fourth, 'space', 'space', ' ', true, 'space');
+    makeKey(fourth, 'return', 'return', '\r', true, 'return');
+    keyboard.appendChild(fourth);
+
+    surface.classList.toggle('keyboard-hidden', !keyboardState.visible);
+    surface.classList.toggle('control-active', keyboardState.control);
+    document.body.classList.toggle('keyboard-hidden', !keyboardState.visible);
+  }
+
+  document.addEventListener('click', function (event) {
+    var button = event.target.closest && event.target.closest('.ios-key');
+    if (!button) return;
+    var action = button.dataset.action;
+    var value = button.dataset.value || '';
+    if (action === 'key') keyboardSend(value);
+    else if (action === 'tab' || action === 'escape' || action === 'up' || action === 'down' || action === 'left' || action === 'right') keyboardSend(value);
+    else if (action === 'control') keyboardState.control = !keyboardState.control;
+    else if (action === 'shift') keyboardState.shifted = !keyboardState.shifted;
+    else if (action === 'symbols') keyboardState.symbols = true;
+    else if (action === 'abc') keyboardState.symbols = false;
+    else if (action === 'backspace') keyboardSend('\x7f');
+    else if (action === 'space') keyboardSend(' ');
+    else if (action === 'return') keyboardSend('\r');
+    else if (action === 'paste') window.ishPaste();
+    else if (action === 'settings') queueUiAction('settings');
+    else if (action === 'hide') keyboardState.visible = !keyboardState.visible;
+    renderIosSurface();
+    terminal.focus();
+    event.preventDefault();
+  });
+
+  window.ishSetVirtualKeyboardVisible = function (visible) {
+    keyboardState.visible = Boolean(visible);
+    renderIosSurface();
+  };
+
+  renderIosSurface();
 
   function append(value) {
     if (value == null) return;
