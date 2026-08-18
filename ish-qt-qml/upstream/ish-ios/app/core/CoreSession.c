@@ -28,13 +28,15 @@ struct IshCoreSession {
     char **launch_argv;
     size_t launch_argc;
 
-    int input_pipe[2];
-    int output_pipe[2];
+    int pty_master;
+    int pty_slave;
     pthread_t worker;
     pthread_t reader;
     bool worker_started;
     bool reader_started;
     bool stopping;
+    struct sigaction saved_sighup;
+    bool sighup_saved;
 
     pthread_mutex_t lock;
     bool state_sent;
@@ -115,9 +117,10 @@ static void restore_stdio(int saved[3]) {
 
 static void *core_reader(void *opaque) {
     struct IshCoreSession *session = opaque;
+    const int master = session->pty_master;
     char buffer[8192];
     for (;;) {
-        ssize_t count = read(session->output_pipe[0], buffer, sizeof(buffer));
+        ssize_t count = read(master, buffer, sizeof(buffer));
         if (count > 0) {
             ish_core_output_callback callback = NULL;
             void *cookie = NULL;
@@ -129,8 +132,21 @@ static void *core_reader(void *opaque) {
                 callback(cookie, buffer, (size_t)count);
             continue;
         }
-        if (count == 0 || (count < 0 && errno != EINTR))
+        if (count == 0)
             break;
+        if (count < 0 && (errno == EINTR))
+            continue;
+        if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            pthread_mutex_lock(&session->lock);
+            const bool stopping = session->stopping;
+            pthread_mutex_unlock(&session->lock);
+            if (stopping)
+                break;
+            struct timespec pause = {.tv_sec = 0, .tv_nsec = 5000000L};
+            nanosleep(&pause, NULL);
+            continue;
+        }
+        break;
     }
     return NULL;
 }
@@ -138,6 +154,12 @@ static void *core_reader(void *opaque) {
 static void core_thread_cleanup(void *opaque) {
     struct IshCoreSession *session = opaque;
     active_session = NULL;
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+    if (session->sighup_saved) {
+        (void)sigaction(SIGHUP, &session->saved_sighup, NULL);
+        session->sighup_saved = false;
+    }
+#endif
     for (int i = 0; i < 3; ++i) {
         if (session->saved_stdio[i] >= 0) {
             (void)dup2(session->saved_stdio[i], i);
@@ -145,9 +167,9 @@ static void core_thread_cleanup(void *opaque) {
             session->saved_stdio[i] = -1;
         }
     }
-    if (session->output_pipe[1] >= 0) {
-        close(session->output_pipe[1]);
-        session->output_pipe[1] = -1;
+    if (session->pty_slave >= 0) {
+        close(session->pty_slave);
+        session->pty_slave = -1;
     }
 }
 
@@ -190,6 +212,93 @@ static int make_core_argv(struct IshCoreSession *session, char ***argv_out, size
     return 0;
 }
 
+static int create_host_pty(struct IshCoreSession *session) {
+    int master = open("/dev/ptmx", O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (master < 0)
+        return -1;
+
+    if (grantpt(master) < 0 || unlockpt(master) < 0) {
+        close(master);
+        return -1;
+    }
+
+    char slave_name[64];
+    if (ptsname_r(master, slave_name, sizeof(slave_name)) != 0) {
+        close(master);
+        return -1;
+    }
+
+    int slave = open(slave_name, O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (slave < 0) {
+        close(master);
+        return -1;
+    }
+
+    // Match Termux: enable UTF-8 input and disable software flow control.
+    struct termios tios;
+    if (tcgetattr(master, &tios) == 0) {
+#ifdef IUTF8
+        tios.c_iflag |= IUTF8;
+#endif
+        tios.c_iflag &= ~(IXON | IXOFF);
+        (void)tcsetattr(master, TCSANOW, &tios);
+    }
+
+    struct winsize size = {
+        .ws_row = 24,
+        .ws_col = 80,
+        .ws_xpixel = 0,
+        .ws_ypixel = 0
+    };
+    (void)ioctl(master, TIOCSWINSZ, &size);
+
+    // Keep both PTY descriptors outside the low-numbered range used by Qt's
+    // event loop, sockets, pipes, and eventfds.  The iSH core shares the
+    // process with Qt, so another subsystem may legitimately close/reuse a
+    // low descriptor during startup or shutdown.  Moving the descriptors
+    // before publishing them prevents the PTY master from being invalidated
+    // behind the reader thread's back.
+#ifdef F_DUPFD_CLOEXEC
+    int high_master = fcntl(master, F_DUPFD_CLOEXEC, 100);
+    int high_slave = fcntl(slave, F_DUPFD_CLOEXEC, 101);
+#else
+    int high_master = fcntl(master, F_DUPFD, 100);
+    int high_slave = fcntl(slave, F_DUPFD, 101);
+    if (high_master >= 0)
+        (void)fcntl(high_master, F_SETFD, FD_CLOEXEC);
+    if (high_slave >= 0)
+        (void)fcntl(high_slave, F_SETFD, FD_CLOEXEC);
+#endif
+    if (high_master < 0 || high_slave < 0) {
+        if (high_master >= 0)
+            close(high_master);
+        if (high_slave >= 0)
+            close(high_slave);
+        close(slave);
+        close(master);
+        return -1;
+    }
+    close(master);
+    close(slave);
+    int flags = fcntl(high_master, F_GETFL, 0);
+    if (flags >= 0)
+        (void)fcntl(high_master, F_SETFL, flags | O_NONBLOCK);
+    session->pty_master = high_master;
+    session->pty_slave = high_slave;
+    return 0;
+}
+
+static void close_host_pty(struct IshCoreSession *session) {
+    if (session->pty_master >= 0) {
+        close(session->pty_master);
+        session->pty_master = -1;
+    }
+    if (session->pty_slave >= 0) {
+        close(session->pty_slave);
+        session->pty_slave = -1;
+    }
+}
+
 static bool configure_dns(const struct IshCoreSession *session) {
     if (session == NULL || session->resolver_config == NULL ||
         session->resolver_config_length == 0)
@@ -217,7 +326,7 @@ static void *core_worker(void *opaque) {
 
     pthread_cleanup_push(core_thread_cleanup, session);
     active_session = session;
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) || defined(ISH_CORE_HOST)
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
 #endif
@@ -229,13 +338,25 @@ static void *core_worker(void *opaque) {
     if (saved[0] < 0 || saved[1] < 0 || saved[2] < 0)
         goto finish;
 
-    (void)dup2(session->input_pipe[0], STDIN_FILENO);
-    (void)dup2(session->output_pipe[1], STDOUT_FILENO);
-    (void)dup2(session->output_pipe[1], STDERR_FILENO);
-    close(session->input_pipe[0]);
-    session->input_pipe[0] = -1;
-    close(session->output_pipe[1]);
-    session->output_pipe[1] = -1;
+    // On Android the app has no terminal of its own, so establish the PTY
+    // slave as the controlling terminal as Termux does. The Linux host
+    // smoke process must keep its Qt/launcher session unchanged; the PTY
+    // still provides tty line discipline there, but setsid is omitted.
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+    struct sigaction ignore_sighup;
+    memset(&ignore_sighup, 0, sizeof(ignore_sighup));
+    sigemptyset(&ignore_sighup.sa_mask);
+    ignore_sighup.sa_handler = SIG_IGN;
+    if (sigaction(SIGHUP, &ignore_sighup, &session->saved_sighup) == 0)
+        session->sighup_saved = true;
+    (void)setsid();
+    (void)ioctl(session->pty_slave, TIOCSCTTY, 0);
+#endif
+    (void)dup2(session->pty_slave, STDIN_FILENO);
+    (void)dup2(session->pty_slave, STDOUT_FILENO);
+    (void)dup2(session->pty_slave, STDERR_FILENO);
+    close(session->pty_slave);
+    session->pty_slave = -1;
     signal(SIGPIPE, SIG_IGN);
 
     if (make_core_argv(session, &argv, &argc) != 0)
@@ -279,8 +400,8 @@ IshCoreSession *ish_core_session_create(const char *root_path,
     struct IshCoreSession *session = calloc(1, sizeof(*session));
     if (session == NULL)
         return NULL;
-    session->input_pipe[0] = session->input_pipe[1] = -1;
-    session->output_pipe[0] = session->output_pipe[1] = -1;
+    session->pty_master = -1;
+    session->pty_slave = -1;
     session->root_path = copy_string(root_path);
     session->boot_argv = copy_argv(boot_argv, boot_argc);
     session->launch_argv = copy_argv(launch_argv, launch_argc);
@@ -302,18 +423,15 @@ IshCoreSession *ish_core_session_create(const char *root_path,
 bool ish_core_session_start(IshCoreSession *session) {
     if (session == NULL || session->worker_started)
         return false;
-    if (pipe(session->input_pipe) < 0 || pipe(session->output_pipe) < 0)
+    if (create_host_pty(session) != 0)
         return false;
-    if (pthread_create(&session->reader, NULL, core_reader, session) != 0)
+    if (pthread_create(&session->reader, NULL, core_reader, session) != 0) {
+        close_host_pty(session);
         return false;
+    }
     session->reader_started = true;
     if (pthread_create(&session->worker, NULL, core_worker, session) != 0) {
-        close(session->input_pipe[0]);
-        close(session->input_pipe[1]);
-        close(session->output_pipe[0]);
-        close(session->output_pipe[1]);
-        session->input_pipe[0] = session->input_pipe[1] = -1;
-        session->output_pipe[0] = session->output_pipe[1] = -1;
+        close_host_pty(session);
         pthread_join(session->reader, NULL);
         session->reader_started = false;
         return false;
@@ -323,11 +441,11 @@ bool ish_core_session_start(IshCoreSession *session) {
 }
 
 size_t ish_core_session_write(IshCoreSession *session, const char *bytes, size_t length) {
-    if (session == NULL || bytes == NULL || length == 0 || session->input_pipe[1] < 0)
+    if (session == NULL || bytes == NULL || length == 0 || session->pty_master < 0)
         return 0;
     size_t sent = 0;
     while (sent < length) {
-        ssize_t result = write(session->input_pipe[1], bytes + sent, length - sent);
+        ssize_t result = write(session->pty_master, bytes + sent, length - sent);
         if (result > 0) {
             sent += (size_t)result;
             continue;
@@ -355,33 +473,50 @@ size_t ish_core_session_set_resolver_config(IshCoreSession *session,
 }
 
 void ish_core_session_resize(IshCoreSession *session, int columns, int rows) {
-    (void)session;
-    (void)columns;
-    (void)rows;
-    /* create_piped_stdio intentionally has no host PTY; term.js performs rendering. */
+    if (session == NULL || session->pty_master < 0 || columns <= 0 || rows <= 0)
+        return;
+    struct winsize size = {
+        .ws_row = (unsigned short)rows,
+        .ws_col = (unsigned short)columns,
+        .ws_xpixel = 0,
+        .ws_ypixel = 0
+    };
+    (void)ioctl(session->pty_master, TIOCSWINSZ, &size);
 }
 
 void ish_core_session_stop(IshCoreSession *session) {
     if (session == NULL)
         return;
-    if (session->input_pipe[1] >= 0) {
-        close(session->input_pipe[1]);
-        session->input_pipe[1] = -1;
+    // Ask an interactive shell to exit while the PTY is still connected.
+    // Closing the master first can leave iSH's terminal wait loop alive, so
+    // give the shell a normal command path before using EOT/hangup as the
+    // fallback wake-up.
+    pthread_mutex_lock(&session->lock);
+    session->stopping = true;
+    pthread_mutex_unlock(&session->lock);
+    if (session->pty_master >= 0) {
+        static const char exit_command[] = "exit\n";
+        (void)write(session->pty_master, exit_command, sizeof(exit_command) - 1);
     }
     if (session->worker_started) {
-        pthread_mutex_lock(&session->lock);
-        session->stopping = true;
-        pthread_mutex_unlock(&session->lock);
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) || defined(ISH_CORE_HOST)
+        struct timespec grace = {.tv_sec = 0, .tv_nsec = 50000000L};
+        nanosleep(&grace, NULL);
         pthread_cancel(session->worker);
         pthread_join(session->worker, NULL);
 #else
-        // Android bionic does not expose POSIX pthread cancellation. Closing
-        // the input pipe requests EOF; the worker is joined after the core
-        // exits through its normal session path.
+        // Android bionic does not expose POSIX pthread cancellation. The
+        // queued exit command is consumed by the interactive shell before
+        // the PTY is closed below.
         pthread_join(session->worker, NULL);
 #endif
         session->worker_started = false;
+    }
+    if (session->pty_master >= 0) {
+        const char eot = '\004';
+        (void)write(session->pty_master, &eot, 1);
+        close(session->pty_master);
+        session->pty_master = -1;
         if (!session->state_sent)
             emit_state(session, 143);
     }
@@ -389,18 +524,7 @@ void ish_core_session_stop(IshCoreSession *session) {
         pthread_join(session->reader, NULL);
         session->reader_started = false;
     }
-    if (session->input_pipe[0] >= 0) {
-        close(session->input_pipe[0]);
-        session->input_pipe[0] = -1;
-    }
-    if (session->output_pipe[0] >= 0) {
-        close(session->output_pipe[0]);
-        session->output_pipe[0] = -1;
-    }
-    if (session->output_pipe[1] >= 0) {
-        close(session->output_pipe[1]);
-        session->output_pipe[1] = -1;
-    }
+    close_host_pty(session);
 }
 
 void ish_core_session_destroy(IshCoreSession *session) {

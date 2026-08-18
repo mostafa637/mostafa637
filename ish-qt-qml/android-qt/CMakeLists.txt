@@ -227,15 +227,15 @@ target_compile_definitions(ish_core_session PRIVATE
     ENGINE_ASBESTOS=1
     LOG_HANDLER_DPRINTF=1
 )
-# The iSH core worker on Linux/macOS uses pthread_cancel for session stop,
-# which aborts the worker mid-session and leaves the sqlite metadata
-# database locked (mounts are not unmounted). This crashes the next kernel
-# mount (fake_db_init die) on restart loops. The Android bionic path closes
-# the input pipe instead so the shell exits cleanly through its normal path
-# (mounts are unmounted, sqlite is closed). Use the graceful Android path on
-# all Qt host platforms for stability.
+# Keep the compatibility __ANDROID__ define required by the imported iSH
+# core on desktop, but mark the host explicitly. PTY teardown uses cancellation
+# on the desktop path; the real Android/bionic path uses a normal shell exit and
+# join because bionic does not provide the POSIX cancellation API.
 if(NOT ANDROID)
-    target_compile_definitions(ish_core_session PRIVATE __ANDROID__=1)
+    target_compile_definitions(ish_core_session PRIVATE
+        __ANDROID__=1
+        ISH_CORE_HOST=1
+    )
 endif()
 target_compile_options(ish_core_session PRIVATE
     -Wno-switch

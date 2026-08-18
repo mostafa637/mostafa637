@@ -153,9 +153,8 @@ bool CoreSession::start(const QString &rootPath,
     for (const QString &value : bootCommand)
         bootBytes.append(value.toUtf8());
 
-    // iSH iOS starts /bin/login on a controlling pseudo-terminal. The Qt
-    // portable transport intentionally uses pipes, so retain compatibility
-    // with the old saved default without launching login on a non-tty.
+    // iSH iOS starts /bin/login on a controlling pseudo-terminal. Retain
+    // compatibility with the old saved default without launching login.
     const QStringList legacyLogin = {
         QStringLiteral("/bin/login"), QStringLiteral("-f"), QStringLiteral("root")
     };
@@ -163,16 +162,11 @@ bool CoreSession::start(const QString &rootPath,
         ? QStringList{QStringLiteral("/bin/sh")}
         : launchCommand;
 
-    // POSIX shells enter non-interactive mode without a controlling tty,
-    // read commands from stdin, and exit at EOF — leaving an empty
-    // terminal with no prompt. Force interactive mode for the default
-    // /bin/sh launch so the shell keeps reading from the input pipe and
-    // prints prompts, matching the iSH iOS pseudo-terminal behaviour.
+    // With a real PTY, /bin/sh detects an interactive terminal itself. Do
+    // not force -i: this preserves the shell's normal tty/job-control mode
+    // and avoids changing command semantics for explicit launch commands.
     if (effectiveLaunchCommand.isEmpty())
-        effectiveLaunchCommand = {QStringLiteral("/bin/sh"), QStringLiteral("-i")};
-    else if (effectiveLaunchCommand.first() == QStringLiteral("/bin/sh") &&
-             !effectiveLaunchCommand.contains(QStringLiteral("-i")))
-        effectiveLaunchCommand.append(QStringLiteral("-i"));
+        effectiveLaunchCommand = {QStringLiteral("/bin/sh")};
     for (const QString &value : effectiveLaunchCommand)
         launchBytes.append(value.toUtf8());
     for (const QByteArray &value : bootBytes)
@@ -217,11 +211,9 @@ bool CoreSession::start(const QString &rootPath,
 
 void CoreSession::stop()
 {
-    // Match the iSH iOS Android shutdown path: closing the input pipe
-    // delivers EOF to the kernel shell, which exits normally so that the
-    // fakefs mounts are unmounted and the sqlite metadata database is
-    // closed cleanly. pthread_cancel would abort the worker mid-session,
-    // leaving the sqlite WAL lock behind and crashing the next mount.
+    // Closing the PTY master delivers hangup/EIO to the shell and unblocks
+    // the reader, allowing the fakefs mounts and sqlite metadata database
+    // to close cleanly.
     if (m_session != nullptr) {
         struct IshCoreSession *session = m_session;
         ish_core_session_stop(session);
@@ -239,13 +231,10 @@ qint64 CoreSession::write(const QByteArray &bytes)
     if (m_session == nullptr || bytes.isEmpty() || !m_running)
         return 0;
 
-    // The portable Qt transport feeds the core through a pipe rather than a
-    // kernel pseudo-terminal. Normalize Return from WebView/iOS-style input
-    // (CR) to LF so /bin/sh actually completes the command line.
-    QByteArray normalized = bytes;
-    normalized.replace('\r', '\n');
+    // Pass terminal input through unchanged. The PTY's termios line
+    // discipline handles carriage return, erase, flow control, and signals.
     return static_cast<qint64>(ish_core_session_write(
-        m_session, normalized.constData(), static_cast<size_t>(normalized.size())));
+        m_session, bytes.constData(), static_cast<size_t>(bytes.size())));
 }
 
 void CoreSession::resize(int columns, int rows)
@@ -283,8 +272,6 @@ void CoreSession::handleOutput(const QByteArray &bytes)
 {
     if (bytes.isEmpty())
         return;
-    qWarning() << "[ish-qt] CoreSession::handleOutput bytes=" << bytes.size();
-
     // The AVD smoke test sends `python3 --version` after installing the
     // package.  Output is delivered in arbitrary chunks, so retain a small
     // bounded probe buffer and emit a log marker only after the shell has
@@ -294,11 +281,9 @@ void CoreSession::handleOutput(const QByteArray &bytes)
         if (m_probeOutput.size() > 8192)
             m_probeOutput.remove(0, m_probeOutput.size() - 8192);
         if (m_probeOutput.contains("Python 3.")) {
-            qWarning() << "[ish-qt] APK_PYTHON_VERSION=PASS";
             m_pythonProbeReported = true;
         } else if (m_probeOutput.contains("python3: not found") ||
                    m_probeOutput.contains("python3: not found\\r")) {
-            qWarning() << "[ish-qt] APK_PYTHON_VERSION=FAIL";
             m_pythonProbeReported = true;
         }
     }

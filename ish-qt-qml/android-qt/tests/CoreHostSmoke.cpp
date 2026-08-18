@@ -50,7 +50,7 @@ int main(int argc, char **argv)
         "if command -v python3 >/dev/null 2>&1; then "
         "printf 'ISH_PYTHON_PRESENT=1\\n'; python3 --version; "
         "else printf 'ISH_PYTHON_PRESENT=0\\n'; fi; "
-        "printf 'ISH_APK_DONE\\n'\n";
+        "printf 'ISH_APK_'\"DONE\"'\\n'\n";
     if (session.write(command) != command.size()) {
         std::fprintf(stderr, "Unable to send apk test command to CoreSession\n");
         session.stop();
@@ -59,7 +59,9 @@ int main(int argc, char **argv)
 
     QElapsedTimer timer;
     timer.start();
-    while (!output.contains("ISH_APK_DONE") && !exited && timer.elapsed() < 180000) {
+    const qint64 configuredTimeout = qEnvironmentVariable("ISH_SMOKE_TIMEOUT_MS").toLongLong();
+    const qint64 smokeTimeout = configuredTimeout > 0 ? configuredTimeout : 180000;
+    while (!output.contains("ISH_APK_DONE") && !exited && timer.elapsed() < smokeTimeout) {
         application.processEvents(QEventLoop::AllEvents, 50);
         QThread::msleep(20);
     }
