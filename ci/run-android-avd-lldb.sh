@@ -129,9 +129,15 @@ lldb_pid=$!
 sleep 15
 adb shell input tap 420 520 || true
 sleep 1
-adb shell input text 'apk%ssadd%spython' || true
+# Android `input text` treats punctuation/encoding differently across API images;
+# type each token separately and insert real spaces with KEYCODE_SPACE.
+adb shell input text apk || true
+adb shell input keyevent KEYCODE_SPACE || true
+adb shell input text add || true
+adb shell input keyevent KEYCODE_SPACE || true
+adb shell input text python3 || true
 adb shell input keyevent KEYCODE_ENTER || true
-echo 'Sent command: apk add python'
+echo 'Sent command: apk add python3'
 
 # Keep monitoring until the full interval completes, including activity state
 # and crash buffer, even if the process exits or LLDB detaches early.

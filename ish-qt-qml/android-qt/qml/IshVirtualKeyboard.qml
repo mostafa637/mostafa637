@@ -30,13 +30,10 @@ Rectangle {
 
     implicitHeight: 286
     color: panelColor
-    // The Android emulator's RHI can corrupt clipped rounded-rectangle batches
-    // into large gray triangles. Render the keyboard as one offscreen layer and
-    // do not clip: every child is already constrained to the panel bounds.
-    clip: false
-    layer.enabled: Qt.platform.os === "android"
-    layer.smooth: true
-    layer.mipmap: false
+    // Keep children inside the iOS-style keyboard panel. On Android the
+    // application selects Qt Quick's software backend before QML is loaded,
+    // avoiding the emulator RHI clipping corruption seen with this panel.
+    clip: true
 
     function unitWidth() {
         return Math.max(20, (width - panelPadding * 2 - keyGap * 9) / 10)
