@@ -14,3 +14,6 @@ coverage.out
 # Local caches and generated files
 .gocache/
 .gomodcache/
+
+# Local build output
+ishgo
