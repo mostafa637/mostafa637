@@ -665,7 +665,23 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		return makeCarryBinary64(address, uint8(inst.Len), inst.Op, left, right), false, nil
 	case x86asm.LAHF, x86asm.SAHF:
 		return makeLAHFSAHF64(address, uint8(inst.Len), inst.Op), false, nil
-	case x86asm.MOVDQA, x86asm.MOVDQU:
+	case x86asm.MOVSS, x86asm.MOVSD_XMM:
+		width := uint8(4)
+		if inst.Op == x86asm.MOVSD_XMM {
+			width = 8
+		}
+
+		left, err := operand64ScalarSSEFromArg(arg(0), width)
+		if err != nil || (left.Kind != operand64XMM && left.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("scalar SSE move destination: %v", err)
+		}
+		right, err := operand64ScalarSSEFromArg(arg(1), width)
+		if err != nil || (right.Kind != operand64XMM && right.Kind != operand64Mem) || (left.Kind == operand64Mem && right.Kind == operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("scalar SSE move source: %v", err)
+		}
+		return makeSSEScalarMove64(address, uint8(inst.Len), width, left, right), false, nil
+	case x86asm.MOVDQA, x86asm.MOVDQU, x86asm.MOVAPS, x86asm.MOVUPS, x86asm.MOVAPD, x86asm.MOVUPD:
+
 		left, err := operand64FromArg(arg(0), 16)
 		if err != nil || (left.Kind != operand64XMM && left.Kind != operand64Mem) {
 			return microOp64{}, false, fmt.Errorf("SSE move destination: %v", err)
@@ -868,6 +884,7 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return Flow64Continue, nil
 		}}, false, nil
 	case x86asm.MOVSB, x86asm.MOVSW, x86asm.MOVSD, x86asm.MOVSQ,
+
 		x86asm.STOSB, x86asm.STOSW, x86asm.STOSD, x86asm.STOSQ,
 		x86asm.LODSB, x86asm.LODSW, x86asm.LODSD, x86asm.LODSQ,
 		x86asm.CMPSB, x86asm.CMPSW, x86asm.CMPSD, x86asm.CMPSQ,
@@ -1543,6 +1560,39 @@ func writeVector64(state *MachineState64, operand operand64, next uint64, value 
 	default:
 		return ErrUnsupportedAddressing
 	}
+}
+
+func operand64ScalarSSEFromArg(arg x86asm.Arg, width uint8) (operand64, error) {
+	if reg, ok := arg.(x86asm.Reg); ok && reg >= x86asm.X0 && reg <= x86asm.X15 {
+		return operand64{Kind: operand64XMM, XMM: uint8(reg - x86asm.X0), Width: 16}, nil
+	}
+	return operand64FromArg(arg, width)
+}
+
+func makeSSEScalarMove64(address uint64, size, width uint8, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		var value uint64
+		if src.Kind == operand64XMM {
+			for i := uint8(0); i < width; i++ {
+				value |= uint64(state.XMM[src.XMM][i]) << (8 * i)
+			}
+		} else {
+			var err error
+			value, err = readOperand64(state, src, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+		}
+		if dst.Kind == operand64XMM {
+			for i := uint8(0); i < width; i++ {
+				state.XMM[dst.XMM][i] = byte(value >> (8 * i))
+			}
+		} else if err := writeOperand64(state, dst, next, value); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
 }
 
 func makeSSEMove64(address uint64, size uint8, dst, src operand64) microOp64 {
