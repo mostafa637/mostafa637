@@ -848,6 +848,16 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s requires an immediate mask", inst.Op)
 		}
 		return makeSSEDotProduct64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
+	case x86asm.PHMINPOSUW:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeSSEMinPos64(address, uint8(inst.Len), destination, source), false, nil
 	case x86asm.PMOVSXBW, x86asm.PMOVSXBD, x86asm.PMOVSXBQ, x86asm.PMOVSXWD, x86asm.PMOVSXWQ, x86asm.PMOVSXDQ,
 		x86asm.PMOVZXBW, x86asm.PMOVZXBD, x86asm.PMOVZXBQ, x86asm.PMOVZXWD, x86asm.PMOVZXWQ, x86asm.PMOVZXDQ:
 		sourceWidth, _, _, _, ok := packedWidenSpec64(inst.Op)
@@ -2218,6 +2228,32 @@ func makeSSEDotProduct64(address uint64, size uint8, op x86asm.Op, destination, 
 				}
 			}
 		}
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEMinPos64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		sourceBytes, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		minimum := binary.LittleEndian.Uint16(sourceBytes[:2])
+		index := uint16(0)
+		for lane := 1; lane < 8; lane++ {
+			value := binary.LittleEndian.Uint16(sourceBytes[lane*2:])
+			if value < minimum {
+				minimum = value
+				index = uint16(lane)
+			}
+		}
+		var result [16]byte
+		binary.LittleEndian.PutUint16(result[:2], minimum)
+		binary.LittleEndian.PutUint16(result[2:4], index)
 		if err := writeVector64(state, destination, next, result); err != nil {
 			return Flow64Stop, err
 		}

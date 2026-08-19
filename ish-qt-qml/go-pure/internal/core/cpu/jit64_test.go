@@ -3419,3 +3419,71 @@ func TestJIT64DotProducts(t *testing.T) {
 	assertFloat32(5, 200, 0, 200, 0)
 	assertFloat64(14, 21, 0)
 }
+
+func TestJIT64PHMINPOSUW(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x50000
+		dataAddress Address64 = 0x51000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	memorySource := make([]byte, 16)
+	memoryValues := []uint16{5, 3, 3, 8, 0xffff, 9, 10, 11}
+	for lane, value := range memoryValues {
+		binary.LittleEndian.PutUint16(memorySource[lane*2:], value)
+	}
+	if err := memory.Write(dataAddress, memorySource); err != nil {
+		t.Fatal(err)
+	}
+	code := []byte{
+		0x66, 0x0f, 0x38, 0x41, 0xca, // phminposuw xmm1, xmm2
+		0x66, 0x0f, 0x38, 0x41, 0x1f, // phminposuw xmm3, [rdi]
+		0x66, 0x44, 0x0f, 0x38, 0x41, 0xf6, // phminposuw xmm14, xmm6
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	for lane := range state.XMM[1] {
+		state.XMM[1][lane] = 0xa5
+		state.XMM[3][lane] = 0x5a
+		state.XMM[14][lane] = 0x3c
+	}
+	putWords := func(destination *[16]byte, values ...uint16) {
+		for lane, value := range values {
+			binary.LittleEndian.PutUint16(destination[lane*2:], value)
+		}
+	}
+	putWords(&state.XMM[2], 9, 8, 7, 6, 5, 4, 3, 3)
+	putWords(&state.XMM[6], 0xffff, 0x8000, 0x1234, 0x0100, 0x0200, 0x0100, 0x0000, 0xffff)
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	var expectedRegister [16]byte
+	binary.LittleEndian.PutUint16(expectedRegister[:2], 3)
+	binary.LittleEndian.PutUint16(expectedRegister[2:4], 6)
+	if state.XMM[1] != expectedRegister {
+		t.Fatalf("xmm1=%x, want %x", state.XMM[1], expectedRegister)
+	}
+	var expectedMemory [16]byte
+	binary.LittleEndian.PutUint16(expectedMemory[:2], 3)
+	binary.LittleEndian.PutUint16(expectedMemory[2:4], 1)
+	if state.XMM[3] != expectedMemory {
+		t.Fatalf("xmm3=%x, want %x", state.XMM[3], expectedMemory)
+	}
+	var expectedHigh [16]byte
+	binary.LittleEndian.PutUint16(expectedHigh[:2], 0)
+	binary.LittleEndian.PutUint16(expectedHigh[2:4], 6)
+	if state.XMM[14] != expectedHigh {
+		t.Fatalf("xmm14=%x, want %x", state.XMM[14], expectedHigh)
+	}
+}
