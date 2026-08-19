@@ -833,7 +833,8 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s requires an immediate index", inst.Op)
 		}
 		return makeSSEExtract64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
-	case x86asm.PMULUDQ, x86asm.PMULLW, x86asm.PMULHW, x86asm.PSADBW,
+	case x86asm.PMULUDQ, x86asm.PMULHUW, x86asm.PMULLW, x86asm.PMULHW, x86asm.PSADBW,
+		x86asm.PMADDWD, x86asm.PMADDUBSW,
 		x86asm.PACKSSWB, x86asm.PACKSSDW, x86asm.PACKUSWB,
 		x86asm.PADDUSB, x86asm.PADDUSW, x86asm.PSUBUSB, x86asm.PSUBUSW,
 		x86asm.PADDSB, x86asm.PADDSW, x86asm.PSUBSB, x86asm.PSUBSW:
@@ -2337,6 +2338,12 @@ func makeSSESpecialBinary64(address uint64, size uint8, op x86asm.Op, dst, src o
 				r := uint64(binary.LittleEndian.Uint32(right[offset:]))
 				binary.LittleEndian.PutUint64(result[offset:], l*r)
 			}
+		case x86asm.PMULHUW:
+			for offset := 0; offset < 16; offset += 2 {
+				leftValue := uint64(binary.LittleEndian.Uint16(left[offset:]))
+				rightValue := uint64(binary.LittleEndian.Uint16(right[offset:]))
+				binary.LittleEndian.PutUint16(result[offset:], uint16((leftValue*rightValue)>>16))
+			}
 		case x86asm.PMULLW, x86asm.PMULHW:
 			for offset := 0; offset < 16; offset += 2 {
 				l := int64(int16(binary.LittleEndian.Uint16(left[offset:])))
@@ -2347,7 +2354,22 @@ func makeSSESpecialBinary64(address uint64, size uint8, op x86asm.Op, dst, src o
 				}
 				binary.LittleEndian.PutUint16(result[offset:], uint16(product))
 			}
+		case x86asm.PMADDWD:
+			for offset := 0; offset < 16; offset += 4 {
+				left0 := int64(int16(binary.LittleEndian.Uint16(left[offset:])))
+				left1 := int64(int16(binary.LittleEndian.Uint16(left[offset+2:])))
+				right0 := int64(int16(binary.LittleEndian.Uint16(right[offset:])))
+				right1 := int64(int16(binary.LittleEndian.Uint16(right[offset+2:])))
+				sum := left0*right0 + left1*right1
+				binary.LittleEndian.PutUint32(result[offset:], uint32(sum))
+			}
+		case x86asm.PMADDUBSW:
+			for offset := 0; offset < 16; offset += 2 {
+				sum := int64(left[offset])*int64(int8(right[offset])) + int64(left[offset+1])*int64(int8(right[offset+1]))
+				binary.LittleEndian.PutUint16(result[offset:], uint16(int16(clampSigned64(sum, -32768, 32767))))
+			}
 		case x86asm.PSADBW:
+
 			for _, base := range []int{0, 8} {
 				var sum uint16
 				for i := 0; i < 8; i++ {

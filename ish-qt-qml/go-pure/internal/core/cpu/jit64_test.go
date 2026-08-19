@@ -2295,3 +2295,90 @@ func TestJIT64SignedSaturatingPackedArithmetic(t *testing.T) {
 		t.Fatalf("memory PADDSB=% x, want % x", got, want)
 	}
 }
+
+func TestJIT64PackedMultiplyAccumulateAndQwordArithmetic(t *testing.T) {
+	checkRun := func(t *testing.T, memory *Memory64, codeAddress Address64, code []byte, state *MachineState64) {
+		t.Helper()
+		if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+			t.Fatal(err)
+		}
+		if err := memory.Write(codeAddress, code); err != nil {
+			t.Fatal(err)
+		}
+		state.RIP = uint64(codeAddress)
+		trap := NewJIT64(memory).RunToInterrupt(state)
+		if trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+	}
+	putWords := func(vector *[16]byte, values ...uint16) {
+		t.Helper()
+		if len(values) != 8 {
+			t.Fatalf("word count=%d, want 8", len(values))
+		}
+		for i, value := range values {
+			binary.LittleEndian.PutUint16(vector[i*2:], value)
+		}
+	}
+	checkWords := func(vector [16]byte, want ...uint16) {
+		t.Helper()
+		if len(want) != 8 {
+			t.Fatalf("want word count=%d, want 8", len(want))
+		}
+		for i, value := range want {
+			if got := binary.LittleEndian.Uint16(vector[i*2:]); got != value {
+				t.Fatalf("word lane %d=%#x, want %#x; vector=%x", i, got, value, vector)
+			}
+		}
+	}
+
+	state := NewMachineState64(NewMemory64())
+	putWords(&state.XMM[0], 0xffff, 0x8000, 0x1234, 1, 0, 0x7fff, 0xffff, 0x8000)
+	putWords(&state.XMM[1], 2, 2, 0x10, 0xffff, 0xffff, 2, 0xffff, 0x8000)
+	putWords(&state.XMM[2], 1, 2, 0xfffd, 4, 0x7fff, 0xffff, 0x8000, 0x8000)
+	putWords(&state.XMM[3], 10, 20, 30, 0xfffb, 2, 2, 0x8000, 0x8000)
+	state.XMM[4] = [16]byte{255, 255, 128, 128, 200, 200, 1, 2, 0, 0, 100, 100, 255, 255, 128, 128}
+	state.XMM[5] = [16]byte{127, 127, 127, 127, 127, 127, 0x80, 0x80, 0x80, 0x80, 127, 127, 0xff, 0xff, 0x80, 0x80}
+	binary.LittleEndian.PutUint64(state.XMM[6][0:], ^uint64(0))
+	binary.LittleEndian.PutUint64(state.XMM[6][8:], 5)
+	binary.LittleEndian.PutUint64(state.XMM[7][0:], 1)
+	binary.LittleEndian.PutUint64(state.XMM[7][8:], 10)
+	checkRun(t, state.Memory, 0x2e000, []byte{
+		0x66, 0x0f, 0xe4, 0xc1, // pmulhuw xmm0, xmm1
+		0x66, 0x0f, 0xf5, 0xd3, // pmaddwd xmm2, xmm3
+		0x66, 0x0f, 0xd4, 0xf7, // paddq xmm6, xmm7
+		0x66, 0x0f, 0xfb, 0xf7, // psubq xmm6, xmm7
+		0xf4,
+	}, state)
+	checkWords(state.XMM[0], 1, 1, 1, 0, 0, 0, 0xfffe, 0x4000)
+	for i, want := range []uint32{50, 0xffffff92, 0x0000fffc, 0x80000000} {
+		if got := binary.LittleEndian.Uint32(state.XMM[2][i*4:]); got != want {
+			t.Fatalf("PMADDWD dword lane %d=%#x, want %#x", i, got, want)
+		}
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[6][0:]); got != ^uint64(0) {
+		t.Fatalf("PADDQ/PSUBQ low qword=%#x, want %#x", got, ^uint64(0))
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[6][8:]); got != 5 {
+		t.Fatalf("PADDQ/PSUBQ high qword=%#x, want %#x", got, uint64(5))
+	}
+
+	memory := NewMemory64()
+	const dataAddress Address64 = 0x2f000
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, 16)
+	putWords((*[16]byte)(data), 0xffff, 0x8000, 0, 0, 0, 0, 0, 0)
+	if err := memory.Write(dataAddress, data); err != nil {
+		t.Fatal(err)
+	}
+	memoryState := NewMachineState64(memory)
+	memoryState.Set(RDI, uint64(dataAddress))
+	putWords(&memoryState.XMM[0], 2, 2, 0, 0, 0, 0, 0, 0)
+	checkRun(t, memory, 0x30000, []byte{
+		0x66, 0x0f, 0xe4, 0x07, // pmulhuw xmm0, [rdi]
+		0xf4,
+	}, memoryState)
+	checkWords(memoryState.XMM[0], 1, 1, 0, 0, 0, 0, 0, 0)
+}
