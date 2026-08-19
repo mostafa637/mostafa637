@@ -2066,3 +2066,153 @@ func TestJIT64PackedArithmeticAndSaturation(t *testing.T) {
 		}
 	}
 }
+
+func TestJIT64PackedInsertExtract(t *testing.T) {
+	run := func(t *testing.T, code []byte, state *MachineState64) {
+		t.Helper()
+		const address Address64 = 0x24000
+		mapExecutable64(t, state.Memory, address, code)
+		state.RIP = uint64(address)
+		trap := NewJIT64(state.Memory).RunToInterrupt(state)
+		if trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+	}
+	mapData := func(state *MachineState64, address Address64, data []byte) {
+		t.Helper()
+		if err := state.Memory.Map(address, Page64Size, PRead|PWrite); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.Memory.Write(address, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkWord := func(vector [16]byte, lane int, want uint16) {
+		t.Helper()
+		got := binary.LittleEndian.Uint16(vector[lane*2:])
+		if got != want {
+			t.Fatalf("word lane %d=%#x, want %#x; vector=%x", lane, got, want, vector)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		for i := range state.XMM[0] {
+			state.XMM[0][i] = 0xaa
+		}
+		state.Set(RCX, 0x1234)
+		run(t, []byte{0x66, 0x0f, 0xc4, 0xc1, 0x02, 0xf4}, state) // pinsrw xmm0, ecx, 2
+		checkWord(state.XMM[0], 2, 0x1234)
+		if state.XMM[0][0] != 0xaa || state.XMM[0][15] != 0xaa {
+			t.Fatalf("pinsrw changed unrelated lanes: %x", state.XMM[0])
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		state.Set(RCX, 0xabcdef12)
+		run(t, []byte{0x66, 0x0f, 0x3a, 0x20, 0xc1, 0x05, 0xf4}, state) // pinsrb xmm0, ecx, 5
+		if state.XMM[0][5] != 0x12 {
+			t.Fatalf("pinsrb byte=%#x, want %#x", state.XMM[0][5], 0x12)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		state.Set(RCX, 0xdeadbeef)
+		run(t, []byte{0x66, 0x0f, 0x3a, 0x22, 0xc1, 0x01, 0xf4}, state) // pinsrd xmm0, ecx, 1
+		if got := binary.LittleEndian.Uint32(state.XMM[0][4:]); got != 0xdeadbeef {
+			t.Fatalf("pinsrd=%#x, want %#x", got, uint32(0xdeadbeef))
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		state.Set(RCX, 0x1122334455667788)
+		run(t, []byte{0x66, 0x48, 0x0f, 0x3a, 0x22, 0xc1, 0x01, 0xf4}, state) // pinsrq xmm0, rcx, 1
+		if got := binary.LittleEndian.Uint64(state.XMM[0][8:]); got != 0x1122334455667788 {
+			t.Fatalf("pinsrq=%#x, want %#x", got, uint64(0x1122334455667788))
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		state.XMM[0] = [16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+		run(t, []byte{0x66, 0x0f, 0xc5, 0xc0, 0x02, 0xf4}, state) // pextrw eax, xmm0, 2
+		if got := state.Get(RAX); got != 0x0000000000005544 {
+			t.Fatalf("pextrw RAX=%#x, want %#x", got, uint64(0x5544))
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		state.XMM[0] = [16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+		run(t, []byte{0x66, 0x0f, 0x3a, 0x14, 0xc0, 0x0b, 0xf4}, state) // pextrb eax, xmm0, 11
+		if got := state.Get(RAX); got != 0x00000000000000bb {
+			t.Fatalf("pextrb RAX=%#x, want %#x", got, uint64(0xbb))
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		state.XMM[0] = [16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+		run(t, []byte{0x66, 0x48, 0x0f, 0x3a, 0x14, 0xc0, 0x0b, 0xf4}, state) // pextrb rax, xmm0, 11 (REX.W)
+		if got := state.Get(RAX); got != 0x00000000000000bb {
+			t.Fatalf("pextrb rex.w RAX=%#x, want %#x", got, uint64(0xbb))
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		state.Set(RCX, 0x1122334455667788)
+		run(t, []byte{0x66, 0x48, 0x0f, 0x3a, 0x20, 0xc1, 0x05, 0xf4}, state) // pinsrb xmm0, rcx, 5 (REX.W ignored for byte source)
+		if got := state.XMM[0][5]; got != 0x88 {
+			t.Fatalf("pinsrb rex.w byte=%#x, want %#x", got, byte(0x88))
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		state.XMM[0] = [16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+		run(t, []byte{0x66, 0x0f, 0x3a, 0x16, 0xc0, 0x01, 0xf4}, state) // pextrd eax, xmm0, 1
+		if got := state.Get(RAX); got != 0x0000000077665544 {
+			t.Fatalf("pextrd RAX=%#x, want %#x", got, uint64(0x77665544))
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		state.XMM[0] = [16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+		run(t, []byte{0x66, 0x48, 0x0f, 0x3a, 0x16, 0xc0, 0x01, 0xf4}, state) // pextrq rax, xmm0, 1
+		if got := state.Get(RAX); got != 0xffeeddccbbaa9988 {
+			t.Fatalf("pextrq RAX=%#x, want %#x", got, uint64(0xffeeddccbbaa9988))
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		const dataAddress Address64 = 0x25000
+		mapData(state, dataAddress, []byte{0, 0, 0, 0, 0, 0, 0, 0})
+		state.Set(RDI, uint64(dataAddress))
+		state.XMM[0] = [16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+		run(t, []byte{0x66, 0x0f, 0x3a, 0x16, 0x07, 0x01, 0xf4}, state) // pextrd [rdi], xmm0, 1
+		stored := make([]byte, 4)
+		if err := state.Memory.Read(dataAddress, stored); err != nil {
+			t.Fatal(err)
+		}
+		if got := binary.LittleEndian.Uint32(stored); got != 0x77665544 {
+			t.Fatalf("memory pextrd=%#x, want %#x", got, uint32(0x77665544))
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		const dataAddress Address64 = 0x26000
+		mapData(state, dataAddress, []byte{0x78, 0x56, 0x34, 0x12, 0, 0, 0, 0})
+		state.Set(RDI, uint64(dataAddress))
+		run(t, []byte{0x66, 0x0f, 0x3a, 0x22, 0x07, 0x02, 0xf4}, state) // pinsrd xmm0, [rdi], 2
+		if got := binary.LittleEndian.Uint32(state.XMM[0][8:]); got != 0x12345678 {
+			t.Fatalf("memory pinsrd=%#x, want %#x", got, uint32(0x12345678))
+		}
+	}
+}

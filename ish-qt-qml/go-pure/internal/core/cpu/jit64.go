@@ -785,9 +785,58 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("SSE move source: %v", err)
 		}
 		return makeSSEMove64(address, uint8(inst.Len), left, right), false, nil
+	case x86asm.PINSRB, x86asm.PINSRW, x86asm.PINSRD, x86asm.PINSRQ:
+		width, ok := packedInsertWidth64(inst.Op)
+		if !ok {
+			return microOp64{}, false, ErrUnsupported64
+		}
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), width)
+		if err != nil && inst.Op != x86asm.PINSRQ {
+			source, err = operand64FromArg(arg(1), 4)
+			if err != nil {
+				source, err = operand64FromArg(arg(1), 8)
+			}
+		}
+		if err != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("%s requires an immediate index", inst.Op)
+		}
+		return makeSSEInsert64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
+	case x86asm.PEXTRB, x86asm.PEXTRW, x86asm.PEXTRD, x86asm.PEXTRQ:
+		width, ok := packedExtractWidth64(inst.Op)
+		if !ok {
+			return microOp64{}, false, ErrUnsupported64
+		}
+		destination, err := operand64FromArg(arg(0), width)
+		if err != nil && inst.Op != x86asm.PEXTRQ {
+			destination, err = operand64FromArg(arg(0), 4)
+			if err != nil {
+				destination, err = operand64FromArg(arg(0), 8)
+			}
+		}
+		if err != nil || (destination.Kind != operand64Reg && destination.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || source.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("%s requires an immediate index", inst.Op)
+		}
+		return makeSSEExtract64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
 	case x86asm.PMULUDQ, x86asm.PMULLW, x86asm.PMULHW, x86asm.PSADBW,
 		x86asm.PACKSSWB, x86asm.PACKSSDW, x86asm.PACKUSWB,
 		x86asm.PADDUSB, x86asm.PADDUSW, x86asm.PSUBUSB, x86asm.PSUBUSW:
+
 		left, err := operand64FromArg(arg(0), 16)
 		if err != nil || left.Kind != operand64XMM {
 			return microOp64{}, false, fmt.Errorf("SSE special destination: %v", err)
@@ -2190,6 +2239,83 @@ func sseLaneWidth64(op x86asm.Op) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func packedInsertWidth64(op x86asm.Op) (uint8, bool) {
+	switch op {
+	case x86asm.PINSRB:
+		return 1, true
+	case x86asm.PINSRW:
+		return 2, true
+	case x86asm.PINSRD:
+		return 4, true
+	case x86asm.PINSRQ:
+		return 8, true
+	default:
+		return 0, false
+	}
+}
+
+func packedExtractWidth64(op x86asm.Op) (uint8, bool) {
+	switch op {
+	case x86asm.PEXTRB:
+		return 1, true
+	case x86asm.PEXTRW:
+		return 2, true
+	case x86asm.PEXTRD:
+		return 4, true
+	case x86asm.PEXTRQ:
+		return 8, true
+	default:
+		return 0, false
+	}
+}
+
+func makeSSEInsert64(address uint64, size uint8, op x86asm.Op, destination, source operand64, immediate uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readOperand64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		result, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		width, _ := packedInsertWidth64(op)
+		indexMask := uint8(16/width - 1)
+		index := int(immediate & indexMask)
+		offset := index * int(width)
+		for i := uint8(0); i < width; i++ {
+			result[offset+int(i)] = byte(value >> (8 * i))
+		}
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEExtract64(address uint64, size uint8, op x86asm.Op, destination, source operand64, immediate uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		width, _ := packedExtractWidth64(op)
+		indexMask := uint8(16/width - 1)
+		index := int(immediate & indexMask)
+		offset := index * int(width)
+		var result uint64
+		for i := uint8(0); i < width; i++ {
+			result |= uint64(value[offset+int(i)]) << (8 * i)
+		}
+		if err := writeOperand64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
 }
 
 func makeSSESpecialBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
