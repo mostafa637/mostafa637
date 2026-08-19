@@ -250,3 +250,24 @@ func TestExecutorCWDEAndCDQ(t *testing.T) {
 		t.Fatalf("cwde/cdq eax=%#x edx=%#x", state.Get(EAX), state.Get(EDX))
 	}
 }
+
+func TestExecutorGSRelativeMemoryOperand(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0x65, 0x8B, 0x03, // mov eax, gs:[ebx]
+		0xF4,
+	})
+	if err := memory.Map(3, 1, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(3*PageSize, uint32Bytes(0xA1B2C3D4)); err != nil {
+		t.Fatal(err)
+	}
+	state.GSBase = 3 * PageSize
+	state.TLS = state.GSBase
+	if err := NewExecutor(nil).Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 0xA1B2C3D4 {
+		t.Fatalf("GS-relative load = %#x, want %#x", got, uint32(0xA1B2C3D4))
+	}
+}

@@ -382,6 +382,16 @@ func effectiveAddress(state *MachineState, operand Operand) (Address, error) {
 		address += state.Get(memory.Index) * uint32(memory.Scale)
 	}
 	address += uint32(memory.Disp)
+	switch memory.Segment {
+	case SegmentFS:
+		address += state.FSBase
+	case SegmentGS:
+		base := state.GSBase
+		if base == 0 {
+			base = state.TLS
+		}
+		address += base
+	}
 	return Address(address), nil
 }
 

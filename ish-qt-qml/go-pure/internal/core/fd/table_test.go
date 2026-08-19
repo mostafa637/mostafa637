@@ -99,3 +99,30 @@ func TestTableDupKeepsCloserAlive(t *testing.T) {
 		t.Fatalf("closer calls after final close = %d", closer.calls)
 	}
 }
+
+func TestTableCloseOnExec(t *testing.T) {
+	cloexecCloser := &countingCloser{}
+	regularCloser := &countingCloser{}
+	table := New()
+	cloexecFD, err := table.Open(&File{Closer: cloexecCloser, Cloexec: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	regularFD, err := table.Open(&File{Closer: regularCloser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed := table.CloseOnExec()
+	if len(removed) != 1 || removed[0] != cloexecFD {
+		t.Fatalf("removed = %#v, want [%d]", removed, cloexecFD)
+	}
+	if _, err := table.Get(cloexecFD); err != ErrBadFD {
+		t.Fatalf("CLOEXEC fd lookup = %v", err)
+	}
+	if _, err := table.Get(regularFD); err != nil {
+		t.Fatalf("regular fd lookup = %v", err)
+	}
+	if cloexecCloser.calls != 1 || regularCloser.calls != 0 {
+		t.Fatalf("closer calls = %d/%d", cloexecCloser.calls, regularCloser.calls)
+	}
+}

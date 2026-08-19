@@ -525,8 +525,8 @@ func TestDispatcherTLSAndRobustList(t *testing.T) {
 	if got := dispatcher.Dispatch(state, SysSetThreadArea, 0x2000); got != 0 {
 		t.Fatalf("set_thread_area = %d", got)
 	}
-	if state.TLS != 0x70000000 || context.TLSBase != 0x70000000 {
-		t.Fatalf("TLS base = %#x/%#x", state.TLS, context.TLSBase)
+	if state.TLS != 0x70000000 || state.GSBase != 0x70000000 || context.TLSBase != 0x70000000 {
+		t.Fatalf("TLS base = %#x/%#x/%#x", state.TLS, state.GSBase, context.TLSBase)
 	}
 	var updated [16]byte
 	if err := memory.Read(0x2000, updated[:]); err != nil {
@@ -557,5 +557,102 @@ func TestDispatcherTLSAndRobustList(t *testing.T) {
 	}
 	if head, length := binary.LittleEndian.Uint32(value[0:4]), binary.LittleEndian.Uint32(value[4:8]); head != 0x3000 || length != 24 {
 		t.Fatalf("robust list = %#x/%d", head, length)
+	}
+}
+
+func TestLibcSupportSyscalls(t *testing.T) {
+	memory := cpu.NewMemory()
+	if err := memory.Map(10, 6, cpu.PRead|cpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	context := NewContext(memory)
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+
+	if got := dispatcher.Dispatch(state, SysClockGettime, 0, 10*cpu.PageSize); got != 0 {
+		t.Fatalf("clock_gettime = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysGettimeofday, 11*cpu.PageSize, 0); got != 0 {
+		t.Fatalf("gettimeofday = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysGetrlimit, rlimitNOFILE, 12*cpu.PageSize); got != 0 {
+		t.Fatalf("getrlimit = %d", got)
+	}
+	var limit [16]byte
+	if err := memory.Read(12*cpu.PageSize, limit[:]); err != nil {
+		t.Fatal(err)
+	}
+	if binary.LittleEndian.Uint64(limit[0:8]) != 1024 {
+		t.Fatalf("RLIMIT_NOFILE cur = %d", binary.LittleEndian.Uint64(limit[0:8]))
+	}
+	binary.LittleEndian.PutUint64(limit[0:8], 128)
+	binary.LittleEndian.PutUint64(limit[8:16], 256)
+	if err := memory.Write(12*cpu.PageSize, limit[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatcher.Dispatch(state, SysSetrlimit, rlimitNOFILE, 12*cpu.PageSize); got != 0 {
+		t.Fatalf("setrlimit = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysGetgroups32, 0, 0); got != 1 {
+		t.Fatalf("getgroups32 query = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysGetgroups32, 1, 13*cpu.PageSize); got != 1 {
+		t.Fatalf("getgroups32 = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysSetgroups32, 1, 13*cpu.PageSize); got != 0 {
+		t.Fatalf("setgroups32 = %d", got)
+	}
+}
+
+func TestFakeFSStatfsAndFileBackedMmap(t *testing.T) {
+	db, err := storage.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	fake, err := corefs.New(filepath.Join(t.TempDir(), "root"), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.WriteFile("/mapped", []byte("mapped-data"), 0o644, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	memory := cpu.NewMemory()
+	if err := memory.Map(1, 5, cpu.PRead|cpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	context := NewContext(memory)
+	context.FS = fake
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+	if err := memory.Write(cpu.PageSize, append([]byte("/mapped"), 0)); err != nil {
+		t.Fatal(err)
+	}
+	fd := dispatcher.Dispatch(state, SysOpen, cpu.PageSize, guestOpenCloexec, 0)
+	if fd < 3 {
+		t.Fatalf("open = %d", fd)
+	}
+	file, result := getFile(context, uint32(fd))
+	if result != 0 || file == nil || !file.Cloexec {
+		t.Fatal("O_CLOEXEC was not retained")
+	}
+	if got := dispatcher.Dispatch(state, SysMmap2, 0x20000, cpu.PageSize, ProtRead, MapPrivate|MapFixed, uint32(fd), 0); uint32(got) != 0x20000 {
+		t.Fatalf("file-backed mmap2 = %#x", uint32(got))
+	}
+	mapped := make([]byte, len("mapped-data"))
+	if err := memory.Read(0x20000, mapped); err != nil {
+		t.Fatal(err)
+	}
+	if string(mapped) != "mapped-data" {
+		t.Fatalf("mapped bytes = %q", mapped)
+	}
+	if got := dispatcher.Dispatch(state, SysStatfs64, cpu.PageSize, statfs64Size, 3*cpu.PageSize); got != 0 {
+		t.Fatalf("statfs64 = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysFstatfs64, uint32(fd), statfs64Size, 4*cpu.PageSize); got != 0 {
+		t.Fatalf("fstatfs64 = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysOpen, cpu.PageSize, guestOpenDirectory, 0); got != ENOTDIR {
+		t.Fatalf("O_DIRECTORY regular file = %d", got)
 	}
 }

@@ -65,6 +65,14 @@ const (
 	OpCDQ
 )
 
+type Segment uint8
+
+const (
+	SegmentNone Segment = iota
+	SegmentFS
+	SegmentGS
+)
+
 type MemoryOperand struct {
 	Base     Reg32
 	Index    Reg32
@@ -72,6 +80,7 @@ type MemoryOperand struct {
 	Disp     int32
 	HasBase  bool
 	HasIndex bool
+	Segment  Segment
 }
 
 type Operand struct {
@@ -141,7 +150,7 @@ func (o Operand) String() string {
 	return fmt.Sprintf("[%s+%s*%d%+d]", o.Memory.Base, o.Memory.Index, o.Memory.Scale, o.Memory.Disp)
 }
 
-func parseModRM(reader *codeReader, modrm byte) (Reg32, Operand, error) {
+func parseModRM(reader *codeReader, modrm byte, segment Segment) (Reg32, Operand, error) {
 	mod := modrm >> 6
 	reg := Reg32((modrm >> 3) & 7)
 	rm := modrm & 7
@@ -197,6 +206,7 @@ func parseModRM(reader *codeReader, modrm byte) (Reg32, Operand, error) {
 		}
 		memory.Disp += int32(value)
 	}
+	memory.Segment = segment
 	return reg, Operand{Memory: memory, IsMem: true, Width: 4}, nil
 }
 
@@ -205,6 +215,18 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 	opcode, err := reader.byte()
 	if err != nil {
 		return Instruction{}, err
+	}
+	var segment Segment
+	for opcode == 0x64 || opcode == 0x65 {
+		if opcode == 0x64 {
+			segment = SegmentFS
+		} else {
+			segment = SegmentGS
+		}
+		opcode, err = reader.byte()
+		if err != nil {
+			return Instruction{}, err
+		}
 	}
 	instruction := Instruction{Len: 1}
 
@@ -271,7 +293,7 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 		if err != nil {
 			return Instruction{}, err
 		}
-		reg, operand, err := parseModRM(reader, modrm)
+		reg, operand, err := parseModRM(reader, modrm, segment)
 		if err != nil {
 			return Instruction{}, err
 		}
@@ -310,7 +332,7 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 		if err != nil {
 			return Instruction{}, err
 		}
-		reg, operand, err := parseModRM(reader, modrm)
+		reg, operand, err := parseModRM(reader, modrm, segment)
 		if err != nil {
 			return Instruction{}, err
 		}
@@ -324,7 +346,7 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 		if err != nil {
 			return Instruction{}, err
 		}
-		reg, operand, err := parseModRM(reader, modrm)
+		reg, operand, err := parseModRM(reader, modrm, segment)
 		if err != nil {
 			return Instruction{}, err
 		}
@@ -361,7 +383,7 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 		if err != nil {
 			return Instruction{}, err
 		}
-		reg, operand, err := parseModRM(reader, modrm)
+		reg, operand, err := parseModRM(reader, modrm, segment)
 		if err != nil {
 			return Instruction{}, err
 		}
@@ -408,7 +430,7 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 		if err != nil {
 			return Instruction{}, err
 		}
-		reg, operand, err := parseModRM(reader, modrm)
+		reg, operand, err := parseModRM(reader, modrm, segment)
 		if err != nil {
 			return Instruction{}, err
 		}
@@ -496,7 +518,7 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			if err != nil {
 				return Instruction{}, err
 			}
-			reg, operand, err := parseModRM(reader, modrm)
+			reg, operand, err := parseModRM(reader, modrm, segment)
 			if err != nil {
 				return Instruction{}, err
 			}
@@ -508,7 +530,7 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			if err != nil {
 				return Instruction{}, err
 			}
-			reg, operand, err := parseModRM(reader, modrm)
+			reg, operand, err := parseModRM(reader, modrm, segment)
 			if err != nil {
 				return Instruction{}, err
 			}

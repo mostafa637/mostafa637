@@ -238,3 +238,36 @@ func TestApplyLocalSymbolRelocations(t *testing.T) {
 		t.Fatalf("R_386_PC32 = %#x, want %#x", got, want)
 	}
 }
+
+func TestLoadTLSModulesBuildsDTV(t *testing.T) {
+	image := &coreelf.Image{Segments: []coreelf.Segment{{
+		Type: 7, Offset: 0, FileSize: 2, MemSize: 8, Align: 16,
+	}}}
+	memory := corecpu.NewMemory()
+	layout, err := LoadTLSModules(memory, []TLSModuleSpec{
+		{ID: 1, Name: "main", Reader: bytes.NewReader([]byte{1, 2}), Size: 2, Image: image},
+		{ID: 2, Name: "libfoo.so", Reader: bytes.NewReader([]byte{3, 4}), Size: 2, Image: image},
+	}, 0x6000, 0x9000)
+	if err != nil {
+		t.Fatalf("LoadTLSModules: %v", err)
+	}
+	if layout == nil || len(layout.Modules) != 2 || layout.ThreadPointer != 0x6000 {
+		t.Fatalf("layout = %#v", layout)
+	}
+	if layout.Modules[0].Block.Start != 0x6000 || layout.Modules[1].Block.Start != 0x7000 {
+		t.Fatalf("module blocks = %#v", layout.Modules)
+	}
+	var dtv [12]byte
+	if err := memory.Read(0x9000, dtv[:]); err != nil {
+		t.Fatalf("read DTV: %v", err)
+	}
+	if got := binary.LittleEndian.Uint32(dtv[0:4]); got != 2 {
+		t.Fatalf("DTV count = %#x, want 2", got)
+	}
+	if got := binary.LittleEndian.Uint32(dtv[4:8]); got != 0x6000 {
+		t.Fatalf("DTV module 1 = %#x", got)
+	}
+	if got := binary.LittleEndian.Uint32(dtv[8:12]); got != 0x7000 {
+		t.Fatalf("DTV module 2 = %#x", got)
+	}
+}

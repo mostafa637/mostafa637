@@ -3,6 +3,7 @@ package loader
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"path"
 
@@ -18,6 +19,8 @@ type Object struct {
 	Image  *coreelf.Image
 	Space  *AddressSpace
 	SONAME string
+	Reader io.ReaderAt
+	Size   int64
 }
 
 // ObjectRegistry stores all mapped objects in load order. The order is also
@@ -45,6 +48,18 @@ func NewObjectRegistry(memory ...*corecpu.Memory) *ObjectRegistry {
 func (r *ObjectRegistry) Register(name string, space *AddressSpace) error {
 	_, err := r.Add(name, space)
 	return err
+}
+
+// AddWithReader registers an object and retains the ReaderAt needed for later
+// PT_TLS template allocation. The reader is not used for mapped code bytes.
+func (r *ObjectRegistry) AddWithReader(name string, space *AddressSpace, reader io.ReaderAt, size int64) (*Object, error) {
+	object, err := r.Add(name, space)
+	if err != nil {
+		return nil, err
+	}
+	object.Reader = reader
+	object.Size = size
+	return object, nil
 }
 
 // Resolve returns the biased address of a globally defined symbol.

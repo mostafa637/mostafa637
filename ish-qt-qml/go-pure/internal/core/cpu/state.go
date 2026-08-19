@@ -86,7 +86,10 @@ type MachineState struct {
 	FCW uint16
 
 	GS         uint16
-	TLS        uint32
+	FSBase     uint32
+	GSBase     uint32
+	TLS        uint32 // compatibility alias for the active i386 GS/TLS base
+	TLSDTV     uint32 // guest address of the dynamic thread vector
 	FaultAt    Address
 	FaultWrite bool
 	TrapNo     uint32

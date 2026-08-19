@@ -18,6 +18,8 @@ const (
 	guestOpenAppend     = 0x400
 	guestOpenNonblock   = 0x800
 	guestOpenNoFollow   = 0x20000
+	guestOpenDirectory  = 0x10000
+	guestOpenCloexec    = 0x80000
 )
 
 func readGuestString(context *Context, state *corecpu.MachineState, address corecpu.Address, limit int) (string, bool) {
@@ -39,7 +41,7 @@ func readGuestString(context *Context, state *corecpu.MachineState, address core
 }
 
 func hostOpenFlags(flags uint32) (int, bool) {
-	known := uint32(guestOpenAccessMask | guestOpenCreat | guestOpenExcl | guestOpenNoCTTY | guestOpenTrunc | guestOpenAppend | guestOpenNonblock | guestOpenNoFollow)
+	known := uint32(guestOpenAccessMask | guestOpenCreat | guestOpenExcl | guestOpenNoCTTY | guestOpenTrunc | guestOpenAppend | guestOpenNonblock | guestOpenNoFollow | guestOpenDirectory | guestOpenCloexec)
 	if flags&^known != 0 {
 		return 0, false
 	}

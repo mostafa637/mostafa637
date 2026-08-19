@@ -41,6 +41,7 @@ func setThreadArea(context *Context, state *corecpu.MachineState, args [6]uint32
 		return EINVAL
 	}
 	context.TLSBase = base
+	state.GSBase = base
 	state.TLS = base
 	if err := context.Memory.Write(address, raw[:]); err != nil {
 		return EFAULT

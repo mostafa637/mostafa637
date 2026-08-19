@@ -16,11 +16,12 @@ var (
 )
 
 type File struct {
-	Reader io.Reader
-	Writer io.Writer
-	Closer io.Closer
-	Seeker io.Seeker
-	Poll   func(events uint16) uint16
+	Reader  io.Reader
+	Writer  io.Writer
+	Closer  io.Closer
+	Seeker  io.Seeker
+	Poll    func(events uint16) uint16
+	Cloexec bool
 
 	refMu  sync.Mutex
 	refs   int
@@ -191,6 +192,30 @@ func (t *Table) Dup2(oldfd, newfd int32) (int32, error) {
 		return -1, err
 	}
 	return newfd, nil
+}
+
+// CloseOnExec removes and closes descriptors marked close-on-exec. It returns
+// the guest descriptor numbers removed from the table.
+func (t *Table) CloseOnExec() []int32 {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	removed := make([]int32, 0)
+	files := make([]*File, 0)
+	for fd, file := range t.entries {
+		if file == nil || !file.Cloexec {
+			continue
+		}
+		delete(t.entries, fd)
+		removed = append(removed, fd)
+		files = append(files, file)
+	}
+	t.mu.Unlock()
+	for _, file := range files {
+		_ = file.Close()
+	}
+	return removed
 }
 
 func (t *Table) Count() int {

@@ -23,6 +23,7 @@ type LoadedImage struct {
 	InterpreterSpace *coreloader.AddressSpace
 	Registry         *coreloader.ObjectRegistry
 	TLS              *coreloader.TLSBlock
+	TLSLayout        *coreloader.TLSLayout
 }
 
 // LoadELF maps an i386 ELF image into the process address space and constructs
@@ -59,12 +60,8 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 	if mainName == "" {
 		mainName = "<main>"
 	}
-	if _, err := registry.Add(mainName, space); err != nil {
+	if _, err := registry.AddWithReader(mainName, space, r, size); err != nil {
 		return nil, err
-	}
-	tls, err := coreloader.LoadTLS(r, size, image, p.Memory, mainBias, coreloader.DefaultTLSBase())
-	if err != nil {
-		return nil, fmt.Errorf("kernel: load TLS: %w", err)
 	}
 	entry := space.Entry
 	var interpreterImage *coreelf.Image
@@ -92,19 +89,25 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 			}
 			interpreterBias = 0x40000000 - start
 		}
-		interpreterSpace, err = coreloader.Load(bytes.NewReader(interpreterData), int64(len(interpreterData)), interpreterImage, p.Memory, interpreterBias)
+		interpreterReader := bytes.NewReader(interpreterData)
+		interpreterSpace, err = coreloader.Load(interpreterReader, int64(len(interpreterData)), interpreterImage, p.Memory, interpreterBias)
 		if err != nil {
 			return nil, fmt.Errorf("kernel: load interpreter %q: %w", image.Interp, err)
 		}
-		if _, err := registry.Add(image.Interp, interpreterSpace); err != nil {
+		if _, err := registry.AddWithReader(image.Interp, interpreterSpace, interpreterReader, int64(len(interpreterData))); err != nil {
 			return nil, err
 		}
+
 		stack.Auxv = dynamicAuxv(space, interpreterSpace)
 
 		entry = interpreterSpace.Entry
 	}
 	if err := p.loadNeededObjects(registry); err != nil {
 		return nil, err
+	}
+	tlsLayout, err := p.loadTLSModules(registry)
+	if err != nil {
+		return nil, fmt.Errorf("kernel: load TLS modules: %w", err)
 	}
 	if err := coreloader.ApplyAllRelocations(p.Memory, registry); err != nil {
 		return nil, fmt.Errorf("kernel: apply dynamic relocations: %w", err)
@@ -141,10 +144,20 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 	p.CPU.FaultWrite = false
 	p.CPU.TrapNo = 0
 	p.CPU.FCW = 0x037f
-	if tls != nil {
-		p.CPU.TLS = uint32(tls.Start)
+	if tlsLayout != nil && len(tlsLayout.Modules) > 0 {
+		p.CPU.FSBase = uint32(tlsLayout.ThreadPointer)
+		p.CPU.GSBase = uint32(tlsLayout.ThreadPointer)
+		p.CPU.TLS = uint32(tlsLayout.ThreadPointer)
+		p.CPU.TLSDTV = uint32(tlsLayout.DTVStart)
 	} else {
+		p.CPU.FSBase = 0
+		p.CPU.GSBase = 0
 		p.CPU.TLS = 0
+		p.CPU.TLSDTV = 0
+	}
+	var tls *coreloader.TLSBlock
+	if tlsLayout != nil && len(tlsLayout.Modules) > 0 {
+		tls = &tlsLayout.Modules[0].Block
 	}
 	p.Executor.Halted = false
 	return &LoadedImage{
@@ -155,7 +168,9 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 		InterpreterSpace: interpreterSpace,
 		Registry:         registry,
 		TLS:              tls,
+		TLSLayout:        tlsLayout,
 	}, nil
+
 }
 
 func (p *Process) loadNeededObjects(registry *coreloader.ObjectRegistry) error {
@@ -191,11 +206,12 @@ func (p *Process) loadNeededObjects(registry *coreloader.ObjectRegistry) error {
 			if err != nil {
 				return fmt.Errorf("kernel: choose bias for shared object %q: %w", filename, err)
 			}
-			space, err := coreloader.Load(bytes.NewReader(data), int64(len(data)), image, p.Memory, bias)
+			reader := bytes.NewReader(data)
+			space, err := coreloader.Load(reader, int64(len(data)), image, p.Memory, bias)
 			if err != nil {
 				return fmt.Errorf("kernel: load shared object %q: %w", filename, err)
 			}
-			if _, err := registry.Add(filename, space); err != nil {
+			if _, err := registry.AddWithReader(filename, space, reader, int64(len(data))); err != nil {
 				return fmt.Errorf("kernel: register shared object %q: %w", filename, err)
 			}
 			nextBias = updatedBias
@@ -203,6 +219,38 @@ func (p *Process) loadNeededObjects(registry *coreloader.ObjectRegistry) error {
 		}
 	}
 	return nil
+}
+
+func (p *Process) loadTLSModules(registry *coreloader.ObjectRegistry) (*coreloader.TLSLayout, error) {
+	if p == nil || registry == nil {
+		return nil, nil
+	}
+	objects := registry.Objects()
+	specs := make([]coreloader.TLSModuleSpec, 0, len(objects))
+	moduleID := uint32(1)
+	for _, object := range objects {
+		if object == nil || object.Reader == nil || object.Size <= 0 || object.Image == nil || !hasTLS(object.Image) {
+			continue
+		}
+		specs = append(specs, coreloader.TLSModuleSpec{
+			ID: moduleID, Name: object.Name, Reader: object.Reader, Size: object.Size,
+			Image: object.Image, Bias: object.Space.Bias,
+		})
+		moduleID++
+	}
+	return coreloader.LoadTLSModules(p.Memory, specs, coreloader.DefaultTLSBase(), 0)
+}
+
+func hasTLS(image *coreelf.Image) bool {
+	if image == nil {
+		return false
+	}
+	for _, segment := range image.Segments {
+		if segment.Type == 7 && segment.MemSize != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func readNeededObject(fsys *corefs.FS, needed string) (string, []byte, error) {
@@ -325,6 +373,7 @@ func (p *Process) execve(filename string, argv, env []string) int32 {
 	if oldMemory != nil {
 		oldMemory.Close()
 	}
+	p.Context.CloseOnExec()
 	return 0
 }
 

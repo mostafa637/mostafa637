@@ -18,6 +18,7 @@ const (
 	fcntlGetFL    = 3
 	fcntlSetFL    = 4
 	fcntlDupFDClO = 1030
+	fdCloexec     = 1
 
 	tioCGWINSZ = 0x5413
 	tioCSWINSZ = 0x5414
@@ -111,12 +112,24 @@ func fcntl64(context *Context, _ *corecpu.MachineState, args [6]uint32) int32 {
 		if dupErr != nil {
 			return EBADF
 		}
+		if fcntlDupFDClO == args[1] {
+			file.Cloexec = true
+		}
 		if context.Files != nil {
 			context.Files[uint32(newFD)] = file
 		}
 		return newFD
-	case fcntlGetFD, fcntlSetFD, fcntlGetFL, fcntlSetFL:
+	case fcntlGetFD:
+		if file.Cloexec {
+			return fdCloexec
+		}
 		return 0
+	case fcntlSetFD:
+		file.Cloexec = args[2]&fdCloexec != 0
+		return 0
+	case fcntlGetFL, fcntlSetFL:
+		return 0
+
 	default:
 		return EINVAL
 	}

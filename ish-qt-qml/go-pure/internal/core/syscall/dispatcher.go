@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"time"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
 	corefd "github.com/mostafa637/mostafa637/go-pure/internal/core/fd"
@@ -67,6 +68,15 @@ const (
 	SysGetThreadArea Number = 244
 	SysSetRobustList Number = 311
 	SysGetRobustList Number = 312
+	SysGettimeofday  Number = 78
+	SysNanosleep     Number = 162
+	SysGetrlimit     Number = 76
+	SysSetrlimit     Number = 75
+	SysGetgroups32   Number = 205
+	SysSetgroups32   Number = 206
+	SysClockGettime  Number = 265
+	SysStatfs64      Number = 268
+	SysFstatfs64     Number = 269
 )
 
 var errFault = errors.New("syscall: bad guest address")
@@ -115,6 +125,9 @@ type Context struct {
 	TLSBase        uint32
 	RobustListHead uint32
 	RobustListLen  uint32
+	RLimits        map[uint32]ResourceLimit
+	Groups         []uint32
+	StartTime      time.Time
 
 	StartBrk uint32
 	Brk      uint32
@@ -142,10 +155,26 @@ type Dispatcher struct {
 }
 
 func NewContext(memory *corecpu.Memory) *Context {
-	return &Context{Memory: memory, CWD: "/", FDs: corefd.New(), Files: make(map[uint32]*File), Children: NewChildRegistry(), WinCols: 80, WinRows: 24}
+	return &Context{
+		Memory: memory, CWD: "/", FDs: corefd.New(), Files: make(map[uint32]*File),
+		Children: NewChildRegistry(), WinCols: 80, WinRows: 24,
+		RLimits: defaultResourceLimits(), Groups: []uint32{0}, StartTime: time.Now(),
+	}
 }
 
 // InstallFile installs a descriptor in both the new table and the legacy map.
+// CloseOnExec closes descriptors marked with O_CLOEXEC after a successful execve.
+func (c *Context) CloseOnExec() {
+	if c == nil || c.FDs == nil {
+		return
+	}
+	for _, fd := range c.FDs.CloseOnExec() {
+		if c.Files != nil {
+			delete(c.Files, uint32(fd))
+		}
+	}
+}
+
 func (c *Context) InstallFile(number uint32, file *File) error {
 	if c == nil || file == nil || number > uint32(^uint32(0)>>1) {
 		return corefd.ErrBadFD
@@ -177,6 +206,15 @@ func NewDispatcher(context *Context) *Dispatcher {
 	d.Register(SysGetThreadArea, getThreadArea)
 	d.Register(SysSetRobustList, setRobustList)
 	d.Register(SysGetRobustList, getRobustList)
+	d.Register(SysGettimeofday, gettimeofday)
+	d.Register(SysClockGettime, clockGettime)
+	d.Register(SysNanosleep, nanosleep)
+	d.Register(SysGetrlimit, getrlimit)
+	d.Register(SysSetrlimit, setrlimit)
+	d.Register(SysGetgroups32, getgroups32)
+	d.Register(SysSetgroups32, setgroups32)
+	d.Register(SysStatfs64, statfs64)
+	d.Register(SysFstatfs64, fstatfs64)
 	d.Register(SysGetTID, gettid)
 	d.Register(SysOpen, open)
 	d.Register(SysAccess, access)
@@ -275,7 +313,16 @@ func open(context *Context, state *corecpu.MachineState, args [6]uint32) int32 {
 	if err != nil {
 		return errnoForOpen(err)
 	}
-	guestFile := &corefd.File{Reader: file, Writer: file, Closer: file, Seeker: file, Path: path}
+	info, statErr := context.FS.Stat(path)
+	if statErr != nil {
+		_ = file.Close()
+		return errnoForOpen(statErr)
+	}
+	if args[1]&guestOpenDirectory != 0 && !info.IsDir() {
+		_ = file.Close()
+		return ENOTDIR
+	}
+	guestFile := &corefd.File{Reader: file, Writer: file, Closer: file, Seeker: file, Path: path, Cloexec: args[1]&guestOpenCloexec != 0}
 	fd, err := context.FDs.Open(guestFile)
 	if err != nil {
 		_ = file.Close()
@@ -347,14 +394,23 @@ func mmap2(context *Context, _ *corecpu.MachineState, args [6]uint32) int32 {
 }
 
 func doMmap(context *Context, addr, length, prot, flags, fd, offset uint32) int32 {
-	if context.Memory == nil || length == 0 || prot&^(ProtRead|ProtWrite|ProtExec) != 0 {
+	if context == nil || context.Memory == nil || length == 0 || prot&^(ProtRead|ProtWrite|ProtExec) != 0 {
 		return EINVAL
 	}
 	if flags&MapPrivate != 0 && flags&MapShared != 0 {
 		return EINVAL
 	}
-	if flags&MapAnonymous == 0 {
-		return EBADF
+	anonymous := flags&MapAnonymous != 0
+	var backing *corefd.File
+	if !anonymous {
+		if fd == ^uint32(0) || offset&(corecpu.PageSize-1) != 0 {
+			return EBADF
+		}
+		var err int32
+		backing, err = getFile(context, fd)
+		if err != 0 || backing == nil || backing.Path == "" || context.FS == nil {
+			return EBADF
+		}
 	}
 	pages := pagesFor(length)
 	page := corecpu.Page(addr >> corecpu.PageBits)
@@ -371,16 +427,55 @@ func doMmap(context *Context, addr, length, prot, flags, fd, offset uint32) int3
 	if page == corecpu.BadPage {
 		return ENOMEM
 	}
-	memoryFlags := memoryFlags(prot)
-	if flags&MapShared != 0 {
-		memoryFlags |= corecpu.PShared
+	finalFlags := memoryFlags(prot)
+	mapFlags := finalFlags | corecpu.PWrite
+	if anonymous {
+		mapFlags |= corecpu.PAnonymous
 	}
-	if err := context.Memory.Map(page, pages, memoryFlags); err != nil {
+	if flags&MapShared != 0 {
+		mapFlags |= corecpu.PShared
+	}
+	if err := context.Memory.Map(page, pages, mapFlags); err != nil {
 		return ENOMEM
 	}
-	_ = fd
-	_ = offset
-	return int32(uint32(page) << corecpu.PageBits)
+	base := uint32(page) << corecpu.PageBits
+	if backing != nil {
+		info, err := context.FS.Stat(backing.Path)
+		if err != nil {
+			_ = context.Memory.UnmapAlways(page, pages)
+			return errnoForOpen(err)
+		}
+		available := uint64(0)
+		if info.Size > int64(offset) {
+			available = uint64(info.Size - int64(offset))
+		}
+		if available > uint64(length) {
+			available = uint64(length)
+		}
+		if available > 0 {
+			buffer := make([]byte, int(available))
+			n, readErr := context.FS.ReadAt(backing.Path, buffer, int64(offset))
+			if n > 0 {
+				if err := context.Memory.Write(corecpu.Address(base), buffer[:n]); err != nil {
+					_ = context.Memory.UnmapAlways(page, pages)
+					return EFAULT
+				}
+			}
+			if readErr != nil && n == 0 {
+				_ = context.Memory.UnmapAlways(page, pages)
+				return EIO
+			}
+		}
+	}
+	protectedFlags := finalFlags
+	if flags&MapShared != 0 {
+		protectedFlags |= corecpu.PShared
+	}
+	if err := context.Memory.SetFlags(page, pages, protectedFlags); err != nil {
+		_ = context.Memory.UnmapAlways(page, pages)
+		return ENOMEM
+	}
+	return int32(base)
 }
 
 func munmap(context *Context, _ *corecpu.MachineState, args [6]uint32) int32 {

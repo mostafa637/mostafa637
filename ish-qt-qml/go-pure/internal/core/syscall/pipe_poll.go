@@ -125,13 +125,14 @@ func pipe2(context *Context, state *corecpu.MachineState, args [6]uint32) int32 
 	return makePipe(context, state, corecpu.Address(args[0]), flags)
 }
 
-func makePipe(context *Context, state *corecpu.MachineState, address corecpu.Address, _ uint32) int32 {
+func makePipe(context *Context, state *corecpu.MachineState, address corecpu.Address, flags uint32) int32 {
 	if context == nil || context.Memory == nil || context.FDs == nil || address == 0 {
 		return EFAULT
 	}
 	pipe := newGuestPipe()
-	reader := &corefd.File{Reader: &pipeReader{pipe: pipe}, Closer: &pipeReader{pipe: pipe}}
-	writer := &corefd.File{Writer: &pipeWriter{pipe: pipe}, Closer: &pipeWriter{pipe: pipe}}
+	cloexec := flags&uint32(pipe2Cloexec) != 0
+	reader := &corefd.File{Reader: &pipeReader{pipe: pipe}, Closer: &pipeReader{pipe: pipe}, Cloexec: cloexec}
+	writer := &corefd.File{Writer: &pipeWriter{pipe: pipe}, Closer: &pipeWriter{pipe: pipe}, Cloexec: cloexec}
 	reader.Poll = func(events uint16) uint16 { return pipe.ready(events) }
 	writer.Poll = func(events uint16) uint16 { return pipe.ready(events) }
 	readFD, err := context.FDs.Open(reader)
