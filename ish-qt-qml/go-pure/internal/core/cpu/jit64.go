@@ -835,7 +835,8 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		return makeSSEExtract64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
 	case x86asm.PMULUDQ, x86asm.PMULLW, x86asm.PMULHW, x86asm.PSADBW,
 		x86asm.PACKSSWB, x86asm.PACKSSDW, x86asm.PACKUSWB,
-		x86asm.PADDUSB, x86asm.PADDUSW, x86asm.PSUBUSB, x86asm.PSUBUSW:
+		x86asm.PADDUSB, x86asm.PADDUSW, x86asm.PSUBUSB, x86asm.PSUBUSW,
+		x86asm.PADDSB, x86asm.PADDSW, x86asm.PSUBSB, x86asm.PSUBSW:
 
 		left, err := operand64FromArg(arg(0), 16)
 		if err != nil || left.Kind != operand64XMM {
@@ -2388,6 +2389,28 @@ func makeSSESpecialBinary64(address uint64, size uint8, op x86asm.Op, dst, src o
 				} else {
 					result[i] = byte(clampSigned64(int64(left[i])-int64(right[i]), 0, 255))
 				}
+			}
+		case x86asm.PADDSB, x86asm.PSUBSB:
+			for i := 0; i < 16; i++ {
+				leftValue := int64(int8(left[i]))
+				rightValue := int64(int8(right[i]))
+				if op == x86asm.PADDSB {
+					result[i] = byte(int8(clampSigned64(leftValue+rightValue, -128, 127)))
+				} else {
+					result[i] = byte(int8(clampSigned64(leftValue-rightValue, -128, 127)))
+				}
+			}
+		case x86asm.PADDSW, x86asm.PSUBSW:
+			for offset := 0; offset < 16; offset += 2 {
+				leftValue := int64(int16(binary.LittleEndian.Uint16(left[offset:])))
+				rightValue := int64(int16(binary.LittleEndian.Uint16(right[offset:])))
+				var value int64
+				if op == x86asm.PADDSW {
+					value = leftValue + rightValue
+				} else {
+					value = leftValue - rightValue
+				}
+				binary.LittleEndian.PutUint16(result[offset:], uint16(int16(clampSigned64(value, -32768, 32767))))
 			}
 		case x86asm.PADDUSW, x86asm.PSUBUSW:
 			for offset := 0; offset < 16; offset += 2 {
