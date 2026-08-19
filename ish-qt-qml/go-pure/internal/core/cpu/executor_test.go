@@ -1330,3 +1330,123 @@ func TestExecutorLAHFSAHF(t *testing.T) {
 		}
 	}
 }
+
+func TestExecutorBitOperations(t *testing.T) {
+	t.Run("bswap", func(t *testing.T) {
+		_, state := mappedCode(t, []byte{0x0F, 0xC8, 0xF4}) // bswap eax; hlt
+		state.Set(EAX, 0x11223344)
+		if err := NewExecutor(nil).Run(state, 4); err != nil {
+			t.Fatal(err)
+		}
+		if got := state.Get(EAX); got != 0x44332211 {
+			t.Fatalf("bswap eax = %#x, want 0x44332211", got)
+		}
+	})
+
+	for _, test := range []struct {
+		name string
+		code []byte
+		want uint32
+		cf   bool
+	}{
+		{name: "bt set", code: []byte{0x0F, 0xA3, 0xC8, 0xF4}, want: 8, cf: true},  // bt eax, ecx
+		{name: "bts set", code: []byte{0x0F, 0xAB, 0xC8, 0xF4}, want: 8, cf: true}, // bts eax, ecx
+		{name: "btr set", code: []byte{0x0F, 0xB3, 0xC8, 0xF4}, want: 0, cf: true}, // btr eax, ecx
+		{name: "btc set", code: []byte{0x0F, 0xBB, 0xC8, 0xF4}, want: 0, cf: true}, // btc eax, ecx
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, state := mappedCode(t, test.code)
+			state.Set(EAX, 8)
+			state.Set(ECX, 3)
+			if err := NewExecutor(nil).Run(state, 4); err != nil {
+				t.Fatal(err)
+			}
+			if got := state.Get(EAX); got != test.want {
+				t.Fatalf("eax = %#x, want %#x", got, test.want)
+			}
+			if state.Flag(FlagCF) != test.cf {
+				t.Fatalf("cf = %v, want %v", state.Flag(FlagCF), test.cf)
+			}
+		})
+	}
+}
+
+func TestExecutorBitOperationsMemoryIndex(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // ebx = 0x2000
+		0xB9, 0x20, 0x00, 0x00, 0x00, // ecx = 32
+		0x0F, 0xAB, 0x0B, // bts dword ptr [ebx], ecx => [ebx+4], bit 0
+		0xF4,
+	})
+	var initial [4]byte
+	binary.LittleEndian.PutUint32(initial[:], 0x80000000)
+	if err := memory.Write(0x2004, initial[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewExecutor(nil).Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	var raw [4]byte
+	if err := memory.Read(0x2000, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 0 {
+		t.Fatalf("word before indexed bit = %#x, want 0", got)
+	}
+	if err := memory.Read(0x2004, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 0x80000001 {
+		t.Fatalf("word after indexed BTS = %#x, want 0x80000001", got)
+	}
+	if state.Flag(FlagCF) {
+		t.Fatal("BTS unexpectedly reported the previously clear bit as set")
+	}
+}
+
+func TestExecutorBitScan(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0x0F, 0xBC, 0xC3, // bsf eax, ebx
+		0x0F, 0xBD, 0xCB, // bsr ecx, ebx
+		0xF4,
+	})
+	state.Set(EBX, 0x80100020)
+	if err := NewExecutor(nil).Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(EAX) != 5 || state.Get(ECX) != 31 || state.Flag(FlagZF) {
+		t.Fatalf("bit scan eax=%d ecx=%d zf=%v, want 5/31/false", state.Get(EAX), state.Get(ECX), state.Flag(FlagZF))
+	}
+
+	_, zeroState := mappedCode(t, []byte{0x0F, 0xBC, 0xC3, 0xF4}) // bsf eax, ebx; hlt
+	zeroState.Set(EAX, 0xDEADBEEF)
+	zeroState.Set(EBX, 0)
+	if err := NewExecutor(nil).Run(zeroState, 4); err != nil {
+		t.Fatal(err)
+	}
+	if zeroState.Get(EAX) != 0xDEADBEEF || !zeroState.Flag(FlagZF) {
+		t.Fatalf("zero BSF eax=%#x zf=%v, want destination unchanged and zf=true", zeroState.Get(EAX), zeroState.Flag(FlagZF))
+	}
+}
+
+func TestExecutorPopcnt(t *testing.T) {
+	_, state := mappedCode(t, []byte{0xF3, 0x0F, 0xB8, 0xC3, 0xF4}) // popcnt eax, ebx; hlt
+	state.Set(EBX, 0xF0F0F0F0)
+	state.EFlags |= FlagCF | FlagPF | FlagAF | FlagSF | FlagOF | FlagZF
+	state.ExpandFlags()
+	if err := NewExecutor(nil).Run(state, 4); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(EAX) != 16 || state.Flag(FlagCF) || state.Flag(FlagPF) || state.Flag(FlagAF) || state.Flag(FlagSF) || state.Flag(FlagOF) || state.Flag(FlagZF) {
+		t.Fatalf("popcnt eax=%d flags cf=%v pf=%v af=%v sf=%v of=%v zf=%v", state.Get(EAX), state.Flag(FlagCF), state.Flag(FlagPF), state.Flag(FlagAF), state.Flag(FlagSF), state.Flag(FlagOF), state.Flag(FlagZF))
+	}
+
+	_, zeroState := mappedCode(t, []byte{0xF3, 0x0F, 0xB8, 0xC3, 0xF4})
+	zeroState.Set(EBX, 0)
+	if err := NewExecutor(nil).Run(zeroState, 4); err != nil {
+		t.Fatal(err)
+	}
+	if zeroState.Get(EAX) != 0 || !zeroState.Flag(FlagZF) {
+		t.Fatalf("zero popcnt eax=%d zf=%v, want 0/true", zeroState.Get(EAX), zeroState.Flag(FlagZF))
+	}
+}

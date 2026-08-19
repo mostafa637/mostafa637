@@ -98,6 +98,10 @@ const (
 	OpSbbImm
 	OpLahf
 	OpSahf
+	OpBswap
+	OpBitTest
+	OpBitScan
+	OpPopcnt
 )
 
 type Segment uint8
@@ -318,6 +322,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return carryInstruction, nil
+	}
+	if bitInstruction, handled, err := decodeX86BitOps(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return bitInstruction, nil
 	}
 
 	if shift, handled, err := decodeX86Shift(disassembled); handled {
@@ -1107,6 +1117,108 @@ func decodeX86Atomic(inst x86asm.Inst) (Instruction, bool, error) {
 		op = OpXadd
 	}
 	return Instruction{Op: op, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
+}
+
+func decodeX86BitOps(inst x86asm.Inst) (Instruction, bool, error) {
+	switch inst.Op {
+	case x86asm.BSWAP, x86asm.BT, x86asm.BTS, x86asm.BTR, x86asm.BTC, x86asm.BSF, x86asm.BSR, x86asm.POPCNT:
+	default:
+		return Instruction{}, false, nil
+	}
+	if inst.DataSize != 32 {
+		return Instruction{}, true, fmt.Errorf("%w: %v data size %d", ErrUnsupportedAddressing, inst.Op, inst.DataSize)
+	}
+
+	switch inst.Op {
+	case x86asm.BSWAP:
+		if len(inst.Args) < 1 || inst.Args[0] == nil {
+			return Instruction{}, true, fmt.Errorf("%w: BSWAP operands", ErrUnsupportedAddressing)
+		}
+		dst, ok, err := x86Operand32(inst.Args[0])
+		if err != nil || !ok || dst.IsMem || dst.Width != 4 {
+			if err == nil {
+				err = fmt.Errorf("%w: BSWAP destination", ErrUnsupportedAddressing)
+			}
+			return Instruction{}, true, err
+		}
+		return Instruction{Op: OpBswap, Len: uint32(inst.Len), Dst: dst}, true, nil
+
+	case x86asm.BSF, x86asm.BSR:
+		if len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+			return Instruction{}, true, fmt.Errorf("%w: %v operands", ErrUnsupportedAddressing, inst.Op)
+		}
+		dst, ok, err := x86Operand32(inst.Args[0])
+		if err != nil || !ok || dst.IsMem || dst.Width != 4 {
+			if err == nil {
+				err = fmt.Errorf("%w: %v destination", ErrUnsupportedAddressing, inst.Op)
+			}
+			return Instruction{}, true, err
+		}
+		src, ok, err := x86Operand32(inst.Args[1])
+		if err != nil || !ok || src.Width != 4 {
+			if err == nil {
+				err = fmt.Errorf("%w: %v source", ErrUnsupportedAddressing, inst.Op)
+			}
+			return Instruction{}, true, err
+		}
+		group := uint8(0)
+		if inst.Op == x86asm.BSR {
+			group = 1
+		}
+		return Instruction{Op: OpBitScan, Len: uint32(inst.Len), Dst: dst, Src: src, Group: group}, true, nil
+
+	case x86asm.POPCNT:
+		if len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+			return Instruction{}, true, fmt.Errorf("%w: POPCNT operands", ErrUnsupportedAddressing)
+		}
+		dst, ok, err := x86Operand32(inst.Args[0])
+		if err != nil || !ok || dst.IsMem || dst.Width != 4 {
+			if err == nil {
+				err = fmt.Errorf("%w: POPCNT destination", ErrUnsupportedAddressing)
+			}
+			return Instruction{}, true, err
+		}
+		src, ok, err := x86Operand32(inst.Args[1])
+		if err != nil || !ok || src.Width != 4 {
+			if err == nil {
+				err = fmt.Errorf("%w: POPCNT source", ErrUnsupportedAddressing)
+			}
+			return Instruction{}, true, err
+		}
+		return Instruction{Op: OpPopcnt, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
+
+	default:
+		group := uint8(0) // BT
+		switch inst.Op {
+		case x86asm.BTS:
+			group = 1
+		case x86asm.BTR:
+			group = 2
+		case x86asm.BTC:
+			group = 3
+		}
+		if len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+			return Instruction{}, true, fmt.Errorf("%w: %v operands", ErrUnsupportedAddressing, inst.Op)
+		}
+		dst, ok, err := x86Operand32(inst.Args[0])
+		if err != nil || !ok || dst.Width != 4 {
+			if err == nil {
+				err = fmt.Errorf("%w: %v destination", ErrUnsupportedAddressing, inst.Op)
+			}
+			return Instruction{}, true, err
+		}
+		if imm, isImm := inst.Args[1].(x86asm.Imm); isImm {
+			return Instruction{Op: OpBitTest, Len: uint32(inst.Len), Dst: dst, Group: group, Imm: int32(imm)}, true, nil
+		}
+		src, ok, err := x86Operand32(inst.Args[1])
+		if err != nil || !ok || src.Width != 4 {
+			if err == nil {
+				err = fmt.Errorf("%w: %v bit-index source", ErrUnsupportedAddressing, inst.Op)
+			}
+			return Instruction{}, true, err
+		}
+		return Instruction{Op: OpBitTest, Len: uint32(inst.Len), Dst: dst, Src: src, Group: group}, true, nil
+	}
 }
 
 func decodeX86Shift(inst x86asm.Inst) (Instruction, bool, error) {

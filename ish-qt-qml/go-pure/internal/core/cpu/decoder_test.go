@@ -536,3 +536,39 @@ func TestDecodeX86CarryMemorySource(t *testing.T) {
 		t.Fatalf("source = %#v, want dword ptr [ebx]", instruction.Src)
 	}
 }
+
+func TestDecodeX86BitOperations(t *testing.T) {
+	tests := []struct {
+		name  string
+		code  []byte
+		op    Op
+		group uint8
+		dst   Operand
+		src   Operand
+		imm   int32
+	}{
+		{name: "bswap", code: []byte{0x0F, 0xC8}, op: OpBswap, dst: regOperand(EAX)},
+		{name: "bt register", code: []byte{0x0F, 0xA3, 0xCB}, op: OpBitTest, dst: regOperand(EBX), src: regOperand(ECX)},
+		{name: "bts memory", code: []byte{0x0F, 0xAB, 0x4B, 0x04}, op: OpBitTest, group: 1, dst: Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1, Disp: 4}}, src: regOperand(ECX)},
+		{name: "btr memory", code: []byte{0x0F, 0xB3, 0x53, 0x08}, op: OpBitTest, group: 2, dst: Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1, Disp: 8}}, src: regOperand(EDX)},
+		{name: "btc immediate", code: []byte{0x0F, 0xBA, 0x7B, 0x0C, 0x1F}, op: OpBitTest, group: 3, dst: Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1, Disp: 12}}, imm: 31},
+		{name: "bsf", code: []byte{0x0F, 0xBC, 0xC3}, op: OpBitScan, dst: regOperand(EAX), src: regOperand(EBX)},
+		{name: "bsr memory", code: []byte{0x0F, 0xBD, 0x4B, 0x04}, op: OpBitScan, group: 1, dst: regOperand(ECX), src: Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1, Disp: 4}}},
+		{name: "popcnt memory", code: []byte{0xF3, 0x0F, 0xB8, 0x43, 0x04}, op: OpPopcnt, dst: regOperand(EAX), src: Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1, Disp: 4}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Len != uint32(len(test.code)) || instruction.Group != test.group || instruction.Imm != test.imm {
+				t.Fatalf("instruction = %#v, want op %v len %d group %d imm %d", instruction, test.op, len(test.code), test.group, test.imm)
+			}
+			if instruction.Dst != test.dst || instruction.Src != test.src {
+				t.Fatalf("operands = dst %#v src %#v, want dst %#v src %#v", instruction.Dst, instruction.Src, test.dst, test.src)
+			}
+		})
+	}
+}

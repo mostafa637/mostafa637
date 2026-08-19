@@ -457,6 +457,83 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		state.EFlags = (state.EFlags &^ (FlagCF | FlagPF | FlagAF | FlagZF | FlagSF)) | flags | FlagIF
 		state.ExpandFlags()
 		state.EIP = next
+	case OpBswap:
+		value := state.Get(instruction.Dst.Reg)
+		state.Set(instruction.Dst.Reg, bits.ReverseBytes32(value))
+		state.EIP = next
+	case OpBitTest:
+		bitIndex, target, err := bitTestTarget(state, instruction)
+		if err != nil {
+			return instruction, err
+		}
+		value, err := loadOperand(state, target)
+		if err != nil {
+			return instruction, err
+		}
+		bit := uint32(1) << bitIndex
+		oldSet := value&bit != 0
+		state.CollapseFlags()
+		if oldSet {
+			state.EFlags |= FlagCF
+		} else {
+			state.EFlags &^= FlagCF
+		}
+		state.ExpandFlags()
+		switch instruction.Group {
+		case 0: // BT only tests CF.
+		case 1: // BTS sets the selected bit.
+			value |= bit
+		case 2: // BTR resets the selected bit.
+			value &^= bit
+		case 3: // BTC complements the selected bit.
+			value ^= bit
+		default:
+			return instruction, fmt.Errorf("cpu: unsupported bit-test group %d", instruction.Group)
+		}
+		if instruction.Group != 0 {
+			if err := storeOperand(state, target, value); err != nil {
+				return instruction, err
+			}
+		}
+		state.EIP = next
+	case OpBitScan:
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		state.CollapseFlags()
+		if value == 0 {
+			state.EFlags |= FlagZF
+			state.ExpandFlags()
+			state.EIP = next
+			break
+		}
+		state.EFlags &^= FlagZF
+		state.ExpandFlags()
+		var index uint32
+		if instruction.Group == 0 {
+			index = uint32(bits.TrailingZeros32(value))
+		} else if instruction.Group == 1 {
+			index = uint32(31 - bits.LeadingZeros32(value))
+		} else {
+			return instruction, fmt.Errorf("cpu: unsupported bit-scan group %d", instruction.Group)
+		}
+		state.Set(instruction.Dst.Reg, index)
+		state.EIP = next
+	case OpPopcnt:
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		count := uint32(bits.OnesCount32(value))
+		state.Set(instruction.Dst.Reg, count)
+		state.CollapseFlags()
+		state.EFlags &^= FlagCF | FlagPF | FlagAF | FlagSF | FlagOF | FlagZF
+		if count == 0 {
+			state.EFlags |= FlagZF
+		}
+		state.ExpandFlags()
+		state.EIP = next
 
 	case OpIncReg:
 		carry := state.Flag(FlagCF)
@@ -839,6 +916,26 @@ func (e *Executor) Run(state *MachineState, maxSteps int) error {
 		return nil
 	}
 	return ErrStepLimit
+}
+
+func bitTestTarget(state *MachineState, instruction Instruction) (uint32, Operand, error) {
+	var bitIndex uint32
+	if instruction.Src.Width == 0 {
+		bitIndex = uint32(instruction.Imm) & 31
+	} else {
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return 0, Operand{}, err
+		}
+		bitIndex = value
+	}
+	target := instruction.Dst
+	if target.IsMem && instruction.Src.Width != 0 {
+		// Register-indexed memory bit operations address the 32-bit word
+		// containing the requested bit, then use the index modulo 32.
+		target.Memory.Disp += int32((bitIndex >> 5) * 4)
+	}
+	return bitIndex & 31, target, nil
 }
 
 func effectiveAddress(state *MachineState, operand Operand) (Address, error) {
