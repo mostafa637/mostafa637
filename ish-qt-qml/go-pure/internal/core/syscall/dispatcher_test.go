@@ -6,6 +6,7 @@ import (
 	"io"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
 	corefs "github.com/mostafa637/mostafa637/go-pure/internal/core/fs"
@@ -825,5 +826,119 @@ func TestAtFamilyAndVectorSyscalls(t *testing.T) {
 	}
 	if output.String() != "pure go" {
 		t.Fatalf("writev output = %q", output.String())
+	}
+}
+
+func TestRuntimeSyscalls(t *testing.T) {
+	memory := cpu.NewMemory()
+	for page := cpu.Page(1); page <= 6; page++ {
+		if err := memory.Map(page, 1, cpu.PRead|cpu.PWrite); err != nil {
+			t.Fatal(err)
+		}
+	}
+	context := NewContext(memory)
+	context.PID = 123
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+
+	var futexValue [4]byte
+	binary.LittleEndian.PutUint32(futexValue[:], 7)
+	if err := memory.Write(0x1000, futexValue[:]); err != nil {
+		t.Fatal(err)
+	}
+	waitResult := make(chan int32, 1)
+	go func() {
+		waitResult <- dispatcher.Dispatch(state, SysFutex, 0x1000, futexWait, 7, 0, 0, futexWakeBitsetAll)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		context.Futexes.mu.Lock()
+		registered := len(context.Futexes.waiters[0x1000]) != 0
+		context.Futexes.mu.Unlock()
+		if registered {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("futex waiter was not registered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := dispatcher.Dispatch(state, SysFutex, 0x1000, futexWake, 1, 0, 0, 0); got != 1 {
+		t.Fatalf("futex wake = %d", got)
+	}
+	select {
+	case got := <-waitResult:
+		if got != 0 {
+			t.Fatalf("futex wait = %d", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("futex waiter did not wake")
+	}
+	if got := dispatcher.Dispatch(state, SysFutex, 0x1000, futexWait, 6, 0, 0, 0); got != EAGAIN {
+		t.Fatalf("futex mismatch = %d", got)
+	}
+	var timeout [8]byte
+	binary.LittleEndian.PutUint32(timeout[0:4], 0)
+	binary.LittleEndian.PutUint32(timeout[4:8], 1_000_000)
+	if err := memory.Write(0x2000, timeout[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatcher.Dispatch(state, SysFutex, 0x1000, futexWait, 7, 0x2000, 0, 0); got != ETIMEDOUT {
+		t.Fatalf("futex timeout = %d", got)
+	}
+
+	var newLimit [16]byte
+	binary.LittleEndian.PutUint64(newLimit[0:8], 128)
+	binary.LittleEndian.PutUint64(newLimit[8:16], 256)
+	if err := memory.Write(0x3000, newLimit[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatcher.Dispatch(state, SysPrlimit64, context.PID, rlimitNOFILE, 0x3000, 0x3100); got != 0 {
+		t.Fatalf("prlimit64 = %d", got)
+	}
+	var oldLimit [16]byte
+	if err := memory.Read(0x3100, oldLimit[:]); err != nil {
+		t.Fatal(err)
+	}
+	if cur, max := binary.LittleEndian.Uint64(oldLimit[0:8]), binary.LittleEndian.Uint64(oldLimit[8:16]); cur != 1024 || max != 4096 {
+		t.Fatalf("old rlimit = %d/%d", cur, max)
+	}
+	if got := dispatcher.Dispatch(state, SysGetrlimit, rlimitNOFILE, 0x3200); got != 0 {
+		t.Fatalf("getrlimit after prlimit64 = %d", got)
+	}
+	var currentLimit [16]byte
+	if err := memory.Read(0x3200, currentLimit[:]); err != nil {
+		t.Fatal(err)
+	}
+	if cur := binary.LittleEndian.Uint64(currentLimit[0:8]); cur != 128 {
+		t.Fatalf("new rlimit current = %d", cur)
+	}
+
+	if got := dispatcher.Dispatch(state, SysGetrandom, 0x4000, 32, getrandomNonblock); got != 32 {
+		t.Fatalf("getrandom = %d", got)
+	}
+	var randomData [32]byte
+	if err := memory.Read(0x4000, randomData[:]); err != nil {
+		t.Fatal(err)
+	}
+	allZero := true
+	for _, value := range randomData {
+		if value != 0 {
+			allZero = false
+			break
+		}
+	}
+	if allZero {
+		t.Fatal("getrandom returned an all-zero sample")
+	}
+
+	if got := dispatcher.Dispatch(state, SysRseq, 0x5000, rseqSize, 0, 0); got != 0 {
+		t.Fatalf("rseq register = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysRseq, 0x5000, rseqSize, 0, 0); got != EBUSY {
+		t.Fatalf("second rseq register = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysRseq, 0, 0, rseqUnregister, 0); got != 0 {
+		t.Fatalf("rseq unregister = %d", got)
 	}
 }

@@ -77,6 +77,10 @@ const (
 	SysSetrlimit     Number = 75
 	SysGetgroups32   Number = 205
 	SysSetgroups32   Number = 206
+	SysFutex         Number = 240
+	SysPrlimit64     Number = 340
+	SysGetrandom     Number = 355
+	SysRseq          Number = 386
 	SysClockGettime  Number = 265
 	SysStatfs64      Number = 268
 	SysFstatfs64     Number = 269
@@ -98,6 +102,9 @@ const (
 	ENOTDIR      int32 = -20
 	ENAMETOOLONG int32 = -36
 	ENOTTY       int32 = -25
+	EAGAIN       int32 = -11
+	ETIMEDOUT    int32 = -110
+	EBUSY        int32 = -16
 	ENOSYS       int32 = -38
 	ECHILD       int32 = -10
 	ESRCH        int32 = -3
@@ -132,6 +139,10 @@ type Context struct {
 	Groups         []uint32
 	StartTime      time.Time
 	Mappings       []GuestMapping
+	Futexes        *FutexRegistry
+	RseqAddress    uint32
+	RseqLength     uint32
+	RseqSignature  uint32
 
 	StartBrk uint32
 	Brk      uint32
@@ -162,7 +173,7 @@ func NewContext(memory *corecpu.Memory) *Context {
 	return &Context{
 		Memory: memory, CWD: "/", FDs: corefd.New(), Files: make(map[uint32]*File),
 		Children: NewChildRegistry(), WinCols: 80, WinRows: 24,
-		RLimits: defaultResourceLimits(), Groups: []uint32{0}, StartTime: time.Now(),
+		RLimits: defaultResourceLimits(), Groups: []uint32{0}, StartTime: time.Now(), Futexes: NewFutexRegistry(),
 	}
 }
 
@@ -217,6 +228,10 @@ func NewDispatcher(context *Context) *Dispatcher {
 	d.Register(SysSetrlimit, setrlimit)
 	d.Register(SysGetgroups32, getgroups32)
 	d.Register(SysSetgroups32, setgroups32)
+	d.Register(SysFutex, futex)
+	d.Register(SysPrlimit64, prlimit64)
+	d.Register(SysGetrandom, getrandom)
+	d.Register(SysRseq, rseq)
 	d.Register(SysStatfs64, statfs64)
 	d.Register(SysFstatfs64, fstatfs64)
 	d.Register(SysGetTID, gettid)
