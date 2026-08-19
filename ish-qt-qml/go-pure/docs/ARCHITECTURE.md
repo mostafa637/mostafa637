@@ -12,7 +12,7 @@
 | `internal/terminal` | نموذج الشاشة، parser adapter، الألوان، cursor، resize | لا يملك process lifecycle |
 | `internal/session` | عقدة جلسة عامة للكتابة والقراءة وresize والإغلاق | لا يعرف تفاصيل Gio |
 | `internal/platform` | تنفيذ PTY الخاص بالمنصة | لا يحتوي عناصر UI |
-| `internal/core` | إعادة كتابة iSH core تدريجيًا في Go، وتشمل storage وfakefs وCPU/emu/FPU وsession | لا يخلط core مع renderer ولا يستخدم CGo |
+| `internal/core` | إعادة كتابة iSH core تدريجيًا في Go، وتشمل cpu وsyscall وkernel وstorage وfakefs وemu/FPU وsession | لا يخلط core مع renderer ولا يستخدم CGo |
 | `assets` | الأيقونات والموارد المرئية | لا يحتوي كود تشغيل |
 | `tests` | اختبارات التكامل والـ smoke | لا يعتمد على ملفات build مولدة |
 
@@ -40,7 +40,7 @@ internal/session
 
 ## قرار iSH core
 
-هذا الفرع مخصص لإعادة كتابة iSH core في Go، وليس مجرد adapter لـC. أُنجزت طبقة التخزين، وfakefs فوق rootfs، وbootstrap metadata، وCoreSession المرحلي الذي يحافظ على عقد PTY، إضافة إلى حد FPU 80-bit المعزول داخل `internal/core/emu/fpu`. تبقى نسخة C في مجلد `upstream` مرجعًا للمقارنة والاختبارات، لكنها ليست اعتمادًا للبناء. لا يجوز إدخال CGo إلى `go-pure`; أما فرع Qt/QML فيبقى مستقلًا ولا يتأثر بهذا القرار.
+هذا الفرع مخصص لإعادة كتابة iSH core في Go، وليس مجرد adapter لـC. أُنجزت طبقة التخزين، وfakefs فوق rootfs، وbootstrap metadata، وCoreSession المرحلي الذي يحافظ على عقد PTY، وحد FPU 80-bit المعزول داخل `internal/core/emu/fpu`. أضيفت الآن `internal/core/cpu` لصفحات الذاكرة وCOW وgrows-down وMachineState، و`internal/core/syscall` لـi386 syscall ABI الأولي، و`internal/core/kernel` لعملية Go تجمع الذاكرة والسجلات والsyscalls وfakefs. ما زال التنفيذ الفعلي للتعليمات، وELF loader، وجدولة المهام، وإشارات Linux خارج هذا الحد المرحلي؛ لذلك يستمر PTY المضيف كمسار نقل مؤقت في CoreSession. تبقى نسخة C في مجلد `upstream` مرجعًا للمقارنة والاختبارات، لكنها ليست اعتمادًا للبناء. لا يجوز إدخال CGo إلى `go-pure`; أما فرع Qt/QML فيبقى مستقلًا ولا يتأثر بهذا القرار.
 
 ## قواعد التنظيم
 

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	corefs "github.com/mostafa637/mostafa637/go-pure/internal/core/fs"
+	corekernel "github.com/mostafa637/mostafa637/go-pure/internal/core/kernel"
 	platform "github.com/mostafa637/mostafa637/go-pure/internal/platform"
 	transport "github.com/mostafa637/mostafa637/go-pure/internal/session"
 )
@@ -39,6 +40,7 @@ func (c Config) withDefaults() Config {
 type CoreSession struct {
 	mu      sync.Mutex
 	fs      *corefs.FS
+	kernel  *corekernel.Process
 	pty     *platform.PTYSession
 	closed  bool
 	started bool
@@ -59,20 +61,29 @@ func New(cfg Config) (*CoreSession, error) {
 			return nil, err
 		}
 	}
-	return &CoreSession{fs: fake, pty: platform.NewPTYSession(cfg.Shell)}, nil
+	return &CoreSession{fs: fake, kernel: corekernel.NewProcess(1, fake), pty: platform.NewPTYSession(cfg.Shell)}, nil
 }
 
 func NewWithFS(fake *corefs.FS, shell string) (*CoreSession, error) {
 	if fake == nil {
 		return nil, fmt.Errorf("core session: nil fakefs")
 	}
-	return &CoreSession{fs: fake, pty: platform.NewPTYSession(shell)}, nil
+	return &CoreSession{fs: fake, kernel: corekernel.NewProcess(1, fake), pty: platform.NewPTYSession(shell)}, nil
 }
 
 func (s *CoreSession) FS() *corefs.FS {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.fs
+}
+
+// Kernel exposes the process boundary used by the future Pure Go emulator.
+// The current transport still uses PTY until ELF loading and instruction
+// execution are ported.
+func (s *CoreSession) Kernel() *corekernel.Process {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.kernel
 }
 
 func (s *CoreSession) Start(ctx context.Context, cols, rows int) error {
@@ -137,11 +148,17 @@ func (s *CoreSession) Close() error {
 	s.closed = true
 	pty := s.pty
 	fake := s.fs
+	process := s.kernel
 	s.mu.Unlock()
 
 	var first error
 	if pty != nil {
 		first = pty.Close()
+	}
+	if process != nil {
+		if err := process.Close(); first == nil {
+			first = err
+		}
 	}
 	if fake != nil {
 		if err := fake.Close(); first == nil {

@@ -8,9 +8,9 @@
 
 | الطبقة | الملفات | الأسطر التقريبية | قرار النقل |
 |---|---:|---:|---|
-| `asbestos` | 25 | 4,484 | نقل تدريجي إلى `internal/core/cpu` بعد تثبيت نموذج الذاكرة والسجلات |
+| `asbestos` | 25 | 4,484 | أُنشئ أساس `internal/core/cpu` للذاكرة والسجلات؛ تنفيذ التعليمات ما زال لاحقًا |
 | `emu` | 16 | 4,420 | نقل إلى `internal/core/emu` مع اختبارات instruction-level |
-| `kernel` | 45 | 8,656 | تقسيم إلى `internal/core/kernel` و`internal/core/syscall` و`internal/core/signal` |
+| `kernel` | 45 | 8,656 | أُنجزت نواة process وsyscall ABI أولي؛ task/signal/ELF والجدولة ما زالت مرحلية |
 | `fs` | 49 | 9,522 | تقسيم إلى `internal/core/fs` و`internal/core/tty` و`internal/core/proc` |
 | `util` | 11 | 749 | نقل حسب الاعتماد إلى `internal/core/util` |
 | `app/core` | 4 | 602 | إعادة كتابة session وboot وPTY في `internal/core/session` |
@@ -36,7 +36,7 @@ go-pure/
 
 ## ترتيب النقل
 
-يبدأ العمل بمكوّنات لا تعتمد على نظام التشغيل: أنواع السجلات والذاكرة، ثم parser للتعليمات واختبارات المقارنة. بعد ذلك تُنقل طبقة kernel الأساسية والمهام وعمليات الذاكرة، ثم filesystem وfd وtty. في المرحلة الأخيرة تُنقل session وboot وتُربط Gio بها.
+يبدأ العمل بمكوّنات لا تعتمد على نظام التشغيل: أنواع السجلات والذاكرة، ثم syscall ABI واختبارات المقارنة. أُنجزت الآن ذاكرة sparse مع page mapping وCOW وgrows-down، وMachineState، وdispatcher أولي لـmmap/munmap/mprotect/brk/read/write/exit. بعد ذلك تُنقل instruction decoder/executor، ثم ELF وtask وsignal وfd/tty. تبقى session وboot مرتبطة مؤقتًا بـPTY المضيف حتى يكتمل executor.
 
 كل مرحلة يجب أن تملك اختبارات Go مستقلة، واختبار مقارنة مع النسخة C عندما يكون الناتج قابلًا للرصد. لا يجوز حذف C core قبل أن ينجح shell smoke وrootfs وPTY وPython في النسختين.
 
