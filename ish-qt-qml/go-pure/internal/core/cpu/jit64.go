@@ -1,6 +1,7 @@
 package cpu
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -763,6 +764,16 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, sourceErr)
 		}
 		return makeCVTScalar64(address, uint8(inst.Len), inst.Op, destination, source, sourceWidth), false, nil
+	case x86asm.CVTDQ2PS, x86asm.CVTPS2DQ, x86asm.CVTTPS2DQ, x86asm.CVTDQ2PD, x86asm.CVTPD2DQ:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeSSEPackedConvert64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
 	case x86asm.MOVDQA, x86asm.MOVDQU, x86asm.MOVAPS, x86asm.MOVUPS, x86asm.MOVAPD, x86asm.MOVUPD:
 
 		left, err := operand64FromArg(arg(0), 16)
@@ -1655,7 +1666,14 @@ func makeFPUArithmeticMem64(address uint64, size uint8, op x86asm.Op, operand op
 }
 
 func readVector64(state *MachineState64, operand operand64, next uint64) ([16]byte, error) {
+	return readVectorWidth64(state, operand, next, 16)
+}
+
+func readVectorWidth64(state *MachineState64, operand operand64, next uint64, width uint8) ([16]byte, error) {
 	var value [16]byte
+	if width > 16 {
+		return value, ErrUnsupported64
+	}
 	switch operand.Kind {
 	case operand64XMM:
 		if operand.XMM >= uint8(len(state.XMM)) {
@@ -1668,7 +1686,7 @@ func readVector64(state *MachineState64, operand operand64, next uint64) ([16]by
 		if err != nil {
 			return value, err
 		}
-		if err := state.Memory.Read(address, value[:]); err != nil {
+		if err := state.Memory.Read(address, value[:width]); err != nil {
 			return value, err
 		}
 		return value, nil
@@ -1759,6 +1777,55 @@ func cvtFloatToInt64(value float64, width uint8, truncate bool) uint64 {
 		return uint64(1) << (uint(width)*8 - 1)
 	}
 	return uint64(int64(value)) & mask64Width(width)
+}
+
+func packedConversionSourceWidth64(op x86asm.Op) uint8 {
+	if op == x86asm.CVTDQ2PD {
+		return 8
+	}
+	return 16
+}
+
+func makeSSEPackedConvert64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		source, err := readVectorWidth64(state, src, next, packedConversionSourceWidth64(op))
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var result [16]byte
+		switch op {
+		case x86asm.CVTDQ2PS:
+			for lane := 0; lane < 4; lane++ {
+				value := int32(binary.LittleEndian.Uint32(source[lane*4:]))
+				binary.LittleEndian.PutUint32(result[lane*4:], math.Float32bits(float32(value)))
+			}
+		case x86asm.CVTPS2DQ, x86asm.CVTTPS2DQ:
+			truncate := op == x86asm.CVTTPS2DQ
+			for lane := 0; lane < 4; lane++ {
+				value := float64(math.Float32frombits(binary.LittleEndian.Uint32(source[lane*4:])))
+				raw := cvtFloatToInt64(value, 4, truncate)
+				binary.LittleEndian.PutUint32(result[lane*4:], uint32(raw))
+			}
+		case x86asm.CVTDQ2PD:
+			for lane := 0; lane < 2; lane++ {
+				value := int32(binary.LittleEndian.Uint32(source[lane*4:]))
+				binary.LittleEndian.PutUint64(result[lane*8:], math.Float64bits(float64(value)))
+			}
+		case x86asm.CVTPD2DQ:
+			for lane := 0; lane < 2; lane++ {
+				value := math.Float64frombits(binary.LittleEndian.Uint64(source[lane*8:]))
+				raw := cvtFloatToInt64(value, 4, false)
+				binary.LittleEndian.PutUint32(result[lane*4:], uint32(raw))
+			}
+		default:
+			return Flow64Stop, ErrUnsupported64
+		}
+		if err := writeVector64(state, dst, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
 }
 
 func makeCVTScalar64(address uint64, size uint8, op x86asm.Op, dst, src operand64, srcWidth uint8) microOp64 {

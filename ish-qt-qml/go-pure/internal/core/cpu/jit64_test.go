@@ -1662,3 +1662,152 @@ func TestJIT64SSE2AndBitCountExtensions(t *testing.T) {
 		}
 	}
 }
+
+func TestJIT64PackedSSEConversions(t *testing.T) {
+	setVector := func(state *MachineState64, xmm uint8, value []byte) {
+		t.Helper()
+		if len(value) != 16 {
+			t.Fatalf("vector length=%d, want 16", len(value))
+		}
+		copy(state.XMM[xmm][:], value)
+	}
+	checkRun := func(t *testing.T, code []byte, state *MachineState64) {
+		t.Helper()
+		const codeAddress Address64 = 0x1e000
+		if err := state.Memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.Memory.Write(codeAddress, code); err != nil {
+			t.Fatal(err)
+		}
+		state.RIP = uint64(codeAddress)
+		trap := NewJIT64(state.Memory).RunToInterrupt(state)
+		if trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+	}
+	putInt32 := func(vector []byte, lane int, value int32) {
+		binary.LittleEndian.PutUint32(vector[lane*4:], uint32(value))
+	}
+	putFloat32 := func(vector []byte, lane int, value float32) {
+		binary.LittleEndian.PutUint32(vector[lane*4:], math.Float32bits(value))
+	}
+	putFloat64 := func(vector []byte, lane int, value float64) {
+		binary.LittleEndian.PutUint64(vector[lane*8:], math.Float64bits(value))
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		source := make([]byte, 16)
+		putInt32(source, 0, -3)
+		putInt32(source, 1, 0)
+		putInt32(source, 2, 2)
+		putInt32(source, 3, 16777217)
+		setVector(state, 1, source)
+		checkRun(t, []byte{0x0f, 0x5b, 0xc1, 0xf4}, state) // cvtdq2ps xmm0, xmm1
+		want := make([]byte, 16)
+		putFloat32(want, 0, -3)
+		putFloat32(want, 1, 0)
+		putFloat32(want, 2, 2)
+		putFloat32(want, 3, 16777216) // rounded by float32 representation
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("cvtdq2ps=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		source := make([]byte, 16)
+		putFloat32(source, 0, 3.5)
+		putFloat32(source, 1, -2.5)
+		putFloat32(source, 2, 2.6)
+		putFloat32(source, 3, float32(math.NaN()))
+		setVector(state, 1, source)
+		checkRun(t, []byte{0x66, 0x0f, 0x5b, 0xc1, 0xf4}, state) // cvtps2dq xmm0, xmm1
+		want := make([]byte, 16)
+		putInt32(want, 0, 4)
+		putInt32(want, 1, -2)
+		putInt32(want, 2, 3)
+		putInt32(want, 3, math.MinInt32)
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("cvtps2dq=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		source := make([]byte, 16)
+		putFloat32(source, 0, 3.9)
+		putFloat32(source, 1, -2.9)
+		putFloat32(source, 2, float32(math.Inf(1)))
+		putFloat32(source, 3, float32(math.NaN()))
+		setVector(state, 1, source)
+		checkRun(t, []byte{0xf3, 0x0f, 0x5b, 0xc1, 0xf4}, state) // cvttps2dq xmm0, xmm1
+		want := make([]byte, 16)
+		putInt32(want, 0, 3)
+		putInt32(want, 1, -2)
+		putInt32(want, 2, math.MinInt32)
+		putInt32(want, 3, math.MinInt32)
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("cvttps2dq=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		source := make([]byte, 16)
+		putInt32(source, 0, -7)
+		putInt32(source, 1, 11)
+		putInt32(source, 2, 123)
+		putInt32(source, 3, -456)
+		setVector(state, 1, source)
+		checkRun(t, []byte{0xf3, 0x0f, 0xe6, 0xc1, 0xf4}, state) // cvtdq2pd xmm0, xmm1
+		want := make([]byte, 16)
+		putFloat64(want, 0, -7)
+		putFloat64(want, 1, 11)
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("cvtdq2pd=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		source := make([]byte, 16)
+		putFloat64(source, 0, 3.5)
+		putFloat64(source, 1, -2.5)
+		setVector(state, 1, source)
+		for i := 8; i < 16; i++ {
+			state.XMM[0][i] = 0xaa
+		}
+		checkRun(t, []byte{0xf2, 0x0f, 0xe6, 0xc1, 0xf4}, state) // cvtpd2dq xmm0, xmm1
+		want := make([]byte, 16)
+		putInt32(want, 0, 4)
+		putInt32(want, 1, -2)
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("cvtpd2dq=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		memory := NewMemory64()
+		const dataAddress Address64 = 0x1f000
+		if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+			t.Fatal(err)
+		}
+		source := make([]byte, 8)
+		putInt32(source, 0, -12)
+		putInt32(source, 1, 34)
+		if err := memory.Write(dataAddress, source); err != nil {
+			t.Fatal(err)
+		}
+		state := NewMachineState64(memory)
+		state.Set(RDI, uint64(dataAddress))
+		checkRun(t, []byte{0xf3, 0x0f, 0xe6, 0x07, 0xf4}, state) // cvtdq2pd xmm0, qword ptr [rdi]
+		want := make([]byte, 16)
+		putFloat64(want, 0, -12)
+		putFloat64(want, 1, 34)
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("memory cvtdq2pd=%x, want %x", state.XMM[0], want)
+		}
+	}
+}
