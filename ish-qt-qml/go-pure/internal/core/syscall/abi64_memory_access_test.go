@@ -34,6 +34,41 @@ func TestABI64MremapAndMadvise(t *testing.T) {
 	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != 0 {
 		t.Fatalf("madvise: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
 	}
+	var discarded [len("mremap-payload")]byte
+	if err := memory.Read(source, discarded[:]); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(discarded[:], make([]byte, len(discarded))) {
+		t.Fatalf("madvise dontneed contents = %q, want zeroes", discarded[:])
+	}
+
+	const readOnly corecpu.Address64 = 0x38000
+	if err := memory.Map(readOnly, corecpu.Page64Size, corecpu.PRead|corecpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(readOnly, payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.SetFlags(readOnly, corecpu.Page64Size, corecpu.PRead); err != nil {
+		t.Fatal(err)
+	}
+	set64Syscall(state, Sys64Madvise, uint64(readOnly), corecpu.Page64Size, madviseDontNeed64)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != 0 {
+		t.Fatalf("madvise read-only: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+	if err := memory.Read(readOnly, discarded[:]); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(discarded[:], make([]byte, len(discarded))) {
+		t.Fatalf("read-only madvise contents = %q, want zeroes", discarded[:])
+	}
+	if flags, ok := memory.MappingFlags(corecpu.Page64(uint64(readOnly) >> corecpu.Page64Bits)); !ok || flags != corecpu.PRead {
+		t.Fatalf("read-only flags after madvise = %#x/%v", flags, ok)
+	}
+	set64Syscall(state, Sys64Madvise, uint64(source+corecpu.Address64(2*corecpu.Page64Size)), corecpu.Page64Size, madviseDontNeed64)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(ENOMEM) {
+		t.Fatalf("madvise unmapped: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
 	set64Syscall(state, Sys64Mremap, uint64(source), 2*corecpu.Page64Size, corecpu.Page64Size, 0)
 	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(source) {
 		t.Fatalf("mremap shrink: err=%v rax=%#x", err, state.Get(corecpu.RAX))

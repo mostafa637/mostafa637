@@ -263,6 +263,43 @@ func (ctx *Context64) updateMapping64(oldBase corecpu.Address64, oldLength uint6
 	ctx.removeMappings64(oldBase, oldLength)
 }
 
+func discardMappingRange64(memory *corecpu.Memory64, base corecpu.Address64, pages uint64) int64 {
+	if memory == nil || pages == 0 {
+		return int64(EINVAL)
+	}
+	flags := make([]corecpu.Flags, pages)
+	first := uint64(base) >> corecpu.Page64Bits
+	for page := uint64(0); page < pages; page++ {
+		value, ok := memory.MappingFlags(corecpu.Page64(first + page))
+		if !ok {
+			return int64(ENOMEM)
+		}
+		flags[page] = value
+	}
+	length := pages * corecpu.Page64Size
+	if err := memory.SetFlags(base, length, corecpu.PRead|corecpu.PWrite); err != nil {
+		return int64(EFAULT)
+	}
+	zeroPage := make([]byte, corecpu.Page64Size)
+	for page := uint64(0); page < pages; page++ {
+		pageBase := corecpu.Address64((first + page) << corecpu.Page64Bits)
+		if err := memory.Write(pageBase, zeroPage); err != nil {
+			for restore := uint64(0); restore < page; restore++ {
+				restoreBase := corecpu.Address64((first + restore) << corecpu.Page64Bits)
+				_ = memory.SetFlags(restoreBase, corecpu.Page64Size, flags[restore])
+			}
+			return int64(EFAULT)
+		}
+	}
+	for page := uint64(0); page < pages; page++ {
+		pageBase := corecpu.Address64((first + page) << corecpu.Page64Bits)
+		if err := memory.SetFlags(pageBase, corecpu.Page64Size, flags[page]); err != nil {
+			return int64(EFAULT)
+		}
+	}
+	return 0
+}
+
 func madvise64(ctx *Context64, args [6]uint64) int64 {
 	if ctx == nil || ctx.Memory == nil || args[1] == 0 {
 		return int64(EINVAL)
@@ -277,8 +314,10 @@ func madvise64(ctx *Context64, args [6]uint64) int64 {
 	if !ok || !mappingRangeMapped64(ctx.Memory, corecpu.Address64(args[0]), pages) {
 		return int64(ENOMEM)
 	}
-	// Advisory state is intentionally a no-op in the sparse guest memory model.
-	// Mapping and page contents remain unchanged for every accepted Linux advice.
+	if args[2] == madviseDontNeed64 {
+		return discardMappingRange64(ctx.Memory, corecpu.Address64(args[0]), pages)
+	}
+	// Other advice values remain advisory in the sparse guest memory model.
 	return 0
 }
 
