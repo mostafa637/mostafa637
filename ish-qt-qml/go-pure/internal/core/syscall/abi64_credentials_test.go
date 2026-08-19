@@ -74,6 +74,14 @@ func TestDispatcher64CredentialsAndResIDs(t *testing.T) {
 	if ids != [3]uint32{100, 100, 0} {
 		t.Fatalf("getresgid values=%v", ids)
 	}
+	set64Syscall(state, Sys64SetUID, uint64(1)<<32)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(EINVAL) {
+		t.Fatalf("out-of-range setuid: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+	set64Syscall(state, Sys64SetResGID, uint64(1)<<32, ^uint64(0), ^uint64(0))
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(EINVAL) {
+		t.Fatalf("out-of-range setresgid: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
 	set64Syscall(state, Sys64GetGID)
 	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 100 {
 		t.Fatalf("getgid: err=%v rax=%d", err, state.Get(corecpu.RAX))

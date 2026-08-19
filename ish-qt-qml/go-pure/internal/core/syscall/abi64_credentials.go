@@ -63,6 +63,9 @@ func setuid64(ctx *Context64, args [6]uint64) int64 {
 	if ctx == nil {
 		return int64(ESRCH)
 	}
+	if args[0] > uint64(^uint32(0)) {
+		return int64(EINVAL)
+	}
 	uid := uint32(args[0])
 	if ctx.EffectiveUID == 0 {
 		ctx.RealUID = uid
@@ -81,6 +84,9 @@ func setgid64(ctx *Context64, args [6]uint64) int64 {
 	if ctx == nil {
 		return int64(ESRCH)
 	}
+	if args[0] > uint64(^uint32(0)) {
+		return int64(EINVAL)
+	}
 	gid := uint32(args[0])
 	if ctx.EffectiveUID == 0 {
 		ctx.RealGID = gid
@@ -95,6 +101,10 @@ func setgid64(ctx *Context64, args [6]uint64) int64 {
 	return 0
 }
 
+func validRequestedID64(value uint64) bool {
+	return value <= uint64(^uint32(0))
+}
+
 func idRequested64(value uint64) (uint32, bool) {
 	id := uint32(value)
 	return id, id != guestInvalidID64
@@ -107,6 +117,9 @@ func allowedUnprivilegedID64(value uint32, real, effective, saved uint32) bool {
 func setresuid64(ctx *Context64, args [6]uint64) int64 {
 	if ctx == nil {
 		return int64(ESRCH)
+	}
+	if !validRequestedID64(args[0]) || !validRequestedID64(args[1]) || !validRequestedID64(args[2]) {
+		return int64(EINVAL)
 	}
 	real, realSet := idRequested64(args[0])
 	effective, effectiveSet := idRequested64(args[1])
@@ -131,6 +144,9 @@ func setresuid64(ctx *Context64, args [6]uint64) int64 {
 func setresgid64(ctx *Context64, args [6]uint64) int64 {
 	if ctx == nil {
 		return int64(ESRCH)
+	}
+	if !validRequestedID64(args[0]) || !validRequestedID64(args[1]) || !validRequestedID64(args[2]) {
+		return int64(EINVAL)
 	}
 	real, realSet := idRequested64(args[0])
 	effective, effectiveSet := idRequested64(args[1])

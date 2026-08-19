@@ -53,6 +53,22 @@ func TestABI64ResourceLimitsAndGroups(t *testing.T) {
 		t.Fatalf("invalid setrlimit: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
 	}
 
+	ctx.EffectiveUID = 1000
+	binary.LittleEndian.PutUint64(limit[0:8], 128)
+	binary.LittleEndian.PutUint64(limit[8:16], 257)
+	if err := memory.Write(limitAddress, limit[:]); err != nil {
+		t.Fatal(err)
+	}
+	set64Syscall(state, Sys64SetRlimit, uint64(rlimitNOFILE), uint64(limitAddress))
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(EPERM) {
+		t.Fatalf("non-root raise hard limit: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+	set64Syscall(state, Sys64SetGroups, 0, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(EPERM) {
+		t.Fatalf("non-root setgroups: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+	ctx.EffectiveUID = 0
+
 	set64Syscall(state, Sys64GetGroups, 0, 0)
 	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != 1 {
 		t.Fatalf("getgroups count: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))

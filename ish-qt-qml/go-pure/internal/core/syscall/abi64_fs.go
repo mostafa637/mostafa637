@@ -516,10 +516,11 @@ func prlimit64_64(ctx *Context64, args [6]uint64) int64 {
 			return int64(EFAULT)
 		}
 		limit := ResourceLimit64{Cur: binary.LittleEndian.Uint64(value[0:8]), Max: binary.LittleEndian.Uint64(value[8:16])}
-		if limit.Cur > limit.Max {
-			return int64(EINVAL)
+		if result := validateResourceLimit64(ctx, old, limit); result != 0 {
+			return result
 		}
 		ctx.RLimits[resource] = limit
+
 	}
 	if args[3] != 0 {
 		var value [16]byte

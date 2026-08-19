@@ -26,6 +26,16 @@ func getrlimit64(ctx *Context64, args [6]uint64) int64 {
 	return 0
 }
 
+func validateResourceLimit64(ctx *Context64, old, next ResourceLimit64) int64 {
+	if next.Cur > next.Max {
+		return int64(EINVAL)
+	}
+	if ctx != nil && ctx.EffectiveUID != 0 && (next.Max > old.Max || next.Cur > old.Max) {
+		return int64(EPERM)
+	}
+	return 0
+}
+
 func setrlimit64(ctx *Context64, args [6]uint64) int64 {
 	if ctx == nil || ctx.Memory == nil || args[1] == 0 {
 		return int64(EFAULT)
@@ -41,8 +51,8 @@ func setrlimit64(ctx *Context64, args [6]uint64) int64 {
 		return int64(EFAULT)
 	}
 	limit := ResourceLimit64{Cur: binary.LittleEndian.Uint64(value[0:8]), Max: binary.LittleEndian.Uint64(value[8:16])}
-	if limit.Cur > limit.Max {
-		return int64(EINVAL)
+	if result := validateResourceLimit64(ctx, ctx.RLimits[args[0]], limit); result != 0 {
+		return result
 	}
 	ctx.RLimits[args[0]] = limit
 	return 0
@@ -75,6 +85,9 @@ func getgroups64(ctx *Context64, args [6]uint64) int64 {
 func setgroups64(ctx *Context64, args [6]uint64) int64 {
 	if ctx == nil || ctx.Memory == nil {
 		return int64(EFAULT)
+	}
+	if ctx.EffectiveUID != 0 {
+		return int64(EPERM)
 	}
 	if args[0] > 65536 {
 		return int64(EINVAL)
