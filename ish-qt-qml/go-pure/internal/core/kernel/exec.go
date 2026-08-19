@@ -21,6 +21,7 @@ type LoadedImage struct {
 	Stack            coreloader.StackLayout
 	Interpreter      *coreelf.Image
 	InterpreterSpace *coreloader.AddressSpace
+	Registry         *coreloader.ObjectRegistry
 	TLS              *coreloader.TLSBlock
 }
 
@@ -52,8 +53,14 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 	if err != nil {
 		return nil, err
 	}
-	if err := coreloader.ApplyRelocations(p.Memory, space); err != nil {
-		return nil, fmt.Errorf("kernel: relocate main image: %w", err)
+	registry := coreloader.NewObjectRegistry(p.Memory)
+
+	mainName := filename
+	if mainName == "" {
+		mainName = "<main>"
+	}
+	if _, err := registry.Add(mainName, space); err != nil {
+		return nil, err
 	}
 	tls, err := coreloader.LoadTLS(r, size, image, p.Memory, mainBias, coreloader.DefaultTLSBase())
 	if err != nil {
@@ -89,13 +96,21 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 		if err != nil {
 			return nil, fmt.Errorf("kernel: load interpreter %q: %w", image.Interp, err)
 		}
-		if err := coreloader.ApplyRelocations(p.Memory, interpreterSpace); err != nil {
-			return nil, fmt.Errorf("kernel: relocate interpreter %q: %w", image.Interp, err)
+		if _, err := registry.Add(image.Interp, interpreterSpace); err != nil {
+			return nil, err
 		}
 		stack.Auxv = dynamicAuxv(space, interpreterSpace)
+
 		entry = interpreterSpace.Entry
 	}
+	if err := p.loadNeededObjects(registry); err != nil {
+		return nil, err
+	}
+	if err := coreloader.ApplyAllRelocations(p.Memory, registry); err != nil {
+		return nil, fmt.Errorf("kernel: apply dynamic relocations: %w", err)
+	}
 	if filename != "" {
+
 		stack.ExecFilename = filename
 	}
 	if stack.ExecFilename == "" {
@@ -138,8 +153,107 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 		Stack:            layout,
 		Interpreter:      interpreterImage,
 		InterpreterSpace: interpreterSpace,
+		Registry:         registry,
 		TLS:              tls,
 	}, nil
+}
+
+func (p *Process) loadNeededObjects(registry *coreloader.ObjectRegistry) error {
+	if p == nil || p.FS == nil || registry == nil {
+		return nil
+	}
+	objects := registry.Objects()
+	nextBias := uint32(0x50000000)
+	for index := 0; index < len(objects); index++ {
+		object := objects[index]
+		if object == nil || object.Image == nil || object.Image.Dynamic == nil {
+			continue
+		}
+		for _, needed := range object.Image.Dynamic.Needed {
+			if registry.Has(needed) {
+				continue
+			}
+			filename, data, err := readNeededObject(p.FS, needed)
+			if err != nil {
+				return fmt.Errorf("kernel: load DT_NEEDED %q for %s: %w", needed, object.Name, err)
+			}
+			image, err := coreelf.Parse(bytes.NewReader(data), int64(len(data)))
+			if err != nil {
+				return fmt.Errorf("kernel: parse shared object %q: %w", filename, err)
+			}
+			if image.Interp != "" {
+				return fmt.Errorf("kernel: shared object %q has unsupported PT_INTERP %q", filename, image.Interp)
+			}
+			if image.Header.Type != elf.ET_DYN {
+				return fmt.Errorf("kernel: shared object %q is not ET_DYN", filename)
+			}
+			bias, updatedBias, err := nextObjectBias(image, nextBias)
+			if err != nil {
+				return fmt.Errorf("kernel: choose bias for shared object %q: %w", filename, err)
+			}
+			space, err := coreloader.Load(bytes.NewReader(data), int64(len(data)), image, p.Memory, bias)
+			if err != nil {
+				return fmt.Errorf("kernel: load shared object %q: %w", filename, err)
+			}
+			if _, err := registry.Add(filename, space); err != nil {
+				return fmt.Errorf("kernel: register shared object %q: %w", filename, err)
+			}
+			nextBias = updatedBias
+			objects = registry.Objects()
+		}
+	}
+	return nil
+}
+
+func readNeededObject(fsys *corefs.FS, needed string) (string, []byte, error) {
+	candidates := []string{
+		needed,
+		pathpkg.Join("/lib", needed),
+		pathpkg.Join("/lib/i386-linux-gnu", needed),
+		pathpkg.Join("/usr/lib", needed),
+		pathpkg.Join("/usr/lib/i386-linux-gnu", needed),
+	}
+	var lastErr error
+	seen := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		candidate = pathpkg.Clean(candidate)
+		if seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		data, err := fsys.ReadFile(candidate)
+		if err == nil {
+			return candidate, data, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = corefs.ErrNotFound
+	}
+	return "", nil, lastErr
+}
+
+func nextObjectBias(image *coreelf.Image, next uint32) (uint32, uint32, error) {
+	start, end, err := image.LoadRange()
+	if err != nil {
+		return 0, 0, err
+	}
+	if end <= start {
+		return 0, 0, fmt.Errorf("empty load range")
+	}
+	if start > next {
+		return 0, 0, fmt.Errorf("load range starts above allocation window")
+	}
+	bias := (next - start) &^ (coreelf.PageSize - 1)
+	actualEnd64 := uint64(bias) + uint64(end)
+	if actualEnd64 > 0xffffffff {
+		return 0, 0, fmt.Errorf("load range overflows 32-bit address space")
+	}
+	nextEnd := uint32(actualEnd64)
+	if nextEnd > 0xffffffff-coreelf.PageSize {
+		return 0, 0, fmt.Errorf("shared-object allocation window exhausted")
+	}
+	return bias, (nextEnd+coreelf.PageSize-1)&^(coreelf.PageSize-1) + coreelf.PageSize, nil
 }
 
 func dynamicAuxv(main, interpreter *coreloader.AddressSpace) []coreloader.AuxEntry {
