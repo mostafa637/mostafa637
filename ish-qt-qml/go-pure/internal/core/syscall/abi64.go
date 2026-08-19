@@ -165,33 +165,36 @@ const (
 	Sys64InotifyAdd       Number64 = 254
 	Sys64InotifyRm        Number64 = 255
 	Sys64Openat           Number64 = 257
+	Sys64Mkdirat          Number64 = 258
+	Sys64Readlinkat       Number64 = 267
 	Sys64Fstatat          Number64 = 262
 	Sys64Unlinkat         Number64 = 263
-	Sys64Renameat         Number64 = 264
-	Sys64Linkat           Number64 = 265
-	Sys64Symlinkat        Number64 = 266
-	Sys64SetRobust        Number64 = 273
-	Sys64Splice           Number64 = 275
-	Sys64GetRobust        Number64 = 274
-	Sys64Signalfd4        Number64 = 289
-	Sys64Eventfd2         Number64 = 290
-	Sys64EpollCreate1     Number64 = 291
-	Sys64Pipe2            Number64 = 293
-	Sys64Tgkill           Number64 = 234
-	Sys64SetRlimit        Number64 = 160
-	Sys64ArchPrctl        Number64 = 158
-	Sys64Accept4          Number64 = 288
-	Sys64InotifyInit1     Number64 = 294
-	Sys64Prlimit64        Number64 = 302
-	Sys64Getrandom        Number64 = 318
-	Sys64GetCPU           Number64 = 309
-	Sys64Statx            Number64 = 332
-	Sys64Rseq             Number64 = 334
-	Sys64EpollPwait2      Number64 = 441
-	Sys64Getdents64       Number64 = 217
-	Sys64TimerfdCreate    Number64 = 283
-	Sys64TimerfdSettime   Number64 = 286
-	Sys64TimerfdGettime   Number64 = 287
+
+	Sys64Renameat       Number64 = 264
+	Sys64Linkat         Number64 = 265
+	Sys64Symlinkat      Number64 = 266
+	Sys64SetRobust      Number64 = 273
+	Sys64Splice         Number64 = 275
+	Sys64GetRobust      Number64 = 274
+	Sys64Signalfd4      Number64 = 289
+	Sys64Eventfd2       Number64 = 290
+	Sys64EpollCreate1   Number64 = 291
+	Sys64Pipe2          Number64 = 293
+	Sys64Tgkill         Number64 = 234
+	Sys64SetRlimit      Number64 = 160
+	Sys64ArchPrctl      Number64 = 158
+	Sys64Accept4        Number64 = 288
+	Sys64InotifyInit1   Number64 = 294
+	Sys64Prlimit64      Number64 = 302
+	Sys64Getrandom      Number64 = 318
+	Sys64GetCPU         Number64 = 309
+	Sys64Statx          Number64 = 332
+	Sys64Rseq           Number64 = 334
+	Sys64EpollPwait2    Number64 = 441
+	Sys64Getdents64     Number64 = 217
+	Sys64TimerfdCreate  Number64 = 283
+	Sys64TimerfdSettime Number64 = 286
+	Sys64TimerfdGettime Number64 = 287
 )
 
 // Handler64 follows the Linux x86-64 syscall register ABI after the SYSCALL
@@ -415,6 +418,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Symlinkat, symlinkat64Guest)
 	d.Register(Sys64Prlimit64, prlimit64_64)
 	d.Register(Sys64Mkdir, mkdir64Guest)
+	d.Register(Sys64Mkdirat, mkdirat64Guest)
+
 	d.Register(Sys64Rmdir, rmdir64Guest)
 	d.Register(Sys64Unlink, unlink64Guest)
 	d.Register(Sys64Rename, rename64Guest)
@@ -423,6 +428,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64GetCWD, getcwd64)
 	d.Register(Sys64Chdir, chdir64)
 	d.Register(Sys64Readlink, readlink64)
+	d.Register(Sys64Readlinkat, readlinkat64)
+
 	d.Register(Sys64Getdents64, getdents64Guest)
 	d.Register(Sys64Brk, brk64)
 	d.Register(Sys64Mmap, mmap64)
