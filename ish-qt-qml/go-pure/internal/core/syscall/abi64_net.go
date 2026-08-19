@@ -40,6 +40,7 @@ type socketHandle64 struct {
 	network  string
 	listener net.Listener
 	conn     net.Conn
+	options  map[socketOptionKey64]int32
 }
 
 type bufferedPipe64 struct {

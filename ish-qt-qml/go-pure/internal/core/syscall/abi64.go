@@ -58,19 +58,25 @@ const (
 	Sys64Fchownat  Number64 = 260
 	Sys64Fchmodat  Number64 = 268
 
-	Sys64GetRUsage        Number64 = 98
-	Sys64GetGroups        Number64 = 115
-	Sys64SetGroups        Number64 = 116
-	Sys64Socket           Number64 = 41
-	Sys64Connect          Number64 = 42
-	Sys64Accept           Number64 = 43
-	Sys64Sendto           Number64 = 44
-	Sys64Recvfrom         Number64 = 45
-	Sys64Shutdown         Number64 = 48
-	Sys64Bind             Number64 = 49
-	Sys64Listen           Number64 = 50
-	Sys64Getsockname      Number64 = 51
-	Sys64Socketpair       Number64 = 53
+	Sys64GetRUsage Number64 = 98
+	Sys64GetGroups Number64 = 115
+	Sys64SetGroups Number64 = 116
+	Sys64Socket    Number64 = 41
+	Sys64Connect   Number64 = 42
+	Sys64Accept    Number64 = 43
+	Sys64Sendto    Number64 = 44
+	Sys64Recvfrom  Number64 = 45
+	Sys64Sendmsg   Number64 = 46
+	Sys64Recvmsg   Number64 = 47
+	Sys64Shutdown  Number64 = 48
+
+	Sys64Bind        Number64 = 49
+	Sys64Listen      Number64 = 50
+	Sys64Getsockname Number64 = 51
+	Sys64Setsockopt  Number64 = 54
+	Sys64Getsockopt  Number64 = 55
+	Sys64Socketpair  Number64 = 53
+
 	Sys64Clone            Number64 = 56
 	Sys64Fork             Number64 = 57
 	Sys64Vfork            Number64 = 58
@@ -323,8 +329,13 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Accept, accept64)
 	d.Register(Sys64Accept4, accept464)
 	d.Register(Sys64Getsockname, getsockname64)
+	d.Register(Sys64Setsockopt, setsockopt64)
+	d.Register(Sys64Getsockopt, getsockopt64)
 	d.Register(Sys64Sendto, sendto64)
 	d.Register(Sys64Recvfrom, recvfrom64)
+	d.Register(Sys64Sendmsg, sendmsg64)
+	d.Register(Sys64Recvmsg, recvmsg64)
+
 	d.Register(Sys64Shutdown, shutdown64)
 	d.Register(Sys64Kill, kill64)
 	d.Register(Sys64Signalfd4, signalfd4_64)
