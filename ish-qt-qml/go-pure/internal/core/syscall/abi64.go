@@ -34,6 +34,10 @@ const (
 	Sys64Brk            Number64 = 12
 	Sys64Mremap         Number64 = 25
 	Sys64Madvise        Number64 = 28
+	Sys64Mlock          Number64 = 149
+	Sys64Munlock        Number64 = 150
+	Sys64Mlockall       Number64 = 151
+	Sys64Munlockall     Number64 = 152
 	Sys64Gettimeofday   Number64 = 96
 	Sys64Times          Number64 = 100
 	Sys64Lseek          Number64 = 8
@@ -111,6 +115,8 @@ const (
 	Sys64Rmdir     Number64 = 84
 	Sys64Unlink    Number64 = 87
 	Sys64Readlink  Number64 = 89
+	Sys64Capget    Number64 = 125
+	Sys64Capset    Number64 = 126
 	Sys64GetUID    Number64 = 102
 	Sys64SetUID    Number64 = 105
 	Sys64GetGID    Number64 = 104
@@ -193,6 +199,9 @@ type Context64 struct {
 	RealGID        uint32
 	EffectiveGID   uint32
 	SavedGID       uint32
+	CapEffective   uint64
+	CapPermitted   uint64
+	CapInheritable uint64
 	TIDAddress     uint64
 	Children       *ChildRegistry
 	RobustListHead uint64
@@ -302,6 +311,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64RtSigreturn, signalStub64)
 	d.Register(Sys64Tkill, tkill64)
 	d.Register(Sys64Tgkill, tgkill64)
+	d.Register(Sys64Capget, capget64)
+	d.Register(Sys64Capset, capset64)
 	d.Register(Sys64GetUID, getuid64)
 	d.Register(Sys64SetUID, setuid64)
 	d.Register(Sys64GetGID, getgid64)
@@ -389,6 +400,10 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Munmap, munmap64)
 	d.Register(Sys64Mremap, mremap64)
 	d.Register(Sys64Madvise, madvise64)
+	d.Register(Sys64Mlock, mlock64)
+	d.Register(Sys64Munlock, munlock64)
+	d.Register(Sys64Mlockall, mlockall64)
+	d.Register(Sys64Munlockall, munlockall64)
 	d.Register(Sys64Lseek, lseek64)
 	d.Register(Sys64Fsync, fsync64)
 	d.Register(Sys64Fdatasync, fdatasync64)
