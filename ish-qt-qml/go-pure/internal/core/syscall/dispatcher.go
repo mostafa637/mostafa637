@@ -89,6 +89,7 @@ type Context struct {
 	PID        uint32
 	CWD        string
 	TIDAddress uint32
+	Children   *ChildRegistry
 
 	StartBrk uint32
 	Brk      uint32
@@ -112,7 +113,7 @@ type Dispatcher struct {
 }
 
 func NewContext(memory *corecpu.Memory) *Context {
-	return &Context{Memory: memory, CWD: "/", FDs: corefd.New(), Files: make(map[uint32]*File)}
+	return &Context{Memory: memory, CWD: "/", FDs: corefd.New(), Files: make(map[uint32]*File), Children: NewChildRegistry()}
 }
 
 // InstallFile installs a descriptor in both the new table and the legacy map.

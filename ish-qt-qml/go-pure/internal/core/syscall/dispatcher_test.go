@@ -266,3 +266,37 @@ func TestTaskLifecycleStubs(t *testing.T) {
 		t.Fatalf("set_tid_address = %d address=%#x", got, context.TIDAddress)
 	}
 }
+
+func TestWait4ChildRegistry(t *testing.T) {
+	memory := cpu.NewMemory()
+	if err := memory.Map(1, 1, cpu.PRead|cpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	context := NewContext(memory)
+	context.PID = 77
+	if !context.Children.AddChild(context.PID, 88) {
+		t.Fatal("AddChild failed")
+	}
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+
+	if got := dispatcher.Dispatch(state, SysWait4, 88, 0x1000, WaitNoHang, 0); got != 0 {
+		t.Fatalf("wait4 WNOHANG before exit = %d", got)
+	}
+	if !context.Children.MarkExited(88, 42) {
+		t.Fatal("MarkExited failed")
+	}
+	if got := dispatcher.Dispatch(state, SysWait4, 88, 0x1000, 0, 0); got != 88 {
+		t.Fatalf("wait4 exited child = %d", got)
+	}
+	var status [4]byte
+	if err := memory.Read(0x1000, status[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(status[:]); got != 42<<8 {
+		t.Fatalf("wait status = %#x", got)
+	}
+	if got := dispatcher.Dispatch(state, SysWait4, 88, 0, WaitNoHang, 0); got != ECHILD {
+		t.Fatalf("wait4 reaped child = %d", got)
+	}
+}

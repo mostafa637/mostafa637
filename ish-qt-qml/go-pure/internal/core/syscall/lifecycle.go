@@ -1,5 +1,7 @@
 package syscall
 
+import "encoding/binary"
+
 import corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
 
 // forkStub and cloneStub intentionally fail closed until ProcessManager can
@@ -13,15 +15,30 @@ func cloneStub(*Context, *corecpu.MachineState, [6]uint32) int32 {
 	return ENOSYS
 }
 
-// wait4 has no child registry yet. ECHILD matches Linux's result when the
-// calling task has no waitable children, while preserving the ABI shape.
-func wait4(context *Context, _ *corecpu.MachineState, _ [6]uint32) int32 {
-	if context == nil {
+// wait4 consumes exited children from ChildRegistry and writes the standard
+// low-byte exit status encoding into the guest status pointer.
+func wait4(context *Context, _ *corecpu.MachineState, args [6]uint32) int32 {
+	if context == nil || context.Children == nil {
 		return ECHILD
 	}
-	// A future ProcessManager will write the encoded wait status here. Until
-	// then, no child is waitable from this single-process execution context.
-	return ECHILD
+	pid, status, err := context.Children.Wait(context.PID, int32(args[0]), args[2])
+	if err != 0 {
+		return err
+	}
+	if pid == 0 {
+		return 0
+	}
+	if args[1] != 0 {
+		if context.Memory == nil {
+			return EFAULT
+		}
+		var encoded [4]byte
+		binary.LittleEndian.PutUint32(encoded[:], uint32(status))
+		if err := context.Memory.Write(corecpu.Address(args[1]), encoded[:]); err != nil {
+			return EFAULT
+		}
+	}
+	return pid
 }
 
 func kill(context *Context, _ *corecpu.MachineState, args [6]uint32) int32 {
