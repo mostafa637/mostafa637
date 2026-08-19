@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math"
+	"math/bits"
 	"testing"
 )
 
@@ -3822,5 +3823,180 @@ func TestJIT64MPSADBWAndPCLMULQDQ(t *testing.T) {
 	}
 	if got := binary.LittleEndian.Uint64(state.XMM[9][0:]); got != 0x2524232221201f1e || binary.LittleEndian.Uint64(state.XMM[9][8:]) != 0 {
 		t.Fatalf("PCLMULQDQ memory low/low=%x, want high=0 low=2524232221201f1e", state.XMM[9])
+	}
+}
+
+func shaTestWords(vector [16]byte) [4]uint32 {
+	return [4]uint32{
+		binary.LittleEndian.Uint32(vector[0:4]),
+		binary.LittleEndian.Uint32(vector[4:8]),
+		binary.LittleEndian.Uint32(vector[8:12]),
+		binary.LittleEndian.Uint32(vector[12:16]),
+	}
+}
+
+func setSHATestWords(vector *[16]byte, words [4]uint32) {
+	for lane, word := range words {
+		binary.LittleEndian.PutUint32(vector[lane*4:lane*4+4], word)
+	}
+}
+
+func shaTestSigma0Small(value uint32) uint32 {
+	return bits.RotateLeft32(value, -7) ^ bits.RotateLeft32(value, -18) ^ (value >> 3)
+}
+
+func shaTestSigma1Small(value uint32) uint32 {
+	return bits.RotateLeft32(value, -17) ^ bits.RotateLeft32(value, -19) ^ (value >> 10)
+}
+
+func shaTestSigma0Big(value uint32) uint32 {
+	return bits.RotateLeft32(value, -2) ^ bits.RotateLeft32(value, -13) ^ bits.RotateLeft32(value, -22)
+}
+
+func shaTestSigma1Big(value uint32) uint32 {
+	return bits.RotateLeft32(value, -6) ^ bits.RotateLeft32(value, -11) ^ bits.RotateLeft32(value, -25)
+}
+
+func shaTestChoose(x, y, z uint32) uint32 {
+	return (x & y) ^ (^x & z)
+}
+
+func shaTestMajority(x, y, z uint32) uint32 {
+	return (x & y) ^ (x & z) ^ (y & z)
+}
+
+func shaTestMessage1(src1, src2 [4]uint32) [4]uint32 {
+	return [4]uint32{src2[2] ^ src1[0], src2[3] ^ src1[1], src1[0] ^ src1[2], src1[1] ^ src1[3]}
+}
+
+func shaTestMessage2SHA1(src1, src2 [4]uint32) [4]uint32 {
+	w16 := bits.RotateLeft32(src1[3]^src2[2], 1)
+	w17 := bits.RotateLeft32(src1[2]^src2[1], 1)
+	w18 := bits.RotateLeft32(src1[1]^src2[0], 1)
+	w19 := bits.RotateLeft32(src1[0]^w16, 1)
+	return [4]uint32{w19, w18, w17, w16}
+}
+
+func shaTestMessage1SHA256(src1, src2 [4]uint32) [4]uint32 {
+	return [4]uint32{
+		src1[0] + shaTestSigma0Small(src1[1]),
+		src1[1] + shaTestSigma0Small(src1[2]),
+		src1[2] + shaTestSigma0Small(src1[3]),
+		src1[3] + shaTestSigma0Small(src2[0]),
+	}
+}
+
+func shaTestMessage2SHA256(src1, src2 [4]uint32) [4]uint32 {
+	w16 := src1[0] + shaTestSigma1Small(src2[2])
+	w17 := src1[1] + shaTestSigma1Small(src2[3])
+	w18 := src1[2] + shaTestSigma1Small(w16)
+	w19 := src1[3] + shaTestSigma1Small(w17)
+	return [4]uint32{w16, w17, w18, w19}
+}
+
+func shaTestRounds2(src1, src2, implicit [4]uint32) [4]uint32 {
+	a, b, c, d := src2[3], src2[2], src1[3], src1[2]
+	e, f, g, h := src2[1], src2[0], src1[1], src1[0]
+	for _, wk := range implicit[:2] {
+		t1 := shaTestChoose(e, f, g) + shaTestSigma1Big(e) + wk + h
+		t2 := shaTestMajority(a, b, c) + shaTestSigma0Big(a)
+		a, b, c, d, e, f, g, h = t1+t2, a, b, c, t1+d, e, f, g
+	}
+	return [4]uint32{f, e, b, a}
+}
+
+func TestJIT64SHAExtensions(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x5c000
+		dataAddress Address64 = 0x5d000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	// SHA256RNDS2 xmm8,xmm9,xmm0; SHA1MSG1 xmm1,xmm2;
+	// SHA1MSG2 xmm3,xmm4; SHA256MSG1 xmm5,xmm6;
+	// SHA256MSG2 xmm15,[rdi] (REX.R); then HLT.
+	code := []byte{
+		0x45, 0x0f, 0x38, 0xcb, 0xc1,
+		0x0f, 0x38, 0xc9, 0xca,
+		0x0f, 0x38, 0xca, 0xdc,
+		0x0f, 0x38, 0xcc, 0xee,
+		0x44, 0x0f, 0x38, 0xcd, 0x3f,
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	memoryWords := [4]uint32{0x12345678, 0x9abcdef0, 0x0badcafe, 0xfeedface}
+	var memoryVector [16]byte
+	setSHATestWords(&memoryVector, memoryWords)
+	if err := memory.Write(dataAddress, memoryVector[:]); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	implicit := [4]uint32{0x01020304, 0x11121314, 0x21222324, 0x31323334}
+	sha1Message1Src := [4]uint32{0x10203040, 0x50607080, 0x90a0b0c0, 0xd0e0f000}
+	sha1Message1Other := [4]uint32{0x11111111, 0x22222222, 0x33333333, 0x44444444}
+	sha1Message2Src := [4]uint32{0x01010101, 0x02020202, 0x03030303, 0x04040404}
+	sha1Message2Other := [4]uint32{0x55555555, 0x66666666, 0x77777777, 0x88888888}
+	sha256Message1Src := [4]uint32{0x0f1e2d3c, 0x4b5a6978, 0x8796a5b4, 0xc3d2e1f0}
+	sha256Message1Other := [4]uint32{0x13579bdf, 0x2468ace0, 0xdeadbeef, 0x10293847}
+	sha256RoundsSource1 := [4]uint32{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a}
+	sha256RoundsSource2 := [4]uint32{0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
+	setSHATestWords(&state.XMM[0], implicit)
+	setSHATestWords(&state.XMM[1], sha1Message1Src)
+	setSHATestWords(&state.XMM[2], sha1Message1Other)
+	setSHATestWords(&state.XMM[3], sha1Message2Src)
+	setSHATestWords(&state.XMM[4], sha1Message2Other)
+	setSHATestWords(&state.XMM[5], sha256Message1Src)
+	setSHATestWords(&state.XMM[6], sha256Message1Other)
+	setSHATestWords(&state.XMM[8], sha256RoundsSource1)
+	setSHATestWords(&state.XMM[9], sha256RoundsSource2)
+	state.RFLAGS = Flag64IF | Flag64CF | Flag64ZF | Flag64SF
+	flagsBefore := state.RFLAGS
+
+	wantRounds := shaTestRounds2(sha256RoundsSource1, sha256RoundsSource2, implicit)
+	wantSHA1Message1 := shaTestMessage1(sha1Message1Src, sha1Message1Other)
+	wantSHA1Message2 := shaTestMessage2SHA1(sha1Message2Src, sha1Message2Other)
+	wantSHA256Message1 := shaTestMessage1SHA256(sha256Message1Src, sha256Message1Other)
+	wantSHA256Message2 := shaTestMessage2SHA256(shaTestWords(state.XMM[7]), memoryWords)
+
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("SHA instructions changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	for lane, want := range wantRounds {
+		if got := binary.LittleEndian.Uint32(state.XMM[8][lane*4:]); got != want {
+			t.Fatalf("SHA256RNDS2 lane %d=%#x, want %#x", lane, got, want)
+		}
+	}
+	for lane, want := range wantSHA1Message1 {
+		if got := binary.LittleEndian.Uint32(state.XMM[1][lane*4:]); got != want {
+			t.Fatalf("SHA1MSG1 lane %d=%#x, want %#x", lane, got, want)
+		}
+	}
+	for lane, want := range wantSHA1Message2 {
+		if got := binary.LittleEndian.Uint32(state.XMM[3][lane*4:]); got != want {
+			t.Fatalf("SHA1MSG2 lane %d=%#x, want %#x", lane, got, want)
+		}
+	}
+	for lane, want := range wantSHA256Message1 {
+		if got := binary.LittleEndian.Uint32(state.XMM[5][lane*4:]); got != want {
+			t.Fatalf("SHA256MSG1 lane %d=%#x, want %#x", lane, got, want)
+		}
+	}
+	for lane, want := range wantSHA256Message2 {
+		if got := binary.LittleEndian.Uint32(state.XMM[15][lane*4:]); got != want {
+			t.Fatalf("SHA256MSG2/REX.R lane %d=%#x, want %#x", lane, got, want)
+		}
 	}
 }
