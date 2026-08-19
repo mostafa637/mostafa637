@@ -260,3 +260,76 @@ func (m *Memory64) WriteUint64(addr Address64, value uint64) error {
 	binary.LittleEndian.PutUint64(raw[:], value)
 	return m.Write(addr, raw[:])
 }
+
+// AtomicRMW executes one guest-width read-modify-write while holding the
+// address-space lock. It is the Pure-Go equivalent of the locked memory part
+// needed by XADD/XCHG; it never exposes a host pointer to guest code.
+func (m *Memory64) AtomicRMW(addr Address64, width uint8, update func(uint64) uint64) (uint64, error) {
+	if m == nil || update == nil || (width != 1 && width != 2 && width != 4 && width != 8) {
+		return 0, ErrRange
+	}
+	if !range64Valid(addr, uint64(width)) {
+		return 0, ErrRange
+	}
+	first, end, ok := page64Range(addr, uint64(width))
+	if !ok {
+		return 0, ErrRange
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for page := first; page < end; page++ {
+		entry := m.pages[page]
+		if entry == nil {
+			return 0, ErrUnmapped
+		}
+		if entry.flags&(PRead|PWrite) != (PRead | PWrite) {
+			return 0, ErrProtection
+		}
+	}
+	var raw [8]byte
+	for i := uint8(0); i < width; i++ {
+		guest := uint64(addr) + uint64(i)
+		page := Page64(guest >> Page64Bits)
+		offset := guest & (Page64Size - 1)
+		raw[i] = m.pages[page].data[offset]
+	}
+	var old uint64
+	switch width {
+	case 1:
+		old = uint64(raw[0])
+	case 2:
+		old = uint64(raw[0]) | uint64(raw[1])<<8
+	case 4:
+		old = uint64(raw[0]) | uint64(raw[1])<<8 | uint64(raw[2])<<16 | uint64(raw[3])<<24
+	case 8:
+		old = binary.LittleEndian.Uint64(raw[:])
+	}
+	mask := mask64Width(width)
+	value := update(old) & mask
+	for i := uint8(0); i < width; i++ {
+		raw[i] = byte(value >> (8 * i))
+	}
+	for i := uint8(0); i < width; i++ {
+		guest := uint64(addr) + uint64(i)
+		page := Page64(guest >> Page64Bits)
+		offset := guest & (Page64Size - 1)
+		m.pages[page].data[offset] = raw[i]
+	}
+	for page := first; page < end; page++ {
+		m.gens[page]++
+		m.pages[page].gen = m.gens[page]
+	}
+	m.changes++
+	return old, nil
+}
+
+// AtomicCompareExchange performs a guest-width compare-and-exchange and
+// returns the value observed before the operation.
+func (m *Memory64) AtomicCompareExchange(addr Address64, width uint8, expected, replacement uint64) (uint64, error) {
+	return m.AtomicRMW(addr, width, func(old uint64) uint64 {
+		if old == (expected & mask64Width(width)) {
+			return replacement
+		}
+		return old
+	})
+}

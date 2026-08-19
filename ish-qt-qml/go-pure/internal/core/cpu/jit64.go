@@ -29,6 +29,7 @@ const (
 	operand64Invalid operand64Kind = iota
 	operand64Reg
 	operand64Mem
+	operand64XMM
 	operand64Imm
 	operand64Rel
 )
@@ -47,6 +48,7 @@ type memoryOperand64 struct {
 type operand64 struct {
 	Kind       operand64Kind
 	Reg        Reg64
+	XMM        uint8
 	ByteOffset uint8
 	Width      uint8
 	Mem        memoryOperand64
@@ -320,6 +322,12 @@ func reg64FromX86(reg x86asm.Reg) (Reg64, uint8, uint8, bool) {
 func operand64FromArg(arg x86asm.Arg, width uint8) (operand64, error) {
 	switch value := arg.(type) {
 	case x86asm.Reg:
+		if value >= x86asm.X0 && value <= x86asm.X15 {
+			if width != 0 && width != 16 {
+				return operand64{}, fmt.Errorf("XMM width %d", width)
+			}
+			return operand64{Kind: operand64XMM, XMM: uint8(value - x86asm.X0), Width: 16}, nil
+		}
 		reg, offset, regWidth, ok := reg64FromX86(value)
 		if !ok {
 			return operand64{}, fmt.Errorf("register %v", value)
@@ -410,6 +418,27 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("MOV destination: %v", err)
 		}
 		return makeMove64(address, uint8(inst.Len), left, right), false, nil
+	case x86asm.MOVDQA, x86asm.MOVDQU:
+		left, err := operand64FromArg(arg(0), 16)
+		if err != nil || (left.Kind != operand64XMM && left.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("SSE move destination: %v", err)
+		}
+		right, err := operand64FromArg(arg(1), 16)
+		if err != nil || (right.Kind != operand64XMM && right.Kind != operand64Mem) || (left.Kind == operand64Mem && right.Kind == operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("SSE move source: %v", err)
+		}
+		return makeSSEMove64(address, uint8(inst.Len), left, right), false, nil
+	case x86asm.PXOR, x86asm.PAND, x86asm.POR:
+		left, err := operand64FromArg(arg(0), 16)
+		if err != nil || left.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("SSE ALU destination: %v", err)
+		}
+		right, err := operand64FromArg(arg(1), 16)
+		if err != nil || (right.Kind != operand64XMM && right.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("SSE ALU source: %v", err)
+		}
+		return makeSSEBinary64(address, uint8(inst.Len), inst.Op, left, right), false, nil
+
 	case x86asm.LEA:
 		left, err := operand64FromArg(arg(0), width)
 		if err != nil || left.Kind != operand64Reg {
@@ -434,6 +463,25 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, err
 		}
 		return makeBinary64(address, uint8(inst.Len), inst.Op, left, right), false, nil
+	case x86asm.XCHG:
+		left, right, err := two()
+		if err != nil || (left.Kind == operand64Mem && right.Kind == operand64Mem) || left.Kind == operand64Imm || right.Kind == operand64Imm {
+			return microOp64{}, false, fmt.Errorf("XCHG requires register and register/memory operands: %v", err)
+		}
+		return makeXchg64(address, uint8(inst.Len), left, right), false, nil
+	case x86asm.XADD:
+		left, right, err := two()
+		if err != nil || left.Kind == operand64Imm || right.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("XADD requires r/m destination and register source: %v", err)
+		}
+		return makeXadd64(address, uint8(inst.Len), left, right), false, nil
+	case x86asm.CMPXCHG:
+		left, right, err := two()
+		if err != nil || left.Kind == operand64Imm || right.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("CMPXCHG requires r/m destination and register source: %v", err)
+		}
+		return makeCmpxchg64(address, uint8(inst.Len), left, right), false, nil
+
 	case x86asm.INC, x86asm.DEC, x86asm.NEG, x86asm.NOT:
 		value, err := operand64FromArg(arg(0), width)
 		if err != nil || value.Kind == operand64Imm || value.Kind == operand64Rel {
@@ -623,6 +671,92 @@ func writeOperand64(state *MachineState64, operand operand64, next, value uint64
 	return state.Memory.Write(address, raw[:operand.Width])
 }
 
+func readVector64(state *MachineState64, operand operand64, next uint64) ([16]byte, error) {
+	var value [16]byte
+	switch operand.Kind {
+	case operand64XMM:
+		if operand.XMM >= uint8(len(state.XMM)) {
+			return value, ErrUnsupported64
+		}
+		copy(value[:], state.XMM[operand.XMM][:])
+		return value, nil
+	case operand64Mem:
+		address, err := effectiveAddress64(state, operand.Mem, next)
+		if err != nil {
+			return value, err
+		}
+		if err := state.Memory.Read(address, value[:]); err != nil {
+			return value, err
+		}
+		return value, nil
+	default:
+		return value, ErrUnsupportedAddressing
+	}
+}
+
+func writeVector64(state *MachineState64, operand operand64, next uint64, value [16]byte) error {
+	switch operand.Kind {
+	case operand64XMM:
+		if operand.XMM >= uint8(len(state.XMM)) {
+			return ErrUnsupported64
+		}
+		copy(state.XMM[operand.XMM][:], value[:])
+		return nil
+	case operand64Mem:
+		address, err := effectiveAddress64(state, operand.Mem, next)
+		if err != nil {
+			return err
+		}
+		return state.Memory.Write(address, value[:])
+	default:
+		return ErrUnsupportedAddressing
+	}
+}
+
+func makeSSEMove64(address uint64, size uint8, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readVector64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		if err := writeVector64(state, dst, next, value); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readVector64(state, dst, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readVector64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		for i := range left {
+			switch op {
+			case x86asm.PXOR:
+				left[i] ^= right[i]
+			case x86asm.PAND:
+				left[i] &= right[i]
+			case x86asm.POR:
+				left[i] |= right[i]
+			default:
+				return Flow64Stop, ErrUnsupported64
+			}
+		}
+		if err := writeVector64(state, dst, next, left); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
 func makeMove64(address uint64, size uint8, dst, src operand64) microOp64 {
 	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
 		value, err := readOperand64(state, src, next)
@@ -682,6 +816,121 @@ func makeBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) 
 			}
 		}
 		_ = subtraction
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeXchg64(address uint64, size uint8, left, right operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		leftValue, err := readOperand64(state, left, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		rightValue, err := readOperand64(state, right, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		if left.Kind == operand64Mem {
+			address, addressErr := effectiveAddress64(state, left.Mem, next)
+			if addressErr != nil {
+				return Flow64Stop, addressErr
+			}
+			old, atomicErr := state.Memory.AtomicRMW(address, left.Width, func(uint64) uint64 { return rightValue })
+			if atomicErr != nil {
+				return Flow64Stop, atomicErr
+			}
+			leftValue = old
+			if err := writeOperand64(state, right, next, leftValue); err != nil {
+				return Flow64Stop, err
+			}
+		} else {
+			if err := writeOperand64(state, left, next, rightValue); err != nil {
+				return Flow64Stop, err
+			}
+			if err := writeOperand64(state, right, next, leftValue); err != nil {
+				return Flow64Stop, err
+			}
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeXadd64(address uint64, size uint8, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		srcValue, err := readOperand64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var old uint64
+		if dst.Kind == operand64Mem {
+			memoryAddress, addressErr := effectiveAddress64(state, dst.Mem, next)
+			if addressErr != nil {
+				return Flow64Stop, addressErr
+			}
+			old, err = state.Memory.AtomicRMW(memoryAddress, dst.Width, func(value uint64) uint64 {
+				result, _ := bits.Add64(value&mask64Width(dst.Width), srcValue&mask64Width(dst.Width), 0)
+				return result
+			})
+		} else {
+			old, err = readOperand64(state, dst, next)
+			if err == nil {
+				result, _ := bits.Add64(old&mask64Width(dst.Width), srcValue&mask64Width(dst.Width), 0)
+				err = writeOperand64(state, dst, next, result)
+			}
+		}
+		if err != nil {
+			return Flow64Stop, err
+		}
+		mask := mask64Width(dst.Width)
+		old &= mask
+		srcValue &= mask
+		result, carry := bits.Add64(old, srcValue, 0)
+		result &= mask
+		state.SetLazyArithmetic(old, srcValue, result, carry != 0, ((^(old ^ srcValue))&(old^result)&(mask^(mask>>1))) != 0, true)
+		if err := writeOperand64(state, src, next, old); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeCmpxchg64(address uint64, size uint8, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		accumulator := operand64{Kind: operand64Reg, Reg: RAX, Width: dst.Width}
+		accValue := readReg64(state, accumulator)
+		srcValue, err := readOperand64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var observed uint64
+		mask := mask64Width(dst.Width)
+		accValue &= mask
+		srcValue &= mask
+		if dst.Kind == operand64Mem {
+			memoryAddress, addressErr := effectiveAddress64(state, dst.Mem, next)
+			if addressErr != nil {
+				return Flow64Stop, addressErr
+			}
+			observed, err = state.Memory.AtomicCompareExchange(memoryAddress, dst.Width, accValue, srcValue)
+		} else {
+			observed, err = readOperand64(state, dst, next)
+			if err == nil && observed == accValue {
+				err = writeOperand64(state, dst, next, srcValue)
+			}
+		}
+		if err != nil {
+			return Flow64Stop, err
+		}
+		observed &= mask
+		result, borrow := bits.Sub64(accValue, observed, 0)
+		result &= mask
+		state.SetLazyArithmetic(accValue, observed, result, borrow != 0, (((accValue ^ observed) & (accValue ^ result) & (mask ^ (mask >> 1))) != 0), true)
+		if accValue != observed {
+			writeReg64(state, accumulator, observed)
+		}
 		state.RIP = next
 		return Flow64Continue, nil
 	}}
