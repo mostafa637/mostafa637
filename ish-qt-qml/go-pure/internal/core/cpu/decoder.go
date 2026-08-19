@@ -37,6 +37,7 @@ const (
 	OpLogicalImm
 	OpTestOperands
 	OpTestImm
+	OpShift
 	OpIncReg
 	OpDecReg
 	OpPushReg
@@ -252,6 +253,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return logical, nil
+	}
+	if shift, handled, err := decodeX86Shift(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return shift, nil
 	}
 	reader := newCodeReader(memory, eip)
 	opcode, err := reader.byte()
@@ -741,4 +748,39 @@ func x86Reg32(reg x86asm.Reg) (Reg32, bool) {
 	default:
 		return RegNone, false
 	}
+}
+
+func decodeX86Shift(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.DataSize != 32 || len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+		return Instruction{}, false, nil
+	}
+	var group uint8
+	switch inst.Op {
+	case x86asm.SHL:
+		group = 0
+	case x86asm.SHR:
+		group = 1
+	case x86asm.SAR:
+		group = 2
+	default:
+		return Instruction{}, false, nil
+	}
+	dst, ok, err := x86Operand32(inst.Args[0])
+	if err != nil || !ok {
+		return Instruction{}, true, err
+	}
+	instruction := Instruction{Op: OpShift, Len: uint32(inst.Len), Dst: dst, Group: group}
+	switch value := inst.Args[1].(type) {
+	case x86asm.Imm:
+		instruction.Imm = int32(value) & 0x1f
+	case x86asm.Reg:
+		if value != x86asm.CL {
+			return Instruction{}, true, fmt.Errorf("%w: shift count register %v", ErrUnsupportedAddressing, value)
+		}
+		// Width 1 marks the implicit CL count without adding a new IR type.
+		instruction.Src = Operand{Reg: ECX, Width: 1}
+	default:
+		return Instruction{}, true, fmt.Errorf("%w: shift count %T", ErrUnsupportedAddressing, inst.Args[1])
+	}
+	return instruction, true, nil
 }

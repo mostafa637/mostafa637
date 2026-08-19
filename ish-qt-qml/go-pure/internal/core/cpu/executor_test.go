@@ -351,3 +351,79 @@ func TestExecutorLogicalMemoryOperandDecodedByX86ASM(t *testing.T) {
 		t.Fatalf("memory = %#x, want 0", got)
 	}
 }
+
+func TestExecutorShiftInstructionsDecodedByX86ASM(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+		0xC1, 0xE0, 0x02, // shl eax, 2 => 4
+		0xD1, 0xE8, // shr eax, 1 => 2
+		0xD1, 0xF8, // sar eax, 1 => 1
+		0xB9, 0x01, 0x00, 0x00, 0x00, // mov ecx, 1
+		0xD3, 0xE0, // shl eax, cl => 2
+		0xF4,
+	})
+	shift, err := Decode(memory, PageSize+5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shift.Op != OpShift || shift.Group != 0 || shift.Imm != 2 || shift.Dst.Reg != EAX {
+		t.Fatalf("SHL decode = %+v", shift)
+	}
+	shr, err := Decode(memory, PageSize+8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shr.Op != OpShift || shr.Group != 1 || shr.Imm != 1 {
+		t.Fatalf("SHR decode = %+v", shr)
+	}
+	clShift, err := Decode(memory, PageSize+17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clShift.Op != OpShift || clShift.Src.Width != 1 || clShift.Src.Reg != ECX {
+		t.Fatalf("CL shift decode = %+v", clShift)
+	}
+	if err := NewExecutor(nil).Run(state, 16); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 2 {
+		t.Fatalf("eax = %#x, want 2", got)
+	}
+}
+
+func TestExecutorShiftFlagsDecodedByX86ASM(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xB8, 0x00, 0x00, 0x00, 0x80, // mov eax, 0x80000000
+		0xC1, 0xE0, 0x01, // shl eax, 1 => 0, CF=1, OF=1
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 4); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 0 {
+		t.Fatalf("eax = %#x, want 0", got)
+	}
+	if !state.Flag(FlagCF) || !state.Flag(FlagOF) || !state.Flag(FlagZF) {
+		t.Fatalf("shift flags: cf=%v of=%v zf=%v", state.Flag(FlagCF), state.Flag(FlagOF), state.Flag(FlagZF))
+	}
+}
+
+func TestExecutorShiftCountZeroPreservesFlags(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+		0xD3, 0xE0, // shl eax, cl; ECX=0, flags unchanged
+		0xF4,
+	})
+	state.Set(ECX, 0)
+	state.EFlags |= FlagCF
+	state.ExpandFlags()
+	if err := NewExecutor(nil).Run(state, 3); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 1 {
+		t.Fatalf("eax = %#x, want 1", got)
+	}
+	if !state.Flag(FlagCF) {
+		t.Fatal("count-zero shift changed CF")
+	}
+}

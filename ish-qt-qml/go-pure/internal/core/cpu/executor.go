@@ -175,6 +175,23 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		}
 		state.SetLazyArithmetic(left, uint32(instruction.Imm), result, false, false, false)
 		state.EIP = next
+	case OpShift:
+		value, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		count := uint32(instruction.Imm) & 0x1f
+		if instruction.Src.Width == 1 {
+			count = state.Get(ECX) & 0x1f
+		}
+		if count != 0 {
+			result, carry, overflow := shiftValue(value, count, instruction.Group)
+			if err := storeOperand(state, instruction.Dst, result); err != nil {
+				return instruction, err
+			}
+			state.SetLazyArithmetic(value, count, result, carry, overflow, false)
+		}
+		state.EIP = next
 	case OpIncReg:
 		carry := state.Flag(FlagCF)
 		reg := state.Get(instruction.Reg)
@@ -545,4 +562,30 @@ func logicalValue(left, right uint32, group uint8) uint32 {
 	default:
 		return 0
 	}
+}
+
+func shiftValue(value, count uint32, group uint8) (result uint32, carry, overflow bool) {
+	if count == 0 {
+		return value, false, false
+	}
+	switch group {
+	case 0: // SHL/SAL
+		result = value << count
+		carry = (value>>(32-count))&1 != 0
+		if count == 1 {
+			overflow = ((result ^ value) & 0x80000000) != 0
+		}
+	case 1: // SHR
+		result = value >> count
+		carry = (value>>(count-1))&1 != 0
+		if count == 1 {
+			overflow = value&0x80000000 != 0
+		}
+	case 2: // SAR
+		result = uint32(int32(value) >> count)
+		carry = (value>>(count-1))&1 != 0
+	default:
+		return value, false, false
+	}
+	return result, carry, overflow
 }
