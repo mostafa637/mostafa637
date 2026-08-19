@@ -247,6 +247,50 @@ func (m *Memory64) Write(addr Address64, src []byte) error {
 	return m.readWrite(addr, src, Write)
 }
 
+// WriteAtomic validates every destination page before copying any byte. It is
+// used by architectural state-save instructions whose memory image must not
+// be partially committed when a later page is unmapped or write-protected.
+func (m *Memory64) WriteAtomic(addr Address64, src []byte) error {
+	if m == nil || len(src) == 0 {
+		return ErrRange
+	}
+	if !range64Valid(addr, uint64(len(src))) {
+		return ErrRange
+	}
+	first, end, ok := page64Range(addr, uint64(len(src)))
+	if !ok {
+		return ErrRange
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for page := first; page < end; page++ {
+		entry := m.pages[page]
+		if entry == nil {
+			return ErrUnmapped
+		}
+		if entry.flags&PWrite == 0 {
+			return ErrProtection
+		}
+	}
+	remaining := src
+	current := uint64(addr)
+	for len(remaining) > 0 {
+		page := Page64(current >> Page64Bits)
+		offset := current & (Page64Size - 1)
+		chunk := int(Page64Size - offset)
+		if chunk > len(remaining) {
+			chunk = len(remaining)
+		}
+		copy(m.pages[page].data[int(offset):int(offset)+chunk], remaining[:chunk])
+		m.gens[page]++
+		m.pages[page].gen = m.gens[page]
+		current += uint64(chunk)
+		remaining = remaining[chunk:]
+	}
+	m.changes++
+	return nil
+}
+
 func (m *Memory64) ReadUint64(addr Address64) (uint64, error) {
 	var raw [8]byte
 	if err := m.Read(addr, raw[:]); err != nil {

@@ -90,6 +90,8 @@ func (j *JIT64) fault(state *MachineState64, err error) uint64 {
 		state.TrapNo = Trap64PageFault
 	} else if errors.Is(err, ErrUnsupported64) {
 		state.TrapNo = Trap64InvalidOpcode
+	} else if errors.Is(err, ErrXSAVEAlignment64) {
+		state.TrapNo = Trap64GeneralFault
 	} else {
 		state.TrapNo = Trap64GeneralFault
 	}

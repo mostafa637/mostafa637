@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	ErrUnsupported64  = errors.New("cpu64: unsupported instruction")
-	ErrInvalid64Block = errors.New("cpu64: invalid translated block")
-	crc32Castagnoli64 = crc32.MakeTable(crc32.Castagnoli)
+	ErrUnsupported64    = errors.New("cpu64: unsupported instruction")
+	ErrInvalid64Block   = errors.New("cpu64: invalid translated block")
+	ErrXSAVEAlignment64 = errors.New("cpu64: XSAVE destination is not 64-byte aligned")
+	crc32Castagnoli64   = crc32.MakeTable(crc32.Castagnoli)
 )
 
 type Flow64 uint8
@@ -442,6 +443,12 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		return makeFSBase64(address, uint8(inst.Len), inst.Op, baseOperand), false, nil
 	case x86asm.XGETBV, x86asm.XSETBV:
 		return makeXCR64(address, uint8(inst.Len), inst.Op), false, nil
+	case x86asm.XSAVE, x86asm.XSAVE64, x86asm.XSAVEOPT, x86asm.XSAVEOPT64, x86asm.XSAVEC, x86asm.XSAVEC64, x86asm.XSAVES, x86asm.XSAVES64:
+		destination, err := operand64FromArg(arg(0), 1)
+		if err != nil || destination.Kind != operand64Mem {
+			return microOp64{}, false, fmt.Errorf("%s requires a memory destination: %v", inst.Op, err)
+		}
+		return makeXSAVE64(address, uint8(inst.Len), inst.Op, destination), false, nil
 	case x86asm.FLD1, x86asm.FLDZ:
 		return makeFPUConst64(address, uint8(inst.Len), inst.Op), false, nil
 	case x86asm.FCHS, x86asm.FABS:
@@ -6297,6 +6304,69 @@ func makeAESKeygenAssist64(address uint64, size uint8, destination, source opera
 		putSHADword64(&result, 2, sub3)
 		putSHADword64(&result, 3, bits.RotateLeft32(sub3, -8)^rcon)
 		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+// makeXSAVE64 serializes the guest's currently modelled x87/MMX and SSE state
+// into the legacy 64-bit XSAVE area. The implementation deliberately keeps the
+// architectural base components (x87 and SSE) only: AVX and supervisor state
+// are not represented by MachineState64 yet, so their request bits are masked
+// out of XSTATE_BV. XSAVEOPT uses the same image as XSAVE because this model
+// does not track init-state optimization metadata; XSAVEC/XSAVES use the same
+// base-component bytes and set the compacted-format XCOMP_BV header.
+func makeXSAVE64(address uint64, size uint8, op x86asm.Op, destination operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if state == nil || state.Memory == nil {
+			return Flow64Stop, ErrUnmapped
+		}
+		if destination.Kind != operand64Mem {
+			return Flow64Stop, ErrUnsupportedAddressing
+		}
+		guestAddress, err := effectiveAddress64(state, destination.Mem, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		if uint64(guestAddress)&63 != 0 {
+			return Flow64Stop, ErrXSAVEAlignment64
+		}
+
+		// RAX:RDX supplies the requested XSTATE component mask. This model
+		// currently exposes only x87 (bit 0) and SSE (bit 1), both gated by
+		// XCR0 as required by XSAVE.
+		request := uint64(uint32(state.Get(RAX))) | uint64(uint32(state.Get(RDX)))<<32
+		selected := request & state.XCR0 & 0x3
+		image := make([]byte, 576) // FXSAVE64 area (512) + XSAVE header (64)
+
+		if selected&1 != 0 {
+			binary.LittleEndian.PutUint16(image[0:2], state.FCW)
+			binary.LittleEndian.PutUint16(image[2:4], state.FSW)
+			image[4] = state.FTW
+			binary.LittleEndian.PutUint16(image[6:8], state.FOP)
+			binary.LittleEndian.PutUint64(image[8:16], state.FIP)
+			binary.LittleEndian.PutUint64(image[16:24], state.FDP)
+			binary.LittleEndian.PutUint32(image[24:28], state.MXCSR)
+			binary.LittleEndian.PutUint32(image[28:32], state.MXCSRMask)
+			for logical := 0; logical < 8; logical++ {
+				physical := (int(state.FPUTop()) + logical) & 7
+				raw := state.FP[physical].Raw().Bytes(binary.LittleEndian)
+				copy(image[32+logical*16:32+logical*16+10], raw[:10])
+			}
+		}
+		if selected&2 != 0 {
+			for register := 0; register < len(state.XMM); register++ {
+				copy(image[160+register*16:160+(register+1)*16], state.XMM[register][:])
+			}
+		}
+
+		binary.LittleEndian.PutUint64(image[512:520], selected)
+		if op == x86asm.XSAVEC || op == x86asm.XSAVEC64 || op == x86asm.XSAVES || op == x86asm.XSAVES64 {
+			binary.LittleEndian.PutUint64(image[520:528], selected|(uint64(1)<<63))
+		}
+		if err := state.Memory.WriteAtomic(guestAddress, image); err != nil {
 			return Flow64Stop, err
 		}
 		state.RIP = next

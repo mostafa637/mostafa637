@@ -6,6 +6,8 @@ import (
 	"math"
 	"math/bits"
 	"testing"
+
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/emu/fpu"
 )
 
 func mapExecutable64(t *testing.T, memory *Memory64, start Address64, code []byte) {
@@ -5388,5 +5390,138 @@ func TestJIT64CVTPI2PDM64PreservesFPUState(t *testing.T) {
 	}
 	if got := state.FPUTop(); got != 6 {
 		t.Fatalf("FPU TOP=%d after CVTPI2PD m64, want 6", got)
+	}
+}
+
+func TestJIT64XSAVEVariants(t *testing.T) {
+	const codeAddress Address64 = 0x7e000
+	const imageAddress Address64 = 0x80000
+	code := []byte{
+		0x41, 0x0f, 0xae, 0x27, // xsave [r15]
+		0x41, 0x0f, 0xae, 0xb7, 0x00, 0x04, 0x00, 0x00, // xsaveopt [r15+0x400]
+		0x41, 0x0f, 0xc7, 0xa7, 0x00, 0x08, 0x00, 0x00, // xsavec [r15+0x800]
+		0x41, 0x0f, 0xc7, 0xaf, 0x00, 0x0c, 0x00, 0x00, // xsaves [r15+0xc00]
+		0xf4,
+	}
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(imageAddress, Page64Size*4, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(R15, uint64(imageAddress))
+	state.Set(RAX, 3)
+	state.Set(RDX, 0)
+	state.FCW = 0x1234
+	state.FSW = 0x4567
+	state.SetFPUTop(3)
+	state.FTW = 0xa5
+	state.FOP = 0x6789
+	state.FIP = 0x1122334455667788
+	state.FDP = 0x8877665544332211
+	state.MXCSR = 0x1f90
+	state.MXCSRMask = 0xffbf
+	state.FP[3] = fpu.FromFloat64(1.5)
+	state.FP[4] = fpu.FromFloat64(-2.5)
+	state.XMM[0] = [16]byte{0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27}
+	state.XMM[15] = [16]byte{0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xe0, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7}
+	state.RFLAGS = Flag64IF | Flag64OF | Flag64AF | Flag64PF | Flag64ZF | Flag64SF | Flag64CF
+	flagsBefore := state.RFLAGS
+	topBefore := state.FPUTop()
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("XSAVE variants changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	if state.FPUTop() != topBefore {
+		t.Fatalf("XSAVE variants changed FPU TOP from %d to %d", topBefore, state.FPUTop())
+	}
+
+	var want [576]byte
+	binary.LittleEndian.PutUint16(want[0:2], state.FCW)
+	binary.LittleEndian.PutUint16(want[2:4], state.FSW)
+	want[4] = state.FTW
+	binary.LittleEndian.PutUint16(want[6:8], state.FOP)
+	binary.LittleEndian.PutUint64(want[8:16], state.FIP)
+	binary.LittleEndian.PutUint64(want[16:24], state.FDP)
+	binary.LittleEndian.PutUint32(want[24:28], state.MXCSR)
+	binary.LittleEndian.PutUint32(want[28:32], state.MXCSRMask)
+	for logical := 0; logical < 8; logical++ {
+		physical := (int(state.FPUTop()) + logical) & 7
+		raw := state.FP[physical].Raw().Bytes(binary.LittleEndian)
+		copy(want[32+logical*16:32+logical*16+10], raw[:10])
+	}
+	for register := 0; register < len(state.XMM); register++ {
+		copy(want[160+register*16:160+(register+1)*16], state.XMM[register][:])
+	}
+	binary.LittleEndian.PutUint64(want[512:520], 3)
+	for index, compacted := range []bool{false, false, true, true} {
+		var got [576]byte
+		if err := memory.Read(imageAddress+Address64(index*0x400), got[:]); err != nil {
+			t.Fatal(err)
+		}
+		wantHeader := uint64(0)
+		if compacted {
+			wantHeader = (1 << 63) | 3
+		}
+		binary.LittleEndian.PutUint64(want[520:528], wantHeader)
+		if got != want {
+			first := -1
+			for offset := range got {
+				if got[offset] != want[offset] {
+					first = offset
+					break
+				}
+			}
+			if first >= 0 {
+				t.Fatalf("XSAVE image %d mismatch at offset %d: got=%#x want=%#x", index, first, got[first], want[first])
+			}
+			t.Fatalf("XSAVE image %d mismatch", index)
+		}
+	}
+}
+
+func TestJIT64XSAVERejectsUnalignedDestination(t *testing.T) {
+	const codeAddress Address64 = 0x8e000
+	const imageAddress Address64 = 0x90000
+	code := []byte{0x41, 0x0f, 0xae, 0x27, 0xf4} // xsave [r15]; hlt
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(imageAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	var before [576]byte
+	for i := range before {
+		before[i] = 0xa5
+	}
+	if err := memory.Write(imageAddress, before[:]); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(R15, uint64(imageAddress+8))
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64GeneralFault {
+		t.Fatalf("trap=%#x, want general fault", trap)
+	}
+	var after [576]byte
+	if err := memory.Read(imageAddress, after[:]); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("unaligned XSAVE changed destination memory")
 	}
 }

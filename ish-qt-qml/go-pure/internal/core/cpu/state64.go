@@ -126,15 +126,21 @@ type MachineState64 struct {
 	Lazy      uint8
 	LazyWidth uint8
 
-	XMM    [16][16]byte
-	MMX    [8]uint64
-	FP     [8]fpu.Value
-	FSW    uint16
-	FCW    uint16
-	FSBase uint64
-	GSBase uint64
-	TLS    uint64
-	XCR0   uint64
+	XMM       [16][16]byte
+	MMX       [8]uint64
+	FP        [8]fpu.Value
+	FSW       uint16
+	FCW       uint16
+	FTW       uint8
+	FOP       uint16
+	FIP       uint64
+	FDP       uint64
+	MXCSR     uint32
+	MXCSRMask uint32
+	FSBase    uint64
+	GSBase    uint64
+	TLS       uint64
+	XCR0      uint64
 
 	RDRAND RDRAND64Provider
 
@@ -147,7 +153,7 @@ type MachineState64 struct {
 }
 
 func NewMachineState64(memory *Memory64) *MachineState64 {
-	return &MachineState64{Memory: memory, RFLAGS: Flag64IF, FCW: 0x037f, XCR0: 0x3, RDRAND: defaultRDRAND64}
+	return &MachineState64{Memory: memory, RFLAGS: Flag64IF, FCW: 0x037f, MXCSR: 0x1f80, MXCSRMask: 0xffbf, XCR0: 0x3, RDRAND: defaultRDRAND64}
 }
 
 func (s *MachineState64) Get(reg Reg64) uint64 {
@@ -249,6 +255,7 @@ const (
 // preserve the architectural TOP reset required by the transition.
 func (s *MachineState64) EnterMMX() {
 	s.SetFPUTop(0)
+	s.FTW = 0xff
 }
 
 func (s *MachineState64) FPUTop() uint8 {
@@ -273,16 +280,22 @@ func (s *MachineState64) FPAt(index uint8) fpu.Value {
 }
 
 func (s *MachineState64) SetFPAt(index uint8, value fpu.Value) {
-	s.FP[(s.FPUTop()+index)&7] = value
+	physical := (s.FPUTop() + index) & 7
+	s.FP[physical] = value
+	s.FTW |= 1 << physical
 }
 
 func (s *MachineState64) PushFP(value fpu.Value) {
 	s.MoveFPUTop(-1)
-	s.FP[s.FPUTop()] = value
+	physical := s.FPUTop()
+	s.FP[physical] = value
+	s.FTW |= 1 << physical
 }
 
 func (s *MachineState64) PopFP() fpu.Value {
-	value := s.FPAt(0)
+	physical := s.FPUTop()
+	value := s.FP[physical]
+	s.FTW &^= 1 << physical
 	s.MoveFPUTop(1)
 	return value
 }
