@@ -15,6 +15,7 @@ type guestTransport struct {
 	input   chan []byte
 	output  chan []byte
 	done    chan struct{}
+	process *corekernel.Process
 
 	stopOnce   sync.Once
 	outputOnce sync.Once
@@ -29,7 +30,7 @@ func newGuestTransport(elfPath string) *guestTransport {
 	}
 }
 
-func (g *guestTransport) start(ctx context.Context, process *corekernel.Process, fake *corefs.FS) error {
+func (g *guestTransport) start(ctx context.Context, process *corekernel.Process, fake *corefs.FS, cols, rows int) error {
 	if g == nil || process == nil || fake == nil {
 		return transportError("guest session: nil process or fakefs")
 	}
@@ -40,6 +41,16 @@ func (g *guestTransport) start(ctx context.Context, process *corekernel.Process,
 	if err != nil {
 		return err
 	}
+	if cols < 1 {
+		cols = 80
+	}
+	if rows < 1 {
+		rows = 24
+	}
+	if err := process.SetWindowSize(uint16(cols), uint16(rows)); err != nil {
+		return err
+	}
+	g.process = process
 	reader := &guestInput{chunks: g.input, done: g.done}
 	writer := &guestOutput{chunks: g.output, done: g.done}
 	if err := process.AttachFile(0, reader, nil); err != nil {
@@ -57,18 +68,32 @@ func (g *guestTransport) start(ctx context.Context, process *corekernel.Process,
 	if _, err := process.LoadELF(bytesReader(data), int64(len(data)), g.elfPath, 0, stack); err != nil {
 		return err
 	}
+	runDone := make(chan struct{})
 	go func() {
-		if ctx != nil {
-			select {
-			case <-ctx.Done():
-				g.stop()
-			default:
-			}
-		}
+		defer close(runDone)
 		_ = process.Run(10_000_000)
 		g.closeOutput()
 	}()
+	if ctx != nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+				g.stop()
+			case <-runDone:
+			}
+		}()
+	}
 	return nil
+}
+
+func (g *guestTransport) resize(cols, rows int) error {
+	if g == nil || g.process == nil {
+		return transportError("guest session: not started")
+	}
+	if cols < 1 || rows < 1 {
+		return nil
+	}
+	return g.process.SetWindowSize(uint16(cols), uint16(rows))
 }
 
 func (g *guestTransport) write(data []byte) error {

@@ -26,6 +26,12 @@ type InputSink interface {
 	Write([]byte) error
 }
 
+// ResizeSink is an optional extension implemented by PTY and guest sessions.
+// Keeping it separate preserves compatibility with simple input fakes.
+type ResizeSink interface {
+	Resize(cols, rows int) error
+}
+
 // Screen is the top-level iSH Gio screen. It is deliberately unaware of
 // process creation and can be driven by a fake session in unit tests.
 type Screen struct {
@@ -117,7 +123,6 @@ func (s *Screen) layoutTerminal(gtx C) D {
 		}
 	}
 
-	snapshot := s.Terminal.Snapshot()
 	cellWidth := gtx.Dp(unit.Dp(8))
 	cellHeight := gtx.Dp(unit.Dp(18))
 	if cellWidth < 1 {
@@ -126,6 +131,22 @@ func (s *Screen) layoutTerminal(gtx C) D {
 	if cellHeight < 1 {
 		cellHeight = 18
 	}
+	cols := gtx.Constraints.Max.X / cellWidth
+	rows := gtx.Constraints.Max.Y / cellHeight
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	current := s.Terminal.Snapshot()
+	if current.Cols != cols || current.Rows != rows {
+		s.Terminal.Resize(cols, rows)
+		if resize, ok := s.Input.(ResizeSink); ok {
+			_ = resize.Resize(cols, rows)
+		}
+	}
+	snapshot := s.Terminal.Snapshot()
 	for i, cell := range snapshot.Cells {
 		x := (i % snapshot.Cols) * cellWidth
 		y := (i / snapshot.Cols) * cellHeight

@@ -43,6 +43,7 @@ type CoreSession struct {
 	mu      sync.Mutex
 	fs      *corefs.FS
 	kernel  *corekernel.Process
+	manager *corekernel.ProcessManager
 	pty     *platform.PTYSession
 	guest   *guestTransport
 	closed  bool
@@ -64,22 +65,24 @@ func New(cfg Config) (*CoreSession, error) {
 			return nil, err
 		}
 	}
-	process := corekernel.NewProcess(1, fake)
+	manager := corekernel.NewProcessManager(fake, 1)
+	process := manager.NewRoot()
 	if cfg.UseGuest {
 		guestPath := cfg.GuestELF
 		if guestPath == "" {
 			guestPath = cfg.Shell
 		}
-		return &CoreSession{fs: fake, kernel: process, guest: newGuestTransport(guestPath)}, nil
+		return &CoreSession{fs: fake, kernel: process, manager: manager, guest: newGuestTransport(guestPath)}, nil
 	}
-	return &CoreSession{fs: fake, kernel: process, pty: platform.NewPTYSession(cfg.Shell)}, nil
+	return &CoreSession{fs: fake, kernel: process, manager: manager, pty: platform.NewPTYSession(cfg.Shell)}, nil
 }
 
 func NewWithFS(fake *corefs.FS, shell string) (*CoreSession, error) {
 	if fake == nil {
 		return nil, fmt.Errorf("core session: nil fakefs")
 	}
-	return &CoreSession{fs: fake, kernel: corekernel.NewProcess(1, fake), pty: platform.NewPTYSession(shell)}, nil
+	manager := corekernel.NewProcessManager(fake, 1)
+	return &CoreSession{fs: fake, kernel: manager.NewRoot(), manager: manager, pty: platform.NewPTYSession(shell)}, nil
 }
 
 func (s *CoreSession) FS() *corefs.FS {
@@ -114,7 +117,7 @@ func (s *CoreSession) Start(ctx context.Context, cols, rows int) error {
 	s.mu.Unlock()
 	var err error
 	if guest != nil {
-		err = guest.start(ctx, process, fake)
+		err = guest.start(ctx, process, fake, cols, rows)
 	} else {
 		err = pty.Start(ctx, cols, rows)
 	}
@@ -166,7 +169,7 @@ func (s *CoreSession) Resize(cols, rows int) error {
 	guest := s.guest
 	s.mu.Unlock()
 	if guest != nil {
-		return nil
+		return guest.resize(cols, rows)
 	}
 	return pty.Resize(cols, rows)
 }
@@ -182,6 +185,7 @@ func (s *CoreSession) Close() error {
 	guest := s.guest
 	fake := s.fs
 	process := s.kernel
+	manager := s.manager
 	s.mu.Unlock()
 
 	var first error
@@ -191,7 +195,11 @@ func (s *CoreSession) Close() error {
 	if pty != nil {
 		first = pty.Close()
 	}
-	if process != nil {
+	if manager != nil {
+		if err := manager.Close(); first == nil {
+			first = err
+		}
+	} else if process != nil {
 		if err := process.Close(); first == nil {
 			first = err
 		}

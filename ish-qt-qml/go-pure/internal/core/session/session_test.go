@@ -203,6 +203,15 @@ func TestCoreSessionGuestStdinStdout(t *testing.T) {
 	if err := s.Start(context.Background(), 80, 24); err != nil {
 		t.Fatalf("guest Start: %v", err)
 	}
+	if err := s.Resize(100, 30); err != nil {
+		t.Fatalf("guest Resize: %v", err)
+	}
+	if got := s.Kernel().Context.WinCols; got != 100 {
+		t.Fatalf("guest columns = %d", got)
+	}
+	if got := s.Kernel().Context.WinRows; got != 30 {
+		t.Fatalf("guest rows = %d", got)
+	}
 	if err := s.Write([]byte("pong")); err != nil {
 		t.Fatalf("guest Write: %v", err)
 	}

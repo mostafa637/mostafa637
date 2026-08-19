@@ -121,3 +121,17 @@ var ErrClosed = errorString("kernel process is closed")
 type errorString string
 
 func (e errorString) Error() string { return string(e) }
+
+func (p *Process) SetWindowSize(cols, rows uint16) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return ErrClosed
+	}
+	if cols == 0 || rows == 0 {
+		return nil
+	}
+	p.Context.WinCols = cols
+	p.Context.WinRows = rows
+	return nil
+}
