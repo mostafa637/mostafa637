@@ -702,7 +702,20 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, errors.New("SSE shift requires an immediate count")
 		}
 		return makeSSEShift64(address, uint8(inst.Len), inst.Op, destination, uint8(immediate)), false, nil
-	case x86asm.PSHUFD:
+	case x86asm.PUNPCKLBW, x86asm.PUNPCKHBW,
+		x86asm.PUNPCKLWD, x86asm.PUNPCKHWD,
+		x86asm.PUNPCKLDQ, x86asm.PUNPCKHDQ,
+		x86asm.PUNPCKLQDQ, x86asm.PUNPCKHQDQ:
+		left, err := operand64FromArg(arg(0), 16)
+		if err != nil || left.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("PUNPCK destination: %v", err)
+		}
+		right, err := operand64FromArg(arg(1), 16)
+		if err != nil || (right.Kind != operand64XMM && right.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("PUNPCK source: %v", err)
+		}
+		return makeSSEUnpack64(address, uint8(inst.Len), inst.Op, left, right), false, nil
+	case x86asm.PSHUFD, x86asm.PSHUFLW, x86asm.PSHUFHW:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
 			return microOp64{}, false, fmt.Errorf("PSHUFD destination: %v", err)
@@ -715,7 +728,10 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		if !ok {
 			return microOp64{}, false, errors.New("PSHUFD requires an immediate selector")
 		}
-		return makeSSEShuffleD64(address, uint8(inst.Len), destination, source, uint8(immediate)), false, nil
+		if inst.Op == x86asm.PSHUFD {
+			return makeSSEShuffleD64(address, uint8(inst.Len), destination, source, uint8(immediate)), false, nil
+		}
+		return makeSSEShuffleW64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
 	case x86asm.PMOVMSKB:
 		destination, err := operand64FromArg(arg(0), 4)
 		if err != nil || destination.Kind != operand64Reg {
@@ -2909,6 +2925,86 @@ func makeSSEMovemask64(address uint64, size uint8, destination, source operand64
 			mask |= uint64(byteValue>>7) << i
 		}
 		if err := writeOperand64(state, destination, next, mask); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func sseUnpackLane64(op x86asm.Op) (lane int, high bool, ok bool) {
+	switch op {
+	case x86asm.PUNPCKLBW:
+		return 1, false, true
+	case x86asm.PUNPCKHBW:
+		return 1, true, true
+	case x86asm.PUNPCKLWD:
+		return 2, false, true
+	case x86asm.PUNPCKHWD:
+		return 2, true, true
+	case x86asm.PUNPCKLDQ:
+		return 4, false, true
+	case x86asm.PUNPCKHDQ:
+		return 4, true, true
+	case x86asm.PUNPCKLQDQ:
+		return 8, false, true
+	case x86asm.PUNPCKHQDQ:
+		return 8, true, true
+	default:
+		return 0, false, false
+	}
+}
+
+func makeSSEUnpack64(address uint64, size uint8, op x86asm.Op, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		lane, high, ok := sseUnpackLane64(op)
+		if !ok {
+			return Flow64Stop, ErrUnsupported64
+		}
+		start := 0
+		if high {
+			start = 8 / lane
+		}
+		var result [16]byte
+		for i := 0; i < 8/lane; i++ {
+			leftOffset := (start + i) * lane
+			rightOffset := (start + i) * lane
+			outputOffset := i * 2 * lane
+			copy(result[outputOffset:outputOffset+lane], left[leftOffset:leftOffset+lane])
+			copy(result[outputOffset+lane:outputOffset+2*lane], right[rightOffset:rightOffset+lane])
+		}
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEShuffleW64(address uint64, size uint8, op x86asm.Op, destination, source operand64, immediate uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		input, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		output := input
+		start := 0
+		if op == x86asm.PSHUFHW {
+			start = 4
+		}
+		for lane := 0; lane < 4; lane++ {
+			selected := int((immediate >> (2 * lane)) & 3)
+			copy(output[(start+lane)*2:(start+lane)*2+2], input[(start+selected)*2:(start+selected)*2+2])
+		}
+		if err := writeVector64(state, destination, next, output); err != nil {
 			return Flow64Stop, err
 		}
 		state.RIP = next
