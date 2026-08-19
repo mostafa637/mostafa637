@@ -19,6 +19,8 @@ type Config struct {
 	Rootfs    string
 	MetaDB    string
 	Shell     string
+	GuestELF  string
+	UseGuest  bool
 	UID       uint32
 	GID       uint32
 	Bootstrap bool
@@ -42,6 +44,7 @@ type CoreSession struct {
 	fs      *corefs.FS
 	kernel  *corekernel.Process
 	pty     *platform.PTYSession
+	guest   *guestTransport
 	closed  bool
 	started bool
 }
@@ -61,7 +64,15 @@ func New(cfg Config) (*CoreSession, error) {
 			return nil, err
 		}
 	}
-	return &CoreSession{fs: fake, kernel: corekernel.NewProcess(1, fake), pty: platform.NewPTYSession(cfg.Shell)}, nil
+	process := corekernel.NewProcess(1, fake)
+	if cfg.UseGuest {
+		guestPath := cfg.GuestELF
+		if guestPath == "" {
+			guestPath = cfg.Shell
+		}
+		return &CoreSession{fs: fake, kernel: process, guest: newGuestTransport(guestPath)}, nil
+	}
+	return &CoreSession{fs: fake, kernel: process, pty: platform.NewPTYSession(cfg.Shell)}, nil
 }
 
 func NewWithFS(fake *corefs.FS, shell string) (*CoreSession, error) {
@@ -97,8 +108,17 @@ func (s *CoreSession) Start(ctx context.Context, cols, rows int) error {
 		return fmt.Errorf("core session: already started")
 	}
 	pty := s.pty
+	guest := s.guest
+	process := s.kernel
+	fake := s.fs
 	s.mu.Unlock()
-	if err := pty.Start(ctx, cols, rows); err != nil {
+	var err error
+	if guest != nil {
+		err = guest.start(ctx, process, fake)
+	} else {
+		err = pty.Start(ctx, cols, rows)
+	}
+	if err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -110,7 +130,11 @@ func (s *CoreSession) Start(ctx context.Context, cols, rows int) error {
 func (s *CoreSession) Output() <-chan []byte {
 	s.mu.Lock()
 	pty := s.pty
+	guest := s.guest
 	s.mu.Unlock()
+	if guest != nil {
+		return guest.outputChannel()
+	}
 	if pty == nil {
 		return nil
 	}
@@ -124,7 +148,11 @@ func (s *CoreSession) Write(p []byte) error {
 		return transport.ErrClosed
 	}
 	pty := s.pty
+	guest := s.guest
 	s.mu.Unlock()
+	if guest != nil {
+		return guest.write(p)
+	}
 	return pty.Write(p)
 }
 
@@ -135,7 +163,11 @@ func (s *CoreSession) Resize(cols, rows int) error {
 		return transport.ErrClosed
 	}
 	pty := s.pty
+	guest := s.guest
 	s.mu.Unlock()
+	if guest != nil {
+		return nil
+	}
 	return pty.Resize(cols, rows)
 }
 
@@ -147,11 +179,15 @@ func (s *CoreSession) Close() error {
 	}
 	s.closed = true
 	pty := s.pty
+	guest := s.guest
 	fake := s.fs
 	process := s.kernel
 	s.mu.Unlock()
 
 	var first error
+	if guest != nil {
+		guest.stop()
+	}
 	if pty != nil {
 		first = pty.Close()
 	}

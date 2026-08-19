@@ -40,6 +40,8 @@ func newSession(ctx context.Context) (transport.Session, error) {
 		Rootfs:    rootfs,
 		MetaDB:    os.Getenv("ISH_META_DB"),
 		Shell:     os.Getenv("ISH_SHELL"),
+		GuestELF:  os.Getenv("ISH_GUEST_ELF"),
+		UseGuest:  true,
 		UID:       0,
 		GID:       0,
 		Bootstrap: true,

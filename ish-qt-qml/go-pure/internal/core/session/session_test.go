@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
@@ -71,5 +72,68 @@ func TestCoreSessionPTYLifecycle(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("timed out waiting for output, got %q", output.String())
 		}
+	}
+}
+
+func guestExitELF() []byte {
+	const (
+		headerSize    = 52
+		programSize   = 32
+		programOffset = headerSize
+		payloadOffset = 0x1000
+		entry         = 0x08048000
+	)
+	code := []byte{0xb8, 0x01, 0, 0, 0, 0xbb, 0x2a, 0, 0, 0, 0xcd, 0x80}
+	data := make([]byte, payloadOffset+len(code))
+	copy(data[0:4], []byte{0x7f, 'E', 'L', 'F'})
+	data[4], data[5], data[6], data[7] = 1, 1, 1, 3
+	binary.LittleEndian.PutUint16(data[16:], 2)
+	binary.LittleEndian.PutUint16(data[18:], 3)
+	binary.LittleEndian.PutUint32(data[20:], 1)
+	binary.LittleEndian.PutUint32(data[24:], entry)
+	binary.LittleEndian.PutUint32(data[28:], programOffset)
+	binary.LittleEndian.PutUint16(data[40:], headerSize)
+	binary.LittleEndian.PutUint16(data[42:], programSize)
+	binary.LittleEndian.PutUint16(data[44:], 1)
+	ph := data[programOffset : programOffset+programSize]
+	binary.LittleEndian.PutUint32(ph[0:], 1)
+	binary.LittleEndian.PutUint32(ph[4:], payloadOffset)
+	binary.LittleEndian.PutUint32(ph[8:], entry)
+	binary.LittleEndian.PutUint32(ph[12:], entry)
+	binary.LittleEndian.PutUint32(ph[16:], uint32(len(code)))
+	binary.LittleEndian.PutUint32(ph[20:], 0x1000)
+	binary.LittleEndian.PutUint32(ph[24:], 5)
+	binary.LittleEndian.PutUint32(ph[28:], 0x1000)
+	copy(data[payloadOffset:], code)
+	return data
+}
+
+func TestCoreSessionGuestELFExit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "exit42"), guestExitELF(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{Rootfs: root, Shell: "/bin/exit42", UseGuest: true, Bootstrap: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Start(context.Background(), 80, 24); err != nil {
+		t.Fatalf("guest Start: %v", err)
+	}
+	select {
+	case _, ok := <-s.Output():
+		if ok {
+			for range s.Output() {
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for guest exit")
+	}
+	if code, exited := s.Kernel().ExitCode(); !exited || code != 42 {
+		t.Fatalf("guest exit: exited=%v code=%d", exited, code)
 	}
 }
