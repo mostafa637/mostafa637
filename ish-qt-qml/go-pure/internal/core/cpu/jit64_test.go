@@ -1113,3 +1113,65 @@ func TestJIT64SSE2UnpackAndWordShuffle(t *testing.T) {
 		t.Fatalf("PUNPCKHQDQ = % x", state.XMM[14])
 	}
 }
+
+func TestJIT64SSE2ShuffleAverageMinMax(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x1e000
+	code := []byte{
+		0x66, 0x0f, 0x38, 0x00, 0xc1, // pshufb xmm0, xmm1
+		0x66, 0x0f, 0xe0, 0xd3, // pavgb xmm2, xmm3
+		0x66, 0x0f, 0xe3, 0xe5, // pavgw xmm4, xmm5
+		0x66, 0x0f, 0xda, 0xf7, // pminub xmm6, xmm7
+		0x66, 0x45, 0x0f, 0x38, 0x38, 0xc1, // pminsb xmm8, xmm9
+		0x66, 0x45, 0x0f, 0x38, 0x3f, 0xd3, // pmaxud xmm10, xmm11
+		0xf4,
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	for i := 0; i < 16; i++ {
+		state.XMM[0][i] = byte(i)
+	}
+	copy(state.XMM[1][:], []byte{15, 14, 13, 12, 0x80, 4, 6, 0x8f, 8, 9, 10, 11, 12, 13, 14, 15})
+	copy(state.XMM[2][:], []byte{0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150})
+	copy(state.XMM[3][:], []byte{1, 11, 21, 31, 41, 51, 61, 71, 81, 91, 101, 111, 121, 131, 141, 151})
+	for i, value := range []uint16{0, 100, 1000, 30000, 40000, 50000, 60000, 65535} {
+		binary.LittleEndian.PutUint16(state.XMM[4][i*2:], value)
+		binary.LittleEndian.PutUint16(state.XMM[5][i*2:], value+1)
+	}
+	copy(state.XMM[6][:], []byte{0, 255, 10, 240, 20, 230, 30, 220, 40, 210, 50, 200, 60, 190, 70, 180})
+	copy(state.XMM[7][:], []byte{1, 1, 11, 239, 19, 231, 31, 219, 41, 211, 49, 201, 61, 189, 69, 181})
+	copy(state.XMM[8][:], []byte{0x80, 0x7f, 0xfe, 0x02, 0x10, 0xf0, 0x7e, 0x81, 1, 2, 3, 4, 0xfc, 0xfd, 0x7d, 0x7c})
+	copy(state.XMM[9][:], []byte{0x7f, 0x80, 0xfd, 0x03, 0x0f, 0x10, 0x7f, 0x80, 2, 1, 4, 3, 0xfb, 0xfe, 0x7e, 0x7b})
+	for i, value := range []uint32{1, 0xffffffff, 100, 0x80000000} {
+		binary.LittleEndian.PutUint32(state.XMM[10][i*4:], value)
+	}
+	for i, value := range []uint32{2, 3, 50, 0x7fffffff} {
+		binary.LittleEndian.PutUint32(state.XMM[11][i*4:], value)
+	}
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("SIMD trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if got, want := state.XMM[0][:], []byte{15, 14, 13, 12, 0, 4, 6, 0, 8, 9, 10, 11, 12, 13, 14, 15}; string(got) != string(want) {
+		t.Fatalf("PSHUFB = % x, want % x", got, want)
+	}
+	if got, want := state.XMM[2][:], []byte{1, 11, 21, 31, 41, 51, 61, 71, 81, 91, 101, 111, 121, 131, 141, 151}; string(got) != string(want) {
+		t.Fatalf("PAVGB = % x, want % x", got, want)
+	}
+	for i, want := range []uint16{1, 101, 1001, 30001, 40001, 50001, 60001, 0x8000} {
+		if got := binary.LittleEndian.Uint16(state.XMM[4][i*2:]); got != want {
+			t.Fatalf("PAVGW lane %d = %#x, want %#x", i, got, want)
+		}
+	}
+	if got, want := state.XMM[6][:], []byte{0, 1, 10, 239, 19, 230, 30, 219, 40, 210, 49, 200, 60, 189, 69, 180}; string(got) != string(want) {
+		t.Fatalf("PMINUB = % x, want % x", got, want)
+	}
+	if got, want := state.XMM[8][:], []byte{0x80, 0x80, 0xfd, 0x02, 0x0f, 0xf0, 0x7e, 0x80, 1, 1, 3, 3, 0xfb, 0xfd, 0x7d, 0x7b}; string(got) != string(want) {
+		t.Fatalf("PMINSB = % x, want % x", got, want)
+	}
+	for i, want := range []uint32{2, 0xffffffff, 100, 0x80000000} {
+		if got := binary.LittleEndian.Uint32(state.XMM[10][i*4:]); got != want {
+			t.Fatalf("PMAXUD lane %d = %#x, want %#x", i, got, want)
+		}
+	}
+}

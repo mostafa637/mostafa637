@@ -678,7 +678,11 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 	case x86asm.PXOR, x86asm.PAND, x86asm.POR, x86asm.PANDN,
 		x86asm.PADDB, x86asm.PADDW, x86asm.PADDD, x86asm.PADDQ,
 		x86asm.PSUBB, x86asm.PSUBW, x86asm.PSUBD, x86asm.PSUBQ,
-		x86asm.PCMPEQB, x86asm.PCMPEQW, x86asm.PCMPEQD, x86asm.PCMPEQQ:
+		x86asm.PCMPEQB, x86asm.PCMPEQW, x86asm.PCMPEQD, x86asm.PCMPEQQ,
+		x86asm.PAVGB, x86asm.PAVGW,
+		x86asm.PMINUB, x86asm.PMAXUB, x86asm.PMINUW, x86asm.PMAXUW,
+		x86asm.PMINUD, x86asm.PMAXUD, x86asm.PMINSB, x86asm.PMAXSB,
+		x86asm.PMINSW, x86asm.PMAXSW, x86asm.PMINSD, x86asm.PMAXSD:
 
 		left, err := operand64FromArg(arg(0), 16)
 		if err != nil || left.Kind != operand64XMM {
@@ -715,6 +719,16 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("PUNPCK source: %v", err)
 		}
 		return makeSSEUnpack64(address, uint8(inst.Len), inst.Op, left, right), false, nil
+	case x86asm.PSHUFB:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("PSHUFB destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("PSHUFB source: %v", err)
+		}
+		return makeSSEShuffleBytes64(address, uint8(inst.Len), destination, source), false, nil
 	case x86asm.PSHUFD, x86asm.PSHUFLW, x86asm.PSHUFHW:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
@@ -1547,11 +1561,16 @@ func makeSSEMove64(address uint64, size uint8, dst, src operand64) microOp64 {
 
 func sseLaneWidth64(op x86asm.Op) (int, bool) {
 	switch op {
-	case x86asm.PADDB, x86asm.PSUBB, x86asm.PCMPEQB:
+	case x86asm.PADDB, x86asm.PSUBB, x86asm.PCMPEQB,
+		x86asm.PAVGB, x86asm.PMINUB, x86asm.PMAXUB,
+		x86asm.PMINSB, x86asm.PMAXSB:
 		return 1, true
-	case x86asm.PADDW, x86asm.PSUBW, x86asm.PCMPEQW:
+	case x86asm.PADDW, x86asm.PSUBW, x86asm.PCMPEQW,
+		x86asm.PAVGW, x86asm.PMINUW, x86asm.PMAXUW,
+		x86asm.PMINSW, x86asm.PMAXSW:
 		return 2, true
-	case x86asm.PADDD, x86asm.PSUBD, x86asm.PCMPEQD:
+	case x86asm.PADDD, x86asm.PSUBD, x86asm.PCMPEQD,
+		x86asm.PMINUD, x86asm.PMAXUD, x86asm.PMINSD, x86asm.PMAXSD:
 		return 4, true
 	case x86asm.PADDQ, x86asm.PSUBQ, x86asm.PCMPEQQ:
 		return 8, true
@@ -1602,9 +1621,41 @@ func makeSSEBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand6
 					result = l - r
 				case x86asm.PCMPEQB, x86asm.PCMPEQW, x86asm.PCMPEQD, x86asm.PCMPEQQ:
 					if l == r {
+
 						result = (uint64(1) << (8 * lane)) - 1
 					}
+				case x86asm.PAVGB, x86asm.PAVGW:
+					result = (l + r + 1) / 2
+				case x86asm.PMINUB, x86asm.PMAXUB, x86asm.PMINUW, x86asm.PMAXUW,
+					x86asm.PMINUD, x86asm.PMAXUD:
+					if op == x86asm.PMINUB || op == x86asm.PMINUW || op == x86asm.PMINUD {
+						if l < r {
+							result = l
+						} else {
+							result = r
+						}
+					} else if l > r {
+						result = l
+					} else {
+						result = r
+					}
+				case x86asm.PMINSB, x86asm.PMAXSB, x86asm.PMINSW, x86asm.PMAXSW,
+					x86asm.PMINSD, x86asm.PMAXSD:
+					leftSigned := signExtendLane64(l, lane)
+					rightSigned := signExtendLane64(r, lane)
+					if op == x86asm.PMINSB || op == x86asm.PMINSW || op == x86asm.PMINSD {
+						if leftSigned < rightSigned {
+							result = l
+						} else {
+							result = r
+						}
+					} else if leftSigned > rightSigned {
+						result = l
+					} else {
+						result = r
+					}
 				}
+
 				for i := 0; i < lane; i++ {
 					left[offset+i] = byte(result >> (8 * i))
 				}
@@ -3003,6 +3054,30 @@ func makeSSEShuffleW64(address uint64, size uint8, op x86asm.Op, destination, so
 		for lane := 0; lane < 4; lane++ {
 			selected := int((immediate >> (2 * lane)) & 3)
 			copy(output[(start+lane)*2:(start+lane)*2+2], input[(start+selected)*2:(start+selected)*2+2])
+		}
+		if err := writeVector64(state, destination, next, output); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEShuffleBytes64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		input, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		control, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var output [16]byte
+		for i, selector := range control {
+			if selector&0x80 == 0 {
+				output[i] = input[selector&0x0f]
+			}
 		}
 		if err := writeVector64(state, destination, next, output); err != nil {
 			return Flow64Stop, err
