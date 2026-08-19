@@ -90,6 +90,7 @@ const (
 	Sys64InotifyInit1   Number64 = 294
 	Sys64Prlimit64      Number64 = 302
 	Sys64Getrandom      Number64 = 318
+	Sys64Statx          Number64 = 332
 	Sys64Rseq           Number64 = 334
 	Sys64Getdents64     Number64 = 217
 	Sys64TimerfdCreate  Number64 = 283
@@ -116,6 +117,7 @@ type Context64 struct {
 	RseqAddress   uint64
 	RseqLength    uint64
 	RseqSignature uint64
+	RLimits       map[uint64]ResourceLimit64
 
 	// Execve is provided by the guest session. It replaces the current ELF
 	// image while preserving process identity and the descriptor table.
@@ -132,7 +134,7 @@ type Dispatcher64 struct {
 }
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
-	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), signalFDs: make(map[*signalFD64]struct{})}
+	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), RLimits: defaultResourceLimits64(), signalFDs: make(map[*signalFD64]struct{})}
 }
 
 const maxFD64 = uint64(^uint32(0) >> 1)
@@ -199,6 +201,12 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Stat, stat64Guest)
 	d.Register(Sys64Fstat, fstat64Guest)
 	d.Register(Sys64Fstatat, fstatat64Guest)
+	d.Register(Sys64Statx, statx64Guest)
+	d.Register(Sys64Unlinkat, unlinkat64Guest)
+	d.Register(Sys64Renameat, renameat64Guest)
+	d.Register(Sys64Linkat, linkat64Guest)
+	d.Register(Sys64Symlinkat, symlinkat64Guest)
+	d.Register(Sys64Prlimit64, prlimit64_64)
 	d.Register(Sys64Mkdir, mkdir64Guest)
 	d.Register(Sys64Rmdir, rmdir64Guest)
 	d.Register(Sys64Unlink, unlink64Guest)
