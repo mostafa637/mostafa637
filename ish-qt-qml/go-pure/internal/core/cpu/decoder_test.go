@@ -368,3 +368,53 @@ func TestDecodeX86LoopInstructions(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX86RegisterExtensionsAndTransforms(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     []byte
+		op       Op
+		srcWidth uint8
+		srcIsMem bool
+		dst      Reg32
+		length   uint32
+	}{
+		{name: "movzx byte register", code: []byte{0x0F, 0xB6, 0xC0}, op: OpMovzxRegOperand, srcWidth: 1, dst: EAX, length: 3},
+		{name: "movzx word register", code: []byte{0x0F, 0xB7, 0xC1}, op: OpMovzxRegOperand, srcWidth: 2, dst: EAX, length: 3},
+		{name: "movsx byte memory", code: []byte{0x0F, 0xBE, 0x43, 0x02}, op: OpMovsxRegOperand, srcWidth: 1, srcIsMem: true, dst: EAX, length: 4},
+		{name: "movsx word memory", code: []byte{0x0F, 0xBF, 0x4B, 0x04}, op: OpMovsxRegOperand, srcWidth: 2, srcIsMem: true, dst: ECX, length: 4},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Len != test.length || instruction.Dst.Reg != test.dst || instruction.Src.Width != test.srcWidth || instruction.Src.IsMem != test.srcIsMem {
+				t.Fatalf("instruction = %#v, want op %v len %d dst %v src width %d mem %v", instruction, test.op, test.length, test.dst, test.srcWidth, test.srcIsMem)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name string
+		code []byte
+		op   Op
+	}{
+		{name: "lea", code: []byte{0x8D, 0x54, 0x8B, 0x10}, op: OpLeaRegMem},
+		{name: "cwde", code: []byte{0x98}, op: OpCWDE},
+		{name: "cdq", code: []byte{0x99}, op: OpCDQ},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Len != uint32(len(test.code)) {
+				t.Fatalf("instruction = %#v, want op %v len %d", instruction, test.op, len(test.code))
+			}
+		})
+	}
+}

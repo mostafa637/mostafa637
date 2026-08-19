@@ -83,6 +83,7 @@ const (
 	OpDecOperand
 	OpImulRegOperand
 	OpMovzxRegOperand
+	OpMovsxRegOperand
 	OpPushAll
 	OpPopAll
 	OpLeave
@@ -291,6 +292,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return stringInstruction, nil
+	}
+	if dataMovement, handled, err := decodeX86DataMovement(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return dataMovement, nil
 	}
 	if shift, handled, err := decodeX86Shift(disassembled); handled {
 		if err != nil {
@@ -828,6 +835,139 @@ func x86Reg32(reg x86asm.Reg) (Reg32, bool) {
 	default:
 		return RegNone, false
 	}
+}
+
+func decodeX86DataMovement(inst x86asm.Inst) (Instruction, bool, error) {
+	switch inst.Op {
+	case x86asm.MOVZX, x86asm.MOVSX:
+		if inst.DataSize != 32 || len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+			return Instruction{}, true, fmt.Errorf("%w: %v data size %d or operands", ErrUnsupportedAddressing, inst.Op, inst.DataSize)
+		}
+		dst, ok, err := x86Operand32(inst.Args[0])
+		if err != nil || !ok || dst.IsMem {
+			if err == nil {
+				err = ErrUnsupportedAddressing
+			}
+			return Instruction{}, true, err
+		}
+		var src Operand
+		switch inst.MemBytes {
+		case 1:
+			src, ok, err = x86Operand8(inst.Args[1])
+		case 2:
+			src, ok, err = x86Operand16(inst.Args[1])
+		default:
+			if reg, isReg := inst.Args[1].(x86asm.Reg); isReg {
+				if isX86ByteReg(reg) {
+					src, ok, err = x86Operand8(reg)
+				} else if isX86WordReg(reg) {
+					src, ok, err = x86Operand16(reg)
+				} else {
+					err = fmt.Errorf("%w: %v source register", ErrUnsupportedAddressing, reg)
+				}
+			} else {
+				err = fmt.Errorf("%w: %v source width", ErrUnsupportedAddressing, inst.Op)
+			}
+		}
+		if err != nil || !ok {
+			if err == nil {
+				err = ErrUnsupportedAddressing
+			}
+			return Instruction{}, true, err
+		}
+		if src.Width != 1 && src.Width != 2 {
+			return Instruction{}, true, fmt.Errorf("%w: %v source width %d", ErrUnsupportedAddressing, inst.Op, src.Width)
+		}
+		op := OpMovzxRegOperand
+		if inst.Op == x86asm.MOVSX {
+			op = OpMovsxRegOperand
+		}
+		return Instruction{Op: op, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
+	case x86asm.LEA:
+		if inst.DataSize != 32 || inst.AddrSize != 32 || len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+			return Instruction{}, true, fmt.Errorf("%w: LEA data/address size %d/%d or operands", ErrUnsupportedAddressing, inst.DataSize, inst.AddrSize)
+		}
+		dst, ok, err := x86Operand32(inst.Args[0])
+		if err != nil || !ok || dst.IsMem {
+			if err == nil {
+				err = ErrUnsupportedAddressing
+			}
+			return Instruction{}, true, err
+		}
+		src, ok, err := x86Operand32(inst.Args[1])
+		if err != nil || !ok || !src.IsMem {
+			if err == nil {
+				err = ErrUnsupportedAddressing
+			}
+			return Instruction{}, true, err
+		}
+		return Instruction{Op: OpLeaRegMem, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
+	case x86asm.CWDE:
+		if inst.DataSize != 32 || inst.Args[0] != nil {
+			return Instruction{}, true, fmt.Errorf("%w: CWDE data size %d or operands", ErrUnsupportedAddressing, inst.DataSize)
+		}
+		return Instruction{Op: OpCWDE, Len: uint32(inst.Len)}, true, nil
+	case x86asm.CDQ:
+		if inst.DataSize != 32 || inst.Args[0] != nil {
+			return Instruction{}, true, fmt.Errorf("%w: CDQ data size %d or operands", ErrUnsupportedAddressing, inst.DataSize)
+		}
+		return Instruction{Op: OpCDQ, Len: uint32(inst.Len)}, true, nil
+	default:
+		return Instruction{}, false, nil
+	}
+}
+
+func isX86ByteReg(reg x86asm.Reg) bool {
+	switch reg {
+	case x86asm.AL, x86asm.CL, x86asm.DL, x86asm.BL, x86asm.AH, x86asm.CH, x86asm.DH, x86asm.BH:
+		return true
+	default:
+		return false
+	}
+}
+
+func isX86WordReg(reg x86asm.Reg) bool {
+	switch reg {
+	case x86asm.AX, x86asm.CX, x86asm.DX, x86asm.BX, x86asm.SP, x86asm.BP, x86asm.SI, x86asm.DI:
+		return true
+	default:
+		return false
+	}
+}
+
+func x86Operand16(arg x86asm.Arg) (Operand, bool, error) {
+	if memory, ok := arg.(x86asm.Mem); ok {
+		operand, ok, err := x86Operand32(memory)
+		if err != nil || !ok {
+			return Operand{}, false, err
+		}
+		operand.Width = 2
+		return operand, true, nil
+	}
+	reg, ok := arg.(x86asm.Reg)
+	if !ok || !isX86WordReg(reg) {
+		return Operand{}, false, fmt.Errorf("%w: word register %v", ErrUnsupportedAddressing, reg)
+	}
+	var base Reg32
+	switch reg {
+	case x86asm.AX:
+		base = EAX
+	case x86asm.CX:
+		base = ECX
+	case x86asm.DX:
+		base = EDX
+	case x86asm.BX:
+		base = EBX
+	case x86asm.SP:
+		base = ESP
+	case x86asm.BP:
+		base = EBP
+	case x86asm.SI:
+		base = ESI
+	case x86asm.DI:
+		base = EDI
+	}
+	return Operand{Reg: base, Width: 2}, true, nil
 }
 
 func decodeX86Shift(inst x86asm.Inst) (Instruction, bool, error) {

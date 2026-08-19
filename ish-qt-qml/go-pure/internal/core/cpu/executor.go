@@ -402,6 +402,21 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		}
 		state.Set(instruction.Dst.Reg, value)
 		state.EIP = next
+	case OpMovsxRegOperand:
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		switch instruction.Src.Width {
+		case 1:
+			value = uint32(int32(int8(value)))
+		case 2:
+			value = uint32(int32(int16(value)))
+		default:
+			return instruction, fmt.Errorf("cpu: unsupported MOVSX source width %d", instruction.Src.Width)
+		}
+		state.Set(instruction.Dst.Reg, value)
+		state.EIP = next
 	case OpPushReg:
 		if err := push(state, state.Get(instruction.Reg)); err != nil {
 			return instruction, err

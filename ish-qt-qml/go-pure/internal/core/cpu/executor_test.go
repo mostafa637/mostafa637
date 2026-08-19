@@ -1131,3 +1131,29 @@ func TestExecutorJCXZUsesLowSixteenBits(t *testing.T) {
 		t.Fatalf("not-taken JCXZ: eax=%d ecx=%#x", notTaken.Get(EAX), notTaken.Get(ECX))
 	}
 }
+
+func TestExecutorMovsxAndMovzxMemory(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0x0F, 0xBE, 0x43, 0x00, // movsx eax, byte [ebx]
+		0x0F, 0xBF, 0x4B, 0x02, // movsx ecx, word [ebx+2]
+		0x0F, 0xB6, 0x53, 0x00, // movzx edx, byte [ebx]
+		0xF4,
+	})
+	base := Address(2 * PageSize)
+	if err := memory.Write(base, []byte{0x80, 0x00, 0x80, 0xFF}); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(EBX, uint32(base))
+	if err := NewExecutor(nil).Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 0xffffff80 {
+		t.Fatalf("MOVSX byte eax=%#x, want 0xffffff80", got)
+	}
+	if got := state.Get(ECX); got != 0xffffff80 {
+		t.Fatalf("MOVSX word ecx=%#x, want 0xffffff80", got)
+	}
+	if got := state.Get(EDX); got != 0x80 {
+		t.Fatalf("MOVZX byte edx=%#x, want 0x80", got)
+	}
+}
