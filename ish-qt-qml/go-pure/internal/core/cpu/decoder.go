@@ -90,6 +90,8 @@ const (
 	OpRetImm
 	OpCWDE
 	OpCDQ
+	OpCmpxchg
+	OpXadd
 )
 
 type Segment uint8
@@ -298,6 +300,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return dataMovement, nil
+	}
+	if atomicInstruction, handled, err := decodeX86Atomic(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return atomicInstruction, nil
 	}
 	if shift, handled, err := decodeX86Shift(disassembled); handled {
 		if err != nil {
@@ -968,6 +976,54 @@ func x86Operand16(arg x86asm.Arg) (Operand, bool, error) {
 		base = EDI
 	}
 	return Operand{Reg: base, Width: 2}, true, nil
+}
+
+func decodeX86Atomic(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.Op != x86asm.CMPXCHG && inst.Op != x86asm.XADD {
+		return Instruction{}, false, nil
+	}
+	if inst.DataSize != 32 || len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+		return Instruction{}, true, fmt.Errorf("%w: %v data size %d or operands", ErrUnsupportedAddressing, inst.Op, inst.DataSize)
+	}
+	width := uint8(4)
+	if inst.MemBytes == 1 {
+		width = 1
+	} else if inst.MemBytes != 0 && inst.MemBytes != 4 {
+		return Instruction{}, true, fmt.Errorf("%w: %v memory width %d", ErrUnsupportedAddressing, inst.Op, inst.MemBytes)
+	}
+	if reg, ok := inst.Args[0].(x86asm.Reg); ok && isX86ByteReg(reg) {
+		width = 1
+	}
+	if reg, ok := inst.Args[1].(x86asm.Reg); ok && isX86ByteReg(reg) {
+		if width == 4 {
+			width = 1
+		}
+	}
+	var dst, src Operand
+	var ok bool
+	var err error
+	if width == 1 {
+		dst, ok, err = x86Operand8(inst.Args[0])
+		if err == nil && ok {
+			src, ok, err = x86Operand8(inst.Args[1])
+		}
+	} else {
+		dst, ok, err = x86Operand32(inst.Args[0])
+		if err == nil && ok {
+			src, ok, err = x86Operand32(inst.Args[1])
+		}
+	}
+	if err != nil || !ok || dst.Width != width || src.Width != width {
+		if err == nil {
+			err = fmt.Errorf("%w: %v operand width", ErrUnsupportedAddressing, inst.Op)
+		}
+		return Instruction{}, true, err
+	}
+	op := OpCmpxchg
+	if inst.Op == x86asm.XADD {
+		op = OpXadd
+	}
+	return Instruction{Op: op, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
 }
 
 func decodeX86Shift(inst x86asm.Inst) (Instruction, bool, error) {

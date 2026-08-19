@@ -418,3 +418,76 @@ func TestDecodeX86RegisterExtensionsAndTransforms(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX86AtomicInstructions(t *testing.T) {
+	tests := []struct {
+		name   string
+		code   []byte
+		op     Op
+		dst    Operand
+		src    Operand
+		length uint32
+	}{
+		{
+			name:   "cmpxchg register",
+			code:   []byte{0x0F, 0xB1, 0xC8}, // cmpxchg eax, ecx
+			op:     OpCmpxchg,
+			dst:    regOperand(EAX),
+			src:    regOperand(ECX),
+			length: 3,
+		},
+		{
+			name: "cmpxchg memory",
+			code: []byte{0x0F, 0xB1, 0x4B, 0x04}, // cmpxchg [ebx+4], ecx
+			op:   OpCmpxchg,
+			dst:  Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1, Disp: 4}},
+			src:  regOperand(ECX), length: 4,
+		},
+		{
+			name:   "cmpxchg byte",
+			code:   []byte{0x0F, 0xB0, 0xC8}, // cmpxchg al, cl
+			op:     OpCmpxchg,
+			dst:    Operand{Reg: EAX, Width: 1},
+			src:    Operand{Reg: ECX, Width: 1},
+			length: 3,
+		},
+		{
+			name:   "xadd register",
+			code:   []byte{0x0F, 0xC1, 0xC8}, // xadd eax, ecx
+			op:     OpXadd,
+			dst:    regOperand(EAX),
+			src:    regOperand(ECX),
+			length: 3,
+		},
+		{
+			name: "xadd memory",
+			code: []byte{0x0F, 0xC1, 0x4B, 0x04}, // xadd [ebx+4], ecx
+			op:   OpXadd,
+			dst:  Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1, Disp: 4}},
+			src:  regOperand(ECX), length: 4,
+		},
+		{
+			name:   "xadd byte",
+			code:   []byte{0x0F, 0xC0, 0xC8}, // xadd al, cl
+			op:     OpXadd,
+			dst:    Operand{Reg: EAX, Width: 1},
+			src:    Operand{Reg: ECX, Width: 1},
+			length: 3,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Len != test.length {
+				t.Fatalf("instruction = %#v, want op %v len %d", instruction, test.op, test.length)
+			}
+			if instruction.Dst != test.dst || instruction.Src != test.src {
+				t.Fatalf("operands = dst %#v src %#v, want dst %#v src %#v", instruction.Dst, instruction.Src, test.dst, test.src)
+			}
+		})
+	}
+}

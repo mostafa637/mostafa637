@@ -344,6 +344,49 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			return instruction, err
 		}
 		state.EIP = next
+	case OpCmpxchg:
+		width := instruction.Dst.Width
+		accumulator := Operand{Reg: EAX, Width: width}
+		accValue, err := loadOperand(state, accumulator)
+		if err != nil {
+			return instruction, err
+		}
+		dstValue, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		srcValue, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		comparison := subWidth(accValue, dstValue, width)
+		if comparison.equal {
+			if err := storeOperand(state, instruction.Dst, srcValue); err != nil {
+				return instruction, err
+			}
+		} else if err := storeOperand(state, accumulator, dstValue); err != nil {
+			return instruction, err
+		}
+		setLazyArithmeticWidth(state, accValue, dstValue, comparison.result, width, true)
+		state.EIP = next
+	case OpXadd:
+		dstValue, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		srcValue, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		sum := addWidth(dstValue, srcValue, instruction.Dst.Width)
+		if err := storeOperand(state, instruction.Dst, sum.result); err != nil {
+			return instruction, err
+		}
+		if err := storeOperand(state, instruction.Src, dstValue); err != nil {
+			return instruction, err
+		}
+		setLazyArithmeticWidth(state, dstValue, srcValue, sum.result, instruction.Dst.Width, false)
+		state.EIP = next
 	case OpIncReg:
 		carry := state.Flag(FlagCF)
 		reg := state.Get(instruction.Reg)
@@ -838,6 +881,59 @@ func (e *Executor) sub(state *MachineState, left, right uint32) uint32 {
 	overflow := ((left ^ right) & (left ^ result) & 0x80000000) != 0
 	state.SetLazyArithmetic(left, right, result, borrow != 0, overflow, true)
 	return result
+}
+
+type widthArithmetic struct {
+	result uint32
+	equal  bool
+}
+
+func widthMask(width uint8) (mask, sign uint32) {
+	switch width {
+	case 1:
+		return 0xff, 0x80
+	case 2:
+		return 0xffff, 0x8000
+	default:
+		return 0xffffffff, 0x80000000
+	}
+}
+
+func addWidth(left, right uint32, width uint8) widthArithmetic {
+	mask, _ := widthMask(width)
+	left &= mask
+	right &= mask
+	return widthArithmetic{result: (left + right) & mask}
+}
+
+func subWidth(left, right uint32, width uint8) widthArithmetic {
+	mask, _ := widthMask(width)
+	left &= mask
+	right &= mask
+	return widthArithmetic{result: (left - right) & mask, equal: left == right}
+}
+
+func setLazyArithmeticWidth(state *MachineState, left, right, result uint32, width uint8, subtraction bool) {
+	mask, sign := widthMask(width)
+	left &= mask
+	right &= mask
+	result &= mask
+	var carry bool
+	if subtraction {
+		carry = left < right
+	} else {
+		carry = uint64(left)+uint64(right) > uint64(mask)
+	}
+	overflow := false
+	if subtraction {
+		overflow = ((left ^ right) & (left ^ result) & sign) != 0
+	} else {
+		overflow = ((^(left ^ right)) & (left ^ result) & sign) != 0
+	}
+	if result&sign != 0 {
+		result |= ^mask
+	}
+	state.SetLazyArithmetic(left, right, result, carry, overflow, true)
 }
 
 func setMultiplicationFlags(state *MachineState, overflow bool) {

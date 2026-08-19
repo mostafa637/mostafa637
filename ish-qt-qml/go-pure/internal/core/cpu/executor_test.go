@@ -1157,3 +1157,95 @@ func TestExecutorMovsxAndMovzxMemory(t *testing.T) {
 		t.Fatalf("MOVZX byte edx=%#x, want 0x80", got)
 	}
 }
+
+func TestExecutorCmpxchgMemorySuccess(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // ebx = 0x2000
+		0xC7, 0x03, 0x05, 0x00, 0x00, 0x00, // [ebx] = 5
+		0xB8, 0x05, 0x00, 0x00, 0x00, // eax = 5 (accumulator)
+		0xB9, 0x07, 0x00, 0x00, 0x00, // ecx = 7
+		0x0F, 0xB1, 0x0B, // cmpxchg [ebx], ecx
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 16); err != nil {
+		t.Fatal(err)
+	}
+	var raw [4]byte
+	if err := memory.Read(0x2000, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 7 {
+		t.Fatalf("cmpxchg success memory = %#x, want 7", got)
+	}
+	if state.Get(EAX) != 5 || !state.Flag(FlagZF) || state.Flag(FlagCF) {
+		t.Fatalf("cmpxchg success eax=%#x zf=%v cf=%v", state.Get(EAX), state.Flag(FlagZF), state.Flag(FlagCF))
+	}
+}
+
+func TestExecutorCmpxchgMemoryFailure(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // ebx = 0x2000
+		0xC7, 0x03, 0x03, 0x00, 0x00, 0x00, // [ebx] = 3
+		0xB8, 0x05, 0x00, 0x00, 0x00, // eax = 5 (wrong accumulator)
+		0xB9, 0x07, 0x00, 0x00, 0x00, // ecx = 7
+		0x0F, 0xB1, 0x0B, // cmpxchg [ebx], ecx
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 16); err != nil {
+		t.Fatal(err)
+	}
+	var raw [4]byte
+	if err := memory.Read(0x2000, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 3 {
+		t.Fatalf("cmpxchg failure memory = %#x, want 3", got)
+	}
+	if state.Get(EAX) != 3 || state.Flag(FlagZF) {
+		t.Fatalf("cmpxchg failure eax=%#x zf=%v", state.Get(EAX), state.Flag(FlagZF))
+	}
+}
+
+func TestExecutorXaddMemoryAndByte(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // ebx = 0x2000
+		0xC7, 0x03, 0x05, 0x00, 0x00, 0x00, // [ebx] = 5
+		0xB9, 0x03, 0x00, 0x00, 0x00, // ecx = 3
+		0x0F, 0xC1, 0x0B, // xadd [ebx], ecx
+		0xB8, 0x05, 0x33, 0x22, 0x11, // eax = 0x11223305
+		0xB9, 0x03, 0x00, 0x00, 0x00, // ecx = 3 (low byte)
+		0x0F, 0xC0, 0xC8, // xadd al, cl
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 24); err != nil {
+		t.Fatal(err)
+	}
+	var raw [4]byte
+	if err := memory.Read(0x2000, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 8 {
+		t.Fatalf("xadd memory = %#x, want 8", got)
+	}
+	if state.Get(ECX) != 5 {
+		t.Fatalf("xadd byte source = %#x, want 5", state.Get(ECX))
+	}
+	if state.Get(EAX) != 0x11223308 {
+		t.Fatalf("xadd byte destination = %#x, want 0x11223308", state.Get(EAX))
+	}
+}
+
+func TestExecutorXaddByteFlags(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xB8, 0xFF, 0x00, 0x00, 0x00, // al = 0xff
+		0xB9, 0x01, 0x00, 0x00, 0x00, // cl = 1
+		0x0F, 0xC0, 0xC8, // xadd al, cl => al=0, cl=0xff, CF=1
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(EAX)&0xff != 0 || state.Get(ECX)&0xff != 0xff || !state.Flag(FlagCF) || state.Flag(FlagOF) || !state.Flag(FlagZF) {
+		t.Fatalf("xadd byte flags eax=%#x ecx=%#x cf=%v of=%v zf=%v", state.Get(EAX), state.Get(ECX), state.Flag(FlagCF), state.Flag(FlagOF), state.Flag(FlagZF))
+	}
+}
