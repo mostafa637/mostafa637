@@ -634,3 +634,37 @@ func TestDecodeX86MovByteImmediate(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX86Movbe(t *testing.T) {
+	tests := []struct {
+		name string
+		code []byte
+		dst  Operand
+		src  Operand
+	}{
+		{
+			name: "load register memory",
+			code: []byte{0x0F, 0x38, 0xF0, 0x03},
+			dst:  regOperand(EAX),
+			src:  Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1}},
+		},
+		{
+			name: "store memory register with SIB",
+			code: []byte{0x0F, 0x38, 0xF1, 0x6C, 0xB3, 0x04},
+			dst:  Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, Index: ESI, Scale: 4, Disp: 4, HasBase: true, HasIndex: true}},
+			src:  regOperand(EBP),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != OpMovbe || instruction.Len != uint32(len(test.code)) || instruction.Dst != test.dst || instruction.Src != test.src {
+				t.Fatalf("instruction = %#v, want MOVBE len %d dst %#v src %#v", instruction, len(test.code), test.dst, test.src)
+			}
+		})
+	}
+}

@@ -24,6 +24,7 @@ const (
 	OpMovMemReg
 	OpMovMemImm
 	OpMovByteImm
+	OpMovbe
 	OpLeaRegMem
 	OpAddRegImm
 	OpSubRegImm
@@ -312,6 +313,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return byteMove, nil
+	}
+	if movbe, handled, err := decodeX86Movbe(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return movbe, nil
 	}
 	if dataMovement, handled, err := decodeX86DataMovement(disassembled); handled {
 		if err != nil {
@@ -908,6 +915,33 @@ func decodeX86ByteMove(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{}, true, err
 	}
 	return Instruction{Op: OpMovByteImm, Len: uint32(inst.Len), Dst: dst, Imm: int32(imm) & 0xff}, true, nil
+}
+
+func decodeX86Movbe(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.Op != x86asm.MOVBE {
+		return Instruction{}, false, nil
+	}
+	if inst.DataSize != 32 || inst.AddrSize != 32 || inst.MemBytes != 4 || len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+		return Instruction{}, true, fmt.Errorf("%w: MOVBE data/address/memory size %d/%d/%d or operands", ErrUnsupportedAddressing, inst.DataSize, inst.AddrSize, inst.MemBytes)
+	}
+	left, ok, err := x86Operand32(inst.Args[0])
+	if err != nil || !ok {
+		if err == nil {
+			err = ErrUnsupportedAddressing
+		}
+		return Instruction{}, true, err
+	}
+	right, ok, err := x86Operand32(inst.Args[1])
+	if err != nil || !ok {
+		if err == nil {
+			err = ErrUnsupportedAddressing
+		}
+		return Instruction{}, true, err
+	}
+	if left.IsMem == right.IsMem {
+		return Instruction{}, true, fmt.Errorf("%w: MOVBE requires one register and one memory operand", ErrUnsupportedAddressing)
+	}
+	return Instruction{Op: OpMovbe, Len: uint32(inst.Len), Dst: left, Src: right}, true, nil
 }
 
 func decodeX86DataMovement(inst x86asm.Inst) (Instruction, bool, error) {

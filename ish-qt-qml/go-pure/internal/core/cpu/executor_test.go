@@ -1590,3 +1590,63 @@ func TestExecutorMovByteImmediate(t *testing.T) {
 		})
 	}
 }
+
+func TestExecutorMovbe(t *testing.T) {
+	t.Run("load register from memory", func(t *testing.T) {
+		memory, state := mappedCode(t, []byte{
+			0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+			0x0F, 0x38, 0xF0, 0x03, // movbe eax, [ebx]
+			0xF4,
+		})
+		var raw [4]byte
+		binary.LittleEndian.PutUint32(raw[:], 0x11223344)
+		if err := memory.Write(0x2000, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+		state.EFlags |= FlagCF | FlagPF | FlagAF | FlagZF | FlagSF | FlagOF
+		state.ExpandFlags()
+		if err := NewExecutor(nil).Run(state, 4); err != nil {
+			t.Fatal(err)
+		}
+		if state.Get(EAX) != 0x44332211 {
+			t.Fatalf("MOVBE load eax=%#x, want 0x44332211", state.Get(EAX))
+		}
+		for _, flag := range []uint32{FlagCF, FlagPF, FlagAF, FlagZF, FlagSF, FlagOF} {
+			if !state.Flag(flag) {
+				t.Fatalf("MOVBE load changed flag %#x", flag)
+			}
+		}
+	})
+
+	t.Run("store memory with SIB", func(t *testing.T) {
+		memory, state := mappedCode(t, []byte{
+			0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+			0xBE, 0x02, 0x00, 0x00, 0x00, // mov esi, 2
+			0xBD, 0x78, 0x56, 0x34, 0x12, // mov ebp, 0x12345678
+			0x0F, 0x38, 0xF1, 0x6C, 0xB3, 0x04, // movbe [ebx+esi*4+4], ebp
+			0xF4,
+		})
+		var raw [4]byte
+		binary.LittleEndian.PutUint32(raw[:], 0)
+		if err := memory.Write(0x200C, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+		state.EFlags |= FlagCF | FlagPF | FlagAF | FlagZF | FlagSF | FlagOF
+		state.ExpandFlags()
+		if err := NewExecutor(nil).Run(state, 8); err != nil {
+			t.Fatal(err)
+		}
+		if err := memory.Read(0x200C, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+		want := [4]byte{0x12, 0x34, 0x56, 0x78}
+		if raw != want {
+			t.Fatalf("MOVBE store bytes=%#v want %#v", raw, want)
+		}
+		for _, flag := range []uint32{FlagCF, FlagPF, FlagAF, FlagZF, FlagSF, FlagOF} {
+			if !state.Flag(flag) {
+				t.Fatalf("MOVBE store changed flag %#x", flag)
+			}
+		}
+	})
+}
