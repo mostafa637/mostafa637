@@ -212,3 +212,32 @@ func TestDecodeX86MulDiv(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX86StringInstructions(t *testing.T) {
+	tests := []struct {
+		name  string
+		code  []byte
+		op    Op
+		width int32
+		rep   uint8
+	}{
+		{name: "movsb", code: []byte{0xA4}, op: OpMovs, width: 1},
+		{name: "rep movsd", code: []byte{0xF3, 0xA5}, op: OpMovs, width: 4, rep: 1},
+		{name: "stosb", code: []byte{0xAA}, op: OpStos, width: 1},
+		{name: "lodsd", code: []byte{0xAD}, op: OpLods, width: 4},
+		{name: "repne scasb", code: []byte{0xF2, 0xAE}, op: OpScas, width: 1, rep: 2},
+		{name: "repe cmpsd", code: []byte{0xF3, 0xA7}, op: OpCmps, width: 4, rep: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Len != uint32(len(test.code)) || instruction.Imm != test.width || instruction.Group != test.rep {
+				t.Fatalf("instruction = %#v, want op %v len %d width %d repeat %d", instruction, test.op, len(test.code), test.width, test.rep)
+			}
+		})
+	}
+}

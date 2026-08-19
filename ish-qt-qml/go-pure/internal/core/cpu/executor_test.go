@@ -793,3 +793,130 @@ func TestExecutorDivisionErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestExecutorStringInstructions(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xF3, 0xA4, // rep movsb
+		0xF3, 0xAA, // rep stosb
+		0xF3, 0xAC, // rep lodsb
+		0xF4,
+	})
+	if err := state.Memory.Write(0x2000, []byte{1, 2, 3}); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(ESI, 0x2000)
+	state.Set(EDI, 0x2010)
+	state.Set(ECX, 3)
+	if _, err := NewExecutor(nil).Step(state); err != nil {
+		t.Fatal(err)
+	}
+	var copied [3]byte
+	if err := state.Memory.Read(0x2010, copied[:]); err != nil {
+		t.Fatal(err)
+	}
+	if copied != [3]byte{1, 2, 3} {
+		t.Fatalf("REP MOVSB destination = %v, want [1 2 3]", copied)
+	}
+	if state.Get(ECX) != 0 || state.Get(ESI) != 0x2003 || state.Get(EDI) != 0x2013 {
+		t.Fatalf("REP MOVSB indices/count = ecx %#x esi %#x edi %#x", state.Get(ECX), state.Get(ESI), state.Get(EDI))
+	}
+
+	state.Set(EAX, 0xAA)
+	state.Set(ECX, 3)
+	if _, err := NewExecutor(nil).Step(state); err != nil {
+		t.Fatal(err)
+	}
+	var filled [3]byte
+	if err := state.Memory.Read(0x2013, filled[:]); err != nil {
+		t.Fatal(err)
+	}
+	if filled != [3]byte{0xAA, 0xAA, 0xAA} {
+		t.Fatalf("REP STOSB destination = %v, want [170 170 170]", filled)
+	}
+	if state.Get(ECX) != 0 || state.Get(EDI) != 0x2016 {
+		t.Fatalf("REP STOSB indices/count = ecx %#x edi %#x", state.Get(ECX), state.Get(EDI))
+	}
+
+	state.Set(ESI, 0x2001)
+	state.Set(ECX, 1)
+	if _, err := NewExecutor(nil).Step(state); err != nil {
+		t.Fatal(err)
+	}
+	if state.EAXValue()&0xff != 2 || state.Get(ESI) != 0x2002 {
+		t.Fatalf("REP LODSB = eax %#x esi %#x", state.EAXValue(), state.Get(ESI))
+	}
+}
+
+func TestExecutorRepneScasStopsOnMatch(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xF2, 0xAE, // repne scasb
+		0xF4,
+	})
+	if err := state.Memory.Write(0x2010, []byte{1, 9, 3}); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(EAX, 9)
+	state.Set(EDI, 0x2010)
+	state.Set(ECX, 3)
+	if err := NewExecutor(nil).Run(state, 2); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(ECX) != 1 || state.Get(EDI) != 0x2012 {
+		t.Fatalf("REPNE SCASB indices/count = ecx %#x edi %#x", state.Get(ECX), state.Get(EDI))
+	}
+	if !state.Flag(FlagZF) {
+		t.Fatal("REPNE SCASB did not leave ZF set on match")
+	}
+}
+
+func TestExecutorRepezCmpsStopsOnMismatch(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xF3, 0xA6, // repe cmpsb
+		0xF4,
+	})
+	if err := state.Memory.Write(0x2000, []byte{4, 5, 6}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Memory.Write(0x2010, []byte{4, 9, 6}); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(ESI, 0x2000)
+	state.Set(EDI, 0x2010)
+	state.Set(ECX, 3)
+	if err := NewExecutor(nil).Run(state, 2); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(ECX) != 1 || state.Get(ESI) != 0x2002 || state.Get(EDI) != 0x2012 {
+		t.Fatalf("REPE CMPSB indices/count = ecx %#x esi %#x edi %#x", state.Get(ECX), state.Get(ESI), state.Get(EDI))
+	}
+	if state.Flag(FlagZF) {
+		t.Fatal("REPE CMPSB left ZF set after mismatch")
+	}
+}
+
+func TestExecutorStringDirectionFlag(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xFD,       // std
+		0xF3, 0xA4, // rep movsb
+		0xF4,
+	})
+	if err := state.Memory.Write(0x2000, []byte{'a', 'b', 'c'}); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(ESI, 0x2002)
+	state.Set(EDI, 0x2012)
+	state.Set(ECX, 3)
+	if err := NewExecutor(nil).Run(state, 3); err != nil {
+		t.Fatal(err)
+	}
+	var copied [3]byte
+	if err := state.Memory.Read(0x2010, copied[:]); err != nil {
+		t.Fatal(err)
+	}
+	if copied != [3]byte{'a', 'b', 'c'} {
+		t.Fatalf("DF REP MOVSB destination = %q, want %q", copied, [3]byte{'a', 'b', 'c'})
+	}
+	if state.Get(ESI) != 0x1fff || state.Get(EDI) != 0x200f {
+		t.Fatalf("DF REP MOVSB indices = esi %#x edi %#x", state.Get(ESI), state.Get(EDI))
+	}
+}

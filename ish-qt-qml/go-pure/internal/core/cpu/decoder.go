@@ -70,6 +70,11 @@ const (
 	OpIMulOperands
 	OpDivImplicit
 	OpIDivImplicit
+	OpMovs
+	OpStos
+	OpLods
+	OpScas
+	OpCmps
 	OpCmpOperandImm
 	OpIncOperand
 	OpDecOperand
@@ -277,6 +282,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return mulDiv, nil
+	}
+	if stringInstruction, handled, err := decodeX86String(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return stringInstruction, nil
 	}
 	if shift, handled, err := decodeX86Shift(disassembled); handled {
 		if err != nil {
@@ -1145,4 +1156,61 @@ func decodeX86MulDiv(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{Op: OpIMulOperands, Len: uint32(inst.Len), Dst: dst, Src: src, Imm: int32(imm), Group: 1}, true, nil
 	}
 	return Instruction{}, false, nil
+}
+
+func decodeX86String(inst x86asm.Inst) (Instruction, bool, error) {
+	var op Op
+	var width uint8
+	switch inst.Op {
+	case x86asm.MOVSB:
+		op, width = OpMovs, 1
+	case x86asm.MOVSD:
+		op, width = OpMovs, 4
+	case x86asm.STOSB:
+		op, width = OpStos, 1
+	case x86asm.STOSD:
+		op, width = OpStos, 4
+	case x86asm.LODSB:
+		op, width = OpLods, 1
+	case x86asm.LODSD:
+		op, width = OpLods, 4
+	case x86asm.SCASB:
+		op, width = OpScas, 1
+	case x86asm.SCASD:
+		op, width = OpScas, 4
+	case x86asm.CMPSB:
+		op, width = OpCmps, 1
+	case x86asm.CMPSD:
+		op, width = OpCmps, 4
+	default:
+		return Instruction{}, false, nil
+	}
+	if inst.DataSize != 32 || inst.AddrSize != 32 {
+		return Instruction{}, true, fmt.Errorf("%w: %v data/address size %d/%d", ErrUnsupportedAddressing, inst.Op, inst.DataSize, inst.AddrSize)
+	}
+
+	repeat := uint8(0)
+	for _, prefix := range inst.Prefix {
+		if prefix == 0 {
+			break
+		}
+		switch prefix & 0xff {
+		case x86asm.PrefixREP & 0xff:
+			if repeat != 0 {
+				return Instruction{}, true, fmt.Errorf("%w: %v has multiple repeat prefixes", ErrUnsupportedInstruction, inst.Op)
+			}
+			repeat = 1
+		case x86asm.PrefixREPN & 0xff:
+			if repeat != 0 {
+				return Instruction{}, true, fmt.Errorf("%w: %v has multiple repeat prefixes", ErrUnsupportedInstruction, inst.Op)
+			}
+			repeat = 2
+		default:
+			return Instruction{}, true, fmt.Errorf("%w: %v prefix %v", ErrUnsupportedInstruction, inst.Op, prefix)
+		}
+	}
+	if repeat == 2 && op != OpScas && op != OpCmps {
+		return Instruction{}, true, fmt.Errorf("%w: REPNE %v", ErrUnsupportedInstruction, inst.Op)
+	}
+	return Instruction{Op: op, Len: uint32(inst.Len), Imm: int32(width), Group: repeat}, true, nil
 }

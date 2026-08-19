@@ -558,6 +558,93 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		state.EFlags |= FlagDF
 		state.DFOffset = ^uint32(0)
 		state.EIP = next
+	case OpMovs:
+		if err := executeString(state, instruction, func() (bool, error) {
+			value, err := readStringValue(state, Address(state.Get(ESI)), uint32(instruction.Imm))
+			if err != nil {
+				return false, err
+			}
+			if err := writeStringValue(state, Address(state.Get(EDI)), uint32(instruction.Imm), value); err != nil {
+				return false, err
+			}
+			advanceStringIndex(state, ESI, uint32(instruction.Imm))
+			advanceStringIndex(state, EDI, uint32(instruction.Imm))
+			return true, nil
+		}); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
+	case OpStos:
+		if err := executeString(state, instruction, func() (bool, error) {
+			width := uint32(instruction.Imm)
+			value := state.EAXValue()
+			if width == 1 {
+				value &= 0xff
+			}
+			if err := writeStringValue(state, Address(state.Get(EDI)), width, value); err != nil {
+				return false, err
+			}
+			advanceStringIndex(state, EDI, width)
+			return true, nil
+		}); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
+	case OpLods:
+		if err := executeString(state, instruction, func() (bool, error) {
+			width := uint32(instruction.Imm)
+			value, err := readStringValue(state, Address(state.Get(ESI)), width)
+			if err != nil {
+				return false, err
+			}
+			if width == 1 {
+				state.Set(EAX, (state.EAXValue()&^0xff)|(value&0xff))
+			} else {
+				state.SetEAX(value)
+			}
+			advanceStringIndex(state, ESI, width)
+			return true, nil
+		}); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
+	case OpScas:
+		if err := executeString(state, instruction, func() (bool, error) {
+			width := uint32(instruction.Imm)
+			value, err := readStringValue(state, Address(state.Get(EDI)), width)
+			if err != nil {
+				return false, err
+			}
+			accumulator := state.EAXValue()
+			if width == 1 {
+				accumulator &= 0xff
+			}
+			e.sub(state, accumulator, value)
+			advanceStringIndex(state, EDI, width)
+			return stringRepeatContinue(state, instruction.Group), nil
+		}); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
+	case OpCmps:
+		if err := executeString(state, instruction, func() (bool, error) {
+			width := uint32(instruction.Imm)
+			left, err := readStringValue(state, Address(state.Get(ESI)), width)
+			if err != nil {
+				return false, err
+			}
+			right, err := readStringValue(state, Address(state.Get(EDI)), width)
+			if err != nil {
+				return false, err
+			}
+			e.sub(state, left, right)
+			advanceStringIndex(state, ESI, width)
+			advanceStringIndex(state, EDI, width)
+			return stringRepeatContinue(state, instruction.Group), nil
+		}); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
 	default:
 		return instruction, ErrUnsupportedInstruction
 	}
@@ -806,5 +893,81 @@ func conditionValue(state *MachineState, condition uint8) bool {
 		return !of
 	default:
 		return false
+	}
+}
+
+func executeString(state *MachineState, instruction Instruction, step func() (bool, error)) error {
+	repeat := instruction.Group
+	count := uint32(1)
+	if repeat != 0 {
+		count = state.Get(ECX)
+		if count == 0 {
+			return nil
+		}
+	}
+	for count != 0 {
+		continueRepeat, err := step()
+		if err != nil {
+			return err
+		}
+		if repeat == 0 {
+			return nil
+		}
+		count--
+		state.Set(ECX, count)
+		if count == 0 || !continueRepeat {
+			return nil
+		}
+	}
+	return nil
+}
+
+func stringRepeatContinue(state *MachineState, repeat uint8) bool {
+	switch repeat {
+	case 1: // REP/REPE: continue while ZF=1 for SCAS/CMPS.
+		return state.Flag(FlagZF)
+	case 2: // REPNE: continue while ZF=0 for SCAS/CMPS.
+		return !state.Flag(FlagZF)
+	default:
+		return false
+	}
+}
+
+func readStringValue(state *MachineState, address Address, width uint32) (uint32, error) {
+	switch width {
+	case 1:
+		var raw [1]byte
+		if err := state.Memory.Read(address, raw[:]); err != nil {
+			return 0, err
+		}
+		return uint32(raw[0]), nil
+	case 4:
+		var raw [4]byte
+		if err := state.Memory.Read(address, raw[:]); err != nil {
+			return 0, err
+		}
+		return binary.LittleEndian.Uint32(raw[:]), nil
+	default:
+		return 0, ErrUnsupportedAddressing
+	}
+}
+
+func writeStringValue(state *MachineState, address Address, width, value uint32) error {
+	switch width {
+	case 1:
+		return state.Memory.Write(address, []byte{byte(value)})
+	case 4:
+		return state.Memory.Write(address, uint32Bytes(value))
+	default:
+		return ErrUnsupportedAddressing
+	}
+}
+
+func advanceStringIndex(state *MachineState, register Reg32, width uint32) {
+	value := state.Get(register)
+	if state.Flag(FlagDF) {
+		state.Set(register, value-width)
+	} else {
+		state.Set(register, value+width)
 	}
 }
