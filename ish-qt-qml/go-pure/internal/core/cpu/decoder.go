@@ -41,6 +41,7 @@ const (
 	OpUnary
 	OpSetcc
 	OpCMOVcc
+	OpXchg
 	OpIncReg
 	OpDecReg
 	OpPushReg
@@ -281,6 +282,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return cmov, nil
+	}
+	if xchg, handled, err := decodeX86Xchg(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return xchg, nil
 	}
 	reader := newCodeReader(memory, eip)
 	opcode, err := reader.byte()
@@ -966,4 +973,44 @@ func decodeX86CMOVcc(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{}, true, err
 	}
 	return Instruction{Op: OpCMOVcc, Len: uint32(inst.Len), Dst: dst, Src: src, Group: condition}, true, nil
+}
+
+func decodeX86Xchg(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.Op != x86asm.XCHG || inst.DataSize != 32 || len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+		return Instruction{}, false, nil
+	}
+
+	width := inst.MemBytes
+	if width == 0 {
+		width = 4
+		if reg, ok := inst.Args[0].(x86asm.Reg); ok {
+			switch reg {
+			case x86asm.AL, x86asm.CL, x86asm.DL, x86asm.BL, x86asm.AH, x86asm.CH, x86asm.DH, x86asm.BH:
+				width = 1
+			}
+		}
+	}
+	if width != 1 && width != 4 {
+		return Instruction{}, true, fmt.Errorf("%w: XCHG width %d", ErrUnsupportedAddressing, width)
+	}
+
+	decodeOperand := x86Operand32
+	if width == 1 {
+		decodeOperand = x86Operand8
+	}
+	dst, ok, err := decodeOperand(inst.Args[0])
+	if err != nil || !ok {
+		return Instruction{}, true, err
+	}
+	src, ok, err := decodeOperand(inst.Args[1])
+	if err != nil || !ok {
+		return Instruction{}, true, err
+	}
+	if dst.Width != src.Width {
+		return Instruction{}, true, fmt.Errorf("%w: XCHG operand widths %d and %d", ErrUnsupportedAddressing, dst.Width, src.Width)
+	}
+	if dst.IsMem && src.IsMem {
+		return Instruction{}, true, fmt.Errorf("%w: XCHG memory to memory", ErrUnsupportedAddressing)
+	}
+	return Instruction{Op: OpXchg, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
 }

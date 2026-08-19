@@ -227,6 +227,22 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			}
 		}
 		state.EIP = next
+	case OpXchg:
+		dstValue, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		srcValue, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		if err := storeOperand(state, instruction.Dst, srcValue); err != nil {
+			return instruction, err
+		}
+		if err := storeOperand(state, instruction.Src, dstValue); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
 	case OpIncReg:
 		carry := state.Flag(FlagCF)
 		reg := state.Get(instruction.Reg)

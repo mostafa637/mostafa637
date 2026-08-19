@@ -553,3 +553,44 @@ func TestExecutorCMOVccMemory(t *testing.T) {
 		t.Fatalf("CMOVE ECX, [EBX] = %d, want 42", got)
 	}
 }
+
+func TestExecutorXchgRegisters(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xB8, 0x07, 0x00, 0x00, 0x00, // mov eax, 7
+		0xBB, 0x2A, 0x00, 0x00, 0x00, // mov ebx, 42
+		0x87, 0xC3, // xchg eax, ebx
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 4); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 42 {
+		t.Fatalf("EAX after XCHG = %d, want 42", got)
+	}
+	if got := state.Get(EBX); got != 7 {
+		t.Fatalf("EBX after XCHG = %d, want 7", got)
+	}
+}
+
+func TestExecutorXchgMemory(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+		0xB8, 0x07, 0x00, 0x00, 0x00, // mov eax, 7
+		0xC7, 0x03, 0x2A, 0x00, 0x00, 0x00, // mov dword ptr [ebx], 42
+		0x87, 0x03, // xchg dword ptr [ebx], eax
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 42 {
+		t.Fatalf("EAX after memory XCHG = %d, want 42", got)
+	}
+	var raw [4]byte
+	if err := memory.Read(Address(0x2000), raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 7 {
+		t.Fatalf("memory after XCHG = %d, want 7", got)
+	}
+}
