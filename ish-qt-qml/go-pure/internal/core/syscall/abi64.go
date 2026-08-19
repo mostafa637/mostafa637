@@ -56,6 +56,9 @@ const (
 	Sys64Ppoll          Number64 = 271
 	Sys64Dup            Number64 = 32
 	Sys64Dup2           Number64 = 33
+	Sys64Getitimer      Number64 = 36
+	Sys64Alarm          Number64 = 37
+	Sys64Setitimer      Number64 = 38
 	Sys64Nanosleep      Number64 = 35
 	Sys64ClockNanosleep Number64 = 230
 	Sys64Pause          Number64 = 34
@@ -247,6 +250,8 @@ type Context64 struct {
 	Mappings     []GuestMapping64
 	SharedMemory *SharedMemoryRegistry64
 	Semaphores   *SemaphoreRegistry64
+	Timers       [3]IntervalTimer64
+	TimerMu      sync.Mutex
 	signalFDs    map[*signalFD64]struct{}
 }
 
@@ -367,6 +372,9 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64SchedGetAffinity, schedGetAffinity64)
 	d.Register(Sys64GetCPU, getcpu64)
 	d.Register(Sys64Ioctl, ioctl64)
+	d.Register(Sys64Getitimer, getitimer64)
+	d.Register(Sys64Alarm, alarm64)
+	d.Register(Sys64Setitimer, setitimer64)
 	d.Register(Sys64Nanosleep, nanosleep64)
 	d.Register(Sys64ClockNanosleep, clockNanosleep64)
 	d.Register(Sys64Futex, futex64)
