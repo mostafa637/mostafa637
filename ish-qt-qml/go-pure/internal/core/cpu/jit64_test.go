@@ -1312,3 +1312,127 @@ func TestJIT64ScalarSSEArithmeticAndCompare(t *testing.T) {
 		}
 	}
 }
+
+func TestJIT64ScalarSSEConversions(t *testing.T) {
+	setFloat32 := func(state *MachineState64, xmm uint8, value float32) {
+		binary.LittleEndian.PutUint32(state.XMM[xmm][0:4], math.Float32bits(value))
+	}
+	setFloat64 := func(state *MachineState64, xmm uint8, value float64) {
+		binary.LittleEndian.PutUint64(state.XMM[xmm][0:8], math.Float64bits(value))
+	}
+	checkRun := func(t *testing.T, code []byte, state *MachineState64) {
+		t.Helper()
+		const codeAddress Address64 = 0x1a000
+		if err := state.Memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.Memory.Write(codeAddress, code); err != nil {
+			t.Fatal(err)
+		}
+		state.RIP = uint64(codeAddress)
+		trap := NewJIT64(state.Memory).RunToInterrupt(state)
+		if trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		state.Set(RAX, ^uint64(5))
+		checkRun(t, []byte{
+			0xf3, 0x48, 0x0f, 0x2a, 0xc0, // cvtsi2ss xmm0, rax = -6
+			0xf2, 0x48, 0x0f, 0x2a, 0xd8, // cvtsi2sd xmm3, rax = -6
+			0xf3, 0x0f, 0x5a, 0xc8, // cvtss2sd xmm1, xmm0 = -6
+			0xf2, 0x0f, 0x5a, 0xd1, // cvtsd2ss xmm2, xmm1 = -6
+			0xf3, 0x0f, 0x2c, 0xca, // cvttss2si ecx, xmm2 = -6
+			0xf4,
+		}, state)
+		if got := math.Float32frombits(binary.LittleEndian.Uint32(state.XMM[0][0:4])); got != -6 {
+			t.Fatalf("cvtsi2ss=%v, want -6", got)
+		}
+		if got := math.Float64frombits(binary.LittleEndian.Uint64(state.XMM[1][0:8])); got != -6 {
+			t.Fatalf("cvtss2sd=%v, want -6", got)
+		}
+		if got := math.Float32frombits(binary.LittleEndian.Uint32(state.XMM[2][0:4])); got != -6 {
+			t.Fatalf("cvtsd2ss=%v, want -6", got)
+		}
+		if got := math.Float64frombits(binary.LittleEndian.Uint64(state.XMM[3][0:8])); got != -6 {
+			t.Fatalf("cvtsi2sd=%v, want -6", got)
+		}
+		if got := state.Get(RCX); got != 0xfffffffa {
+			t.Fatalf("cvttss2si ecx=%#x, want 0xfffffffa", got)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		setFloat32(state, 0, 3.5)
+		setFloat64(state, 1, -2.5)
+		checkRun(t, []byte{
+			0xf3, 0x0f, 0x2d, 0xc8, // cvtss2si ecx, xmm0: round-to-even 4
+			0xf3, 0x0f, 0x2c, 0xd0, // cvttss2si edx, xmm0: truncate 3
+			0xf2, 0x0f, 0x2d, 0xd1, // cvtsd2si edx, xmm1: round-to-even -2
+			0xf2, 0x0f, 0x2c, 0xd9, // cvttsd2si ebx, xmm1: truncate -2
+			0xf4,
+		}, state)
+		if got := state.Get(RCX); got != 4 {
+			t.Fatalf("cvtss2si=%d, want 4", got)
+		}
+		if got := state.Get(RDX); got != 0xfffffffe {
+			t.Fatalf("cvtsd2si=%#x, want 0xfffffffe", got)
+		}
+		if got := state.Get(RBX); got != 0xfffffffe {
+			t.Fatalf("cvttsd2si=%#x, want 0xfffffffe", got)
+		}
+	}
+
+	{
+		memory := NewMemory64()
+		const dataAddress Address64 = 0x1b000
+		if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+			t.Fatal(err)
+		}
+		var raw [4]byte
+		binary.LittleEndian.PutUint32(raw[:], math.Float32bits(3.5))
+		if err := memory.Write(dataAddress, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+		state := NewMachineState64(memory)
+		state.Set(RDI, uint64(dataAddress))
+		checkRun(t, []byte{
+			0xf3, 0x0f, 0x2d, 0x0f, // cvtss2si ecx, dword ptr [rdi] = 4
+			0xf4,
+		}, state)
+		if got := state.Get(RCX); got != 4 {
+			t.Fatalf("memory cvtss2si=%d, want 4", got)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		setFloat64(state, 0, 3.5)
+		checkRun(t, []byte{
+			0xf2, 0x48, 0x0f, 0x2d, 0xc0, // cvtsd2si rax, xmm0 = 4
+			0xf2, 0x48, 0x0f, 0x2c, 0xc8, // cvttsd2si rcx, xmm0 = 3
+			0xf4,
+		}, state)
+		if got := state.Get(RAX); got != 4 {
+			t.Fatalf("64-bit cvtsd2si=%d, want 4", got)
+		}
+		if got := state.Get(RCX); got != 3 {
+			t.Fatalf("64-bit cvttsd2si=%d, want 3", got)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		setFloat64(state, 0, math.NaN())
+		checkRun(t, []byte{
+			0xf2, 0x0f, 0x2d, 0xc8, // cvtsd2si ecx, xmm0 => indefinite integer
+			0xf4,
+		}, state)
+		if got := state.Get(RCX); got != 0x80000000 {
+			t.Fatalf("NaN cvtsd2si=%#x, want 0x80000000", got)
+		}
+	}
+}

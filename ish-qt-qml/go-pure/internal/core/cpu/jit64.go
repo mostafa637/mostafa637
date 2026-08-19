@@ -690,7 +690,8 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("scalar SSE destination: %v", err)
 		}
 		if inst.Op == x86asm.SQRTSS || inst.Op == x86asm.SQRTSD {
-			source, sourceErr := operand64ScalarSSEFromArg(arg(0), width)
+			source, sourceErr := operand64ScalarSSEFromArg(arg(1), width)
+
 			if sourceErr != nil {
 				return microOp64{}, false, fmt.Errorf("scalar SSE sqrt source: %v", sourceErr)
 			}
@@ -712,6 +713,46 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("scalar SSE compare right: %v", rightErr)
 		}
 		return makeSSECompare64(address, uint8(inst.Len), width, left, right), false, nil
+	case x86asm.CVTSI2SS, x86asm.CVTSI2SD:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		sourceWidth := instructionDataWidth64(inst)
+		source, sourceErr := operand64FromArg(arg(1), sourceWidth)
+		if sourceErr != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, sourceErr)
+		}
+		return makeCVTScalar64(address, uint8(inst.Len), inst.Op, destination, source, sourceWidth), false, nil
+	case x86asm.CVTSS2SD, x86asm.CVTSD2SS:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		sourceWidth := uint8(4)
+		if inst.Op == x86asm.CVTSD2SS {
+			sourceWidth = 8
+		}
+		source, sourceErr := operand64ScalarSSEFromArg(arg(1), sourceWidth)
+		if sourceErr != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, sourceErr)
+		}
+		return makeCVTScalar64(address, uint8(inst.Len), inst.Op, destination, source, sourceWidth), false, nil
+	case x86asm.CVTSS2SI, x86asm.CVTSD2SI, x86asm.CVTTSS2SI, x86asm.CVTTSD2SI:
+		destinationWidth := instructionDataWidth64(inst)
+		destination, err := operand64FromArg(arg(0), destinationWidth)
+		if err != nil || destination.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		sourceWidth := uint8(4)
+		if inst.Op == x86asm.CVTSD2SI || inst.Op == x86asm.CVTTSD2SI {
+			sourceWidth = 8
+		}
+		source, sourceErr := operand64ScalarSSEFromArg(arg(1), sourceWidth)
+		if sourceErr != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, sourceErr)
+		}
+		return makeCVTScalar64(address, uint8(inst.Len), inst.Op, destination, source, sourceWidth), false, nil
 	case x86asm.MOVDQA, x86asm.MOVDQU, x86asm.MOVAPS, x86asm.MOVUPS, x86asm.MOVAPD, x86asm.MOVUPD:
 
 		left, err := operand64FromArg(arg(0), 16)
@@ -1639,6 +1680,70 @@ func scalarSSEWidth64(op x86asm.Op) uint8 {
 		return 4
 	}
 	return 8
+}
+
+func instructionDataWidth64(inst x86asm.Inst) uint8 {
+	if inst.DataSize == 64 {
+		return 8
+	}
+	return 4
+}
+
+func cvtFloatToInt64(value float64, width uint8, truncate bool) uint64 {
+	limit := math.Ldexp(1, int(width)*8-1)
+	if !truncate {
+		value = math.RoundToEven(value)
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < -limit || value >= limit {
+		return uint64(1) << (uint(width)*8 - 1)
+	}
+	return uint64(int64(value)) & mask64Width(width)
+}
+
+func makeCVTScalar64(address uint64, size uint8, op x86asm.Op, dst, src operand64, srcWidth uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		switch op {
+		case x86asm.CVTSI2SS, x86asm.CVTSI2SD:
+			raw, err := readOperand64(state, src, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			integer := signExtend64Width(raw, srcWidth)
+			value := float64(integer)
+			destinationWidth := uint8(4)
+			if op == x86asm.CVTSI2SD {
+				destinationWidth = 8
+			}
+			if err := writeScalarSSE64(state, dst, destinationWidth, next, value); err != nil {
+				return Flow64Stop, err
+			}
+		case x86asm.CVTSS2SD, x86asm.CVTSD2SS:
+			value, err := readScalarSSE64(state, src, srcWidth, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			destinationWidth := uint8(8)
+			if op == x86asm.CVTSD2SS {
+				destinationWidth = 4
+			}
+			if err := writeScalarSSE64(state, dst, destinationWidth, next, value); err != nil {
+				return Flow64Stop, err
+			}
+		case x86asm.CVTSS2SI, x86asm.CVTSD2SI, x86asm.CVTTSS2SI, x86asm.CVTTSD2SI:
+			value, err := readScalarSSE64(state, src, srcWidth, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			truncate := op == x86asm.CVTTSS2SI || op == x86asm.CVTTSD2SI
+			if err := writeOperand64(state, dst, next, cvtFloatToInt64(value, dst.Width, truncate)); err != nil {
+				return Flow64Stop, err
+			}
+		default:
+			return Flow64Stop, ErrUnsupported64
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
 }
 
 func readScalarSSE64(state *MachineState64, operand operand64, width uint8, next uint64) (float64, error) {
