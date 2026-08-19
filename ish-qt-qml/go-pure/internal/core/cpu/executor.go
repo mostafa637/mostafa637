@@ -293,6 +293,39 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			state.SetLazyArithmetic(value, count, result, carry, overflow, false)
 		}
 		state.EIP = next
+	case OpRotate:
+		value, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		count := uint32(instruction.Imm) & 0x1f
+		if instruction.Src.Width == 1 {
+			count = state.Get(ECX) & 0x1f
+		}
+		if count == 0 {
+			state.EIP = next
+			break
+		}
+		carryIn := state.Flag(FlagCF)
+		result, carry, overflow, overflowDefined := rotateValue(value, count, instruction.Group, carryIn)
+		if err := storeOperand(state, instruction.Dst, result); err != nil {
+			return instruction, err
+		}
+		state.CollapseFlags()
+		if carry {
+			state.EFlags |= FlagCF
+		} else {
+			state.EFlags &^= FlagCF
+		}
+		if overflowDefined {
+			if overflow {
+				state.EFlags |= FlagOF
+			} else {
+				state.EFlags &^= FlagOF
+			}
+		}
+		state.ExpandFlags()
+		state.EIP = next
 	case OpUnary:
 		value, err := loadOperand(state, instruction.Dst)
 		if err != nil {
@@ -1197,6 +1230,72 @@ func logicalValue(left, right uint32, group uint8) uint32 {
 	default:
 		return 0
 	}
+}
+
+func rotateValue(value, count uint32, group uint8, carryIn bool) (result uint32, carry, overflow, overflowDefined bool) {
+	count &= 0x1f
+	if count == 0 {
+		return value, carryIn, false, false
+	}
+	switch group {
+	case 0: // ROL.
+		result = bits.RotateLeft32(value, int(count))
+		carry = result&1 != 0
+		if count == 1 {
+			overflow = (result >> 31) != (result & 1)
+			overflowDefined = true
+		}
+	case 1: // ROR.
+		result = bits.RotateLeft32(value, -int(count))
+		carry = result>>31 != 0
+		if count == 1 {
+			overflow = (result>>31)&1 != (result>>30)&1
+			overflowDefined = true
+		}
+	case 2: // RCL, rotate through the carry flag.
+		carryBit := uint32(0)
+		if carryIn {
+			carryBit = 1
+		}
+		for i := uint32(0); i < count; i++ {
+			nextCarry := value>>31 != 0
+			value = (value << 1) | carryBit
+			if nextCarry {
+				carryBit = 1
+			} else {
+				carryBit = 0
+			}
+		}
+		result = value
+		carry = carryBit != 0
+		if count == 1 {
+			overflow = (result >> 31) != (result & 1)
+			overflowDefined = true
+		}
+	case 3: // RCR, rotate through the carry flag.
+		carryBit := uint32(0)
+		if carryIn {
+			carryBit = 1
+		}
+		for i := uint32(0); i < count; i++ {
+			nextCarry := value&1 != 0
+			value = (value >> 1) | (carryBit << 31)
+			if nextCarry {
+				carryBit = 1
+			} else {
+				carryBit = 0
+			}
+		}
+		result = value
+		carry = carryBit != 0
+		if count == 1 {
+			overflow = (result>>31)&1 != (result>>30)&1
+			overflowDefined = true
+		}
+	default:
+		return value, carryIn, false, false
+	}
+	return result, carry, overflow, overflowDefined
 }
 
 func shiftValue(value, count uint32, group uint8) (result uint32, carry, overflow bool) {

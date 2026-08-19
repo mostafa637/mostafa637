@@ -572,3 +572,34 @@ func TestDecodeX86BitOperations(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX86RotateInstructions(t *testing.T) {
+	tests := []struct {
+		name  string
+		code  []byte
+		group uint8
+		dst   Operand
+		src   Operand
+		imm   int32
+	}{
+		{name: "rol one", code: []byte{0xD1, 0xC0}, group: 0, dst: regOperand(EAX), imm: 1},
+		{name: "ror immediate", code: []byte{0xC1, 0xC8, 0x07}, group: 1, dst: regOperand(EAX), imm: 7},
+		{name: "rcl cl", code: []byte{0xD3, 0xD0}, group: 2, dst: regOperand(EAX), src: Operand{Reg: ECX, Width: 1}},
+		{name: "rcr memory", code: []byte{0xC1, 0x18, 0x01}, group: 3, dst: Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EAX, HasBase: true, Scale: 1}}, imm: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != OpRotate || instruction.Len != uint32(len(test.code)) || instruction.Group != test.group || instruction.Imm != test.imm {
+				t.Fatalf("instruction = %#v, want rotate len %d group %d imm %d", instruction, len(test.code), test.group, test.imm)
+			}
+			if instruction.Dst != test.dst || instruction.Src != test.src {
+				t.Fatalf("operands = dst %#v src %#v, want dst %#v src %#v", instruction.Dst, instruction.Src, test.dst, test.src)
+			}
+		})
+	}
+}

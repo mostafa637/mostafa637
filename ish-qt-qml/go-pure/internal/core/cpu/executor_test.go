@@ -1450,3 +1450,102 @@ func TestExecutorPopcnt(t *testing.T) {
 		t.Fatalf("zero popcnt eax=%d zf=%v, want 0/true", zeroState.Get(EAX), zeroState.Flag(FlagZF))
 	}
 }
+
+func TestExecutorRotate(t *testing.T) {
+	t.Run("rol immediate", func(t *testing.T) {
+		_, state := mappedCode(t, []byte{0xD1, 0xC0, 0xF4}) // rol eax, 1; hlt
+		state.Set(EAX, 0x80000001)
+		if err := NewExecutor(nil).Run(state, 4); err != nil {
+			t.Fatal(err)
+		}
+		if state.Get(EAX) != 3 || !state.Flag(FlagCF) || !state.Flag(FlagOF) {
+			t.Fatalf("rol eax=%#x cf=%v of=%v, want 3/true/true", state.Get(EAX), state.Flag(FlagCF), state.Flag(FlagOF))
+		}
+	})
+
+	t.Run("ror immediate", func(t *testing.T) {
+		_, state := mappedCode(t, []byte{0xC1, 0xC8, 0x01, 0xF4}) // ror eax, 1; hlt
+		state.Set(EAX, 0x80000001)
+		if err := NewExecutor(nil).Run(state, 4); err != nil {
+			t.Fatal(err)
+		}
+		if state.Get(EAX) != 0xC0000000 || !state.Flag(FlagCF) || state.Flag(FlagOF) {
+			t.Fatalf("ror eax=%#x cf=%v of=%v, want 0xc0000000/true/false", state.Get(EAX), state.Flag(FlagCF), state.Flag(FlagOF))
+		}
+	})
+
+	t.Run("rcl through carry", func(t *testing.T) {
+		_, state := mappedCode(t, []byte{0xD1, 0xD0, 0xF4}) // rcl eax, 1; hlt
+		state.Set(EAX, 0x80000000)
+		state.EFlags |= FlagCF
+		state.ExpandFlags()
+		if err := NewExecutor(nil).Run(state, 4); err != nil {
+			t.Fatal(err)
+		}
+		if state.Get(EAX) != 1 || !state.Flag(FlagCF) || !state.Flag(FlagOF) {
+			t.Fatalf("rcl eax=%#x cf=%v of=%v, want 1/true/true", state.Get(EAX), state.Flag(FlagCF), state.Flag(FlagOF))
+		}
+	})
+
+	t.Run("rcr memory", func(t *testing.T) {
+		memory, state := mappedCode(t, []byte{
+			0xB8, 0x00, 0x20, 0x00, 0x00, // eax = 0x2000
+			0xC1, 0x18, 0x01, // rcr dword ptr [eax], 1
+			0xF4,
+		})
+		var raw [4]byte
+		binary.LittleEndian.PutUint32(raw[:], 1)
+		if err := memory.Write(0x2000, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+		state.EFlags |= FlagCF
+		state.ExpandFlags()
+		if err := NewExecutor(nil).Run(state, 4); err != nil {
+			t.Fatal(err)
+		}
+		if err := memory.Read(0x2000, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+		if got := binary.LittleEndian.Uint32(raw[:]); got != 0x80000000 || !state.Flag(FlagCF) || !state.Flag(FlagOF) {
+			t.Fatalf("rcr memory=%#x cf=%v of=%v, want 0x80000000/true/true", got, state.Flag(FlagCF), state.Flag(FlagOF))
+		}
+	})
+
+	t.Run("cl count", func(t *testing.T) {
+		_, state := mappedCode(t, []byte{0xD3, 0xC0, 0xF4}) // rol eax, cl; hlt
+		state.Set(EAX, 1)
+		state.Set(ECX, 4)
+		if err := NewExecutor(nil).Run(state, 4); err != nil {
+			t.Fatal(err)
+		}
+		if state.Get(EAX) != 16 || state.Flag(FlagCF) {
+			t.Fatalf("rol cl eax=%#x cf=%v, want 16/false", state.Get(EAX), state.Flag(FlagCF))
+		}
+	})
+
+	t.Run("count zero preserves flags", func(t *testing.T) {
+		_, state := mappedCode(t, []byte{0xC1, 0xC0, 0x20, 0xF4}) // rol eax, 32 -> masked zero; hlt
+		state.Set(EAX, 0x12345678)
+		state.EFlags |= FlagCF | FlagOF
+		state.ExpandFlags()
+		if err := NewExecutor(nil).Run(state, 4); err != nil {
+			t.Fatal(err)
+		}
+		if state.Get(EAX) != 0x12345678 || !state.Flag(FlagCF) || !state.Flag(FlagOF) {
+			t.Fatalf("zero rotate eax=%#x cf=%v of=%v, want unchanged", state.Get(EAX), state.Flag(FlagCF), state.Flag(FlagOF))
+		}
+	})
+
+	t.Run("count greater than one preserves undefined OF", func(t *testing.T) {
+		_, state := mappedCode(t, []byte{0xC1, 0xC0, 0x04, 0xF4}) // rol eax, 4; hlt
+		state.Set(EAX, 1)
+		state.EFlags |= FlagOF
+		state.ExpandFlags()
+		if err := NewExecutor(nil).Run(state, 4); err != nil {
+			t.Fatal(err)
+		}
+		if state.Get(EAX) != 16 || !state.Flag(FlagOF) {
+			t.Fatalf("multi-bit rotate eax=%#x of=%v, want 16/unchanged true", state.Get(EAX), state.Flag(FlagOF))
+		}
+	})
+}

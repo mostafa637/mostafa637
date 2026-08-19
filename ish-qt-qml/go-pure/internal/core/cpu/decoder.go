@@ -38,6 +38,7 @@ const (
 	OpTestOperands
 	OpTestImm
 	OpShift
+	OpRotate
 	OpUnary
 	OpSetcc
 	OpCMOVcc
@@ -328,6 +329,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return bitInstruction, nil
+	}
+	if rotate, handled, err := decodeX86Rotate(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return rotate, nil
 	}
 
 	if shift, handled, err := decodeX86Shift(disassembled); handled {
@@ -1219,6 +1226,46 @@ func decodeX86BitOps(inst x86asm.Inst) (Instruction, bool, error) {
 		}
 		return Instruction{Op: OpBitTest, Len: uint32(inst.Len), Dst: dst, Src: src, Group: group}, true, nil
 	}
+}
+
+func decodeX86Rotate(inst x86asm.Inst) (Instruction, bool, error) {
+	group := uint8(0)
+	switch inst.Op {
+	case x86asm.ROL:
+		group = 0
+	case x86asm.ROR:
+		group = 1
+	case x86asm.RCL:
+		group = 2
+	case x86asm.RCR:
+		group = 3
+	default:
+		return Instruction{}, false, nil
+	}
+	if inst.DataSize != 32 || len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+		return Instruction{}, true, fmt.Errorf("%w: %v data size %d or operands", ErrUnsupportedAddressing, inst.Op, inst.DataSize)
+	}
+	dst, ok, err := x86Operand32(inst.Args[0])
+	if err != nil || !ok || dst.Width != 4 {
+		if err == nil {
+			err = fmt.Errorf("%w: %v destination", ErrUnsupportedAddressing, inst.Op)
+		}
+		return Instruction{}, true, err
+	}
+	instruction := Instruction{Op: OpRotate, Len: uint32(inst.Len), Dst: dst, Group: group}
+	switch value := inst.Args[1].(type) {
+	case x86asm.Imm:
+		instruction.Imm = int32(value) & 0x1f
+	case x86asm.Reg:
+		if value != x86asm.CL {
+			return Instruction{}, true, fmt.Errorf("%w: rotate count register %v", ErrUnsupportedAddressing, value)
+		}
+		// Width 1 marks the implicit CL count, matching OpShift.
+		instruction.Src = Operand{Reg: ECX, Width: 1}
+	default:
+		return Instruction{}, true, fmt.Errorf("%w: rotate count %T", ErrUnsupportedAddressing, inst.Args[1])
+	}
+	return instruction, true, nil
 }
 
 func decodeX86Shift(inst x86asm.Inst) (Instruction, bool, error) {
