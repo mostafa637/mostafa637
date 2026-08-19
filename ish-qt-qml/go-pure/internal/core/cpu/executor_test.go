@@ -518,3 +518,38 @@ func TestExecutorSetccByteMemory(t *testing.T) {
 		t.Fatalf("SETNE memory = %#x, want 0", got)
 	}
 }
+
+func TestExecutorCMOVccRegister(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0x31, 0xC0, // xor eax, eax: ZF=1
+		0xBB, 0x2A, 0x00, 0x00, 0x00, // mov ebx, 42
+		0x0F, 0x44, 0xCB, // cmove ecx, ebx
+		0x0F, 0x45, 0xD3, // cmovne edx, ebx (must not move)
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(ECX); got != 42 {
+		t.Fatalf("CMOVE ECX, EBX = %d, want 42", got)
+	}
+	if got := state.Get(EDX); got != 0 {
+		t.Fatalf("CMOVNE EDX, EBX = %d, want 0", got)
+	}
+}
+
+func TestExecutorCMOVccMemory(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0x31, 0xC0, // xor eax, eax: ZF=1
+		0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+		0xC7, 0x03, 0x2A, 0x00, 0x00, 0x00, // mov dword ptr [ebx], 42
+		0x0F, 0x44, 0x0B, // cmove ecx, dword ptr [ebx]
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(ECX); got != 42 {
+		t.Fatalf("CMOVE ECX, [EBX] = %d, want 42", got)
+	}
+}

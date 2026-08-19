@@ -40,6 +40,7 @@ const (
 	OpShift
 	OpUnary
 	OpSetcc
+	OpCMOVcc
 	OpIncReg
 	OpDecReg
 	OpPushReg
@@ -274,6 +275,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return setcc, nil
+	}
+	if cmov, handled, err := decodeX86CMOVcc(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return cmov, nil
 	}
 	reader := newCodeReader(memory, eip)
 	opcode, err := reader.byte()
@@ -904,4 +911,59 @@ func decodeX86Setcc(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{}, true, err
 	}
 	return Instruction{Op: OpSetcc, Len: uint32(inst.Len), Dst: dst, Group: condition}, true, nil
+}
+
+func decodeX86CMOVcc(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.DataSize != 32 || len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+		return Instruction{}, false, nil
+	}
+	var condition uint8
+	switch inst.Op {
+	case x86asm.CMOVA:
+		condition = 5
+	case x86asm.CMOVAE:
+		condition = 1
+	case x86asm.CMOVB:
+		condition = 0
+	case x86asm.CMOVBE:
+		condition = 4
+	case x86asm.CMOVE:
+		condition = 2
+	case x86asm.CMOVG:
+		condition = 13
+	case x86asm.CMOVGE:
+		condition = 11
+	case x86asm.CMOVL:
+		condition = 10
+	case x86asm.CMOVLE:
+		condition = 12
+	case x86asm.CMOVNE:
+		condition = 3
+	case x86asm.CMOVNO:
+		condition = 15
+	case x86asm.CMOVNP:
+		condition = 9
+	case x86asm.CMOVNS:
+		condition = 7
+	case x86asm.CMOVO:
+		condition = 14
+	case x86asm.CMOVP:
+		condition = 8
+	case x86asm.CMOVS:
+		condition = 6
+	default:
+		return Instruction{}, false, nil
+	}
+	dst, ok, err := x86Operand32(inst.Args[0])
+	if err != nil || !ok {
+		return Instruction{}, true, err
+	}
+	if dst.IsMem {
+		return Instruction{}, true, fmt.Errorf("%w: CMOV destination %v", ErrUnsupportedAddressing, inst.Args[0])
+	}
+	src, ok, err := x86Operand32(inst.Args[1])
+	if err != nil || !ok {
+		return Instruction{}, true, err
+	}
+	return Instruction{Op: OpCMOVcc, Len: uint32(inst.Len), Dst: dst, Src: src, Group: condition}, true, nil
 }

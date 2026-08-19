@@ -216,6 +216,17 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			return instruction, err
 		}
 		state.EIP = next
+	case OpCMOVcc:
+		if conditionValue(state, instruction.Group) {
+			value, err := loadOperand(state, instruction.Src)
+			if err != nil {
+				return instruction, err
+			}
+			if err := storeOperand(state, instruction.Dst, value); err != nil {
+				return instruction, err
+			}
+		}
+		state.EIP = next
 	case OpIncReg:
 		carry := state.Flag(FlagCF)
 		reg := state.Get(instruction.Reg)
