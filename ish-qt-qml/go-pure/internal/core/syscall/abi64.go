@@ -21,6 +21,8 @@ type Number64 uint64
 const (
 	Sys64Read          Number64 = 0
 	Sys64Write         Number64 = 1
+	Sys64Poll          Number64 = 7
+	Sys64Select        Number64 = 23
 	Sys64Open          Number64 = 2
 	Sys64Close         Number64 = 3
 	Sys64Stat          Number64 = 4
@@ -39,6 +41,8 @@ const (
 	Sys64Readv         Number64 = 19
 	Sys64Writev        Number64 = 20
 	Sys64SchedYield    Number64 = 24
+	Sys64Pselect6      Number64 = 270
+	Sys64Ppoll         Number64 = 271
 	Sys64Dup           Number64 = 32
 	Sys64Dup2          Number64 = 33
 	Sys64Nanosleep     Number64 = 35
@@ -251,6 +255,11 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 		return int64(ctx.ParentPID)
 	})
 	d.Register(Sys64GetTID, gettid64)
+	d.Register(Sys64Poll, poll64)
+	d.Register(Sys64Select, selectSyscall64)
+	d.Register(Sys64Pselect6, pselect6Syscall64)
+	d.Register(Sys64Ppoll, ppoll64)
+
 	d.Register(Sys64Fchmod, fchmod64)
 	d.Register(Sys64Fchmodat, fchmodat64)
 	d.Register(Sys64Chown, chown64)
