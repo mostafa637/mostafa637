@@ -5206,3 +5206,187 @@ func TestJIT64PackedFloatConversions(t *testing.T) {
 		t.Fatalf("CVTTPD2DQ results: XMM10=%x XMM13=%x want=%x", state.XMM[10], state.XMM[13], wantInt)
 	}
 }
+
+func TestJIT64MMXFloatConversions(t *testing.T) {
+	const codeAddress Address64 = 0x6d000
+	const dataAddress Address64 = 0x71000
+	code := []byte{
+		0x0f, 0x2d, 0xc8, // cvtps2pi mm1,xmm0
+		0x0f, 0x2c, 0xd1, // cvttps2pi mm2,xmm1
+		0x66, 0x0f, 0x2d, 0xda, // cvtpd2pi mm3,xmm2
+		0x66, 0x0f, 0x2c, 0xe3, // cvttpd2pi mm4,xmm3
+		0x44, 0x0f, 0x2a, 0xc4, // cvtpi2ps xmm8,mm4
+		0x66, 0x44, 0x0f, 0x2a, 0xcd, // cvtpi2pd xmm9,mm5
+		0x41, 0x0f, 0x2d, 0x37, // cvtps2pi mm6,[r15]
+		0x41, 0x0f, 0x2c, 0x7f, 0x08, // cvttps2pi mm7,[r15+8]
+		0x66, 0x41, 0x0f, 0x2d, 0x47, 0x10, // cvtpd2pi mm0,[r15+16]
+		0x66, 0x41, 0x0f, 0x2c, 0x6f, 0x20, // cvttpd2pi mm5,[r15+32]
+		0x45, 0x0f, 0x2a, 0x57, 0x30, // cvtpi2ps xmm10,[r15+48]
+		0x66, 0x45, 0x0f, 0x2a, 0x5f, 0x38, // cvtpi2pd xmm11,[r15+56]
+		0xf4, // hlt
+	}
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	var data [64]byte
+	putF32 := func(offset int, value float32) {
+		binary.LittleEndian.PutUint32(data[offset:], math.Float32bits(value))
+	}
+	putF64 := func(offset int, value float64) {
+		binary.LittleEndian.PutUint64(data[offset:], math.Float64bits(value))
+	}
+	putI32 := func(offset int, value int32) {
+		binary.LittleEndian.PutUint32(data[offset:], uint32(value))
+	}
+	putF32(0, 1.5)
+	putF32(4, -2.5)
+	putF32(8, 1.75)
+	putF32(12, -2.75)
+	putF64(16, 3.5)
+	putF64(24, -4.5)
+	putF64(32, 3.75)
+	putF64(40, -4.75)
+	putI32(48, 9)
+	putI32(52, -10)
+	putI32(56, 11)
+	putI32(60, -12)
+	if err := memory.Write(dataAddress, data[:]); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(R15, uint64(dataAddress))
+	state.XMM[0] = [16]byte{}
+	binary.LittleEndian.PutUint32(state.XMM[0][0:], math.Float32bits(1.5))
+	binary.LittleEndian.PutUint32(state.XMM[0][4:], math.Float32bits(-2.5))
+	state.XMM[1] = [16]byte{}
+	binary.LittleEndian.PutUint32(state.XMM[1][0:], math.Float32bits(3.75))
+	binary.LittleEndian.PutUint32(state.XMM[1][4:], math.Float32bits(-4.5))
+	state.XMM[2] = [16]byte{}
+	binary.LittleEndian.PutUint64(state.XMM[2][0:], math.Float64bits(3.5))
+	binary.LittleEndian.PutUint64(state.XMM[2][8:], math.Float64bits(-4.5))
+	state.XMM[3] = [16]byte{}
+	binary.LittleEndian.PutUint64(state.XMM[3][0:], math.Float64bits(5.75))
+	binary.LittleEndian.PutUint64(state.XMM[3][8:], math.Float64bits(-6.75))
+	state.MMX[5] = uint64(7) | uint64(0xfffffff8)<<32
+	state.XMM[8] = [16]byte{0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7}
+	state.XMM[10] = [16]byte{0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7}
+	state.SetFPUTop(6)
+	state.RFLAGS = Flag64OF | Flag64AF | Flag64PF | Flag64ZF | Flag64SF | Flag64CF
+	flagsBefore := state.RFLAGS
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("MMX float conversions changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	if got, want := state.MMX[1], uint64(0xfffffffe00000002); got != want {
+		t.Fatalf("MMX1=%#x, want %#x", got, want)
+	}
+	if got, want := state.MMX[2], uint64(0xfffffffc00000003); got != want {
+		t.Fatalf("MMX2=%#x, want %#x", got, want)
+	}
+	if got, want := state.MMX[3], uint64(0xfffffffc00000004); got != want {
+		t.Fatalf("MMX3=%#x, want %#x", got, want)
+	}
+	if got, want := state.MMX[4], uint64(0xfffffffa00000005); got != want {
+		t.Fatalf("MMX4=%#x, want %#x", got, want)
+	}
+	if got, want := state.MMX[6], uint64(0xfffffffe00000002); got != want {
+		t.Fatalf("MMX6=%#x, want %#x", got, want)
+	}
+	if got, want := state.MMX[7], uint64(0xfffffffe00000001); got != want {
+		t.Fatalf("MMX7=%#x, want %#x", got, want)
+	}
+	if got, want := state.MMX[0], uint64(0xfffffffc00000004); got != want {
+		t.Fatalf("MMX0=%#x, want %#x", got, want)
+	}
+	if got, want := state.MMX[5], uint64(0xfffffffc00000003); got != want {
+		t.Fatalf("MMX5 memory result=%#x, want %#x", got, want)
+	}
+	var want8 [16]byte
+	want8 = state.XMM[8]
+	binary.LittleEndian.PutUint32(want8[0:], math.Float32bits(5))
+	binary.LittleEndian.PutUint32(want8[4:], math.Float32bits(-6))
+	if state.XMM[8] != want8 {
+		t.Fatalf("XMM8=%x, want %x", state.XMM[8], want8)
+	}
+	var want9 [16]byte
+	binary.LittleEndian.PutUint64(want9[0:], math.Float64bits(7))
+	binary.LittleEndian.PutUint64(want9[8:], math.Float64bits(-8))
+	if state.XMM[9] != want9 {
+		t.Fatalf("XMM9=%x, want %x", state.XMM[9], want9)
+	}
+	var want10 [16]byte
+	want10 = state.XMM[10]
+	binary.LittleEndian.PutUint32(want10[0:], math.Float32bits(9))
+	binary.LittleEndian.PutUint32(want10[4:], math.Float32bits(-10))
+	if state.XMM[10] != want10 {
+		t.Fatalf("XMM10=%x, want %x", state.XMM[10], want10)
+	}
+	var want11 [16]byte
+	binary.LittleEndian.PutUint64(want11[0:], math.Float64bits(11))
+	binary.LittleEndian.PutUint64(want11[8:], math.Float64bits(-12))
+	if state.XMM[11] != want11 {
+		t.Fatalf("XMM11=%x, want %x", state.XMM[11], want11)
+	}
+	if got := state.FPUTop(); got != 0 {
+		t.Fatalf("FPU TOP=%d after MMX conversions, want 0", got)
+	}
+}
+
+func TestJIT64CVTPI2PDM64PreservesFPUState(t *testing.T) {
+	const codeAddress Address64 = 0x6e000
+	const dataAddress Address64 = 0x72000
+	code := []byte{
+		0x66, 0x41, 0x0f, 0x2a, 0x07, // cvtpi2pd xmm0,[r15]
+		0xf4, // hlt
+	}
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	var data [8]byte
+	binary.LittleEndian.PutUint32(data[0:], uint32(int32(13)))
+	binary.LittleEndian.PutUint32(data[4:], 0xfffffff2)
+	if err := memory.Write(dataAddress, data[:]); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(R15, uint64(dataAddress))
+	state.XMM[0] = [16]byte{0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7}
+	state.SetFPUTop(6)
+	state.RFLAGS = Flag64OF | Flag64PF | Flag64ZF | Flag64CF
+	flagsBefore := state.RFLAGS
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("CVTPI2PD m64 changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	var want [16]byte
+	binary.LittleEndian.PutUint64(want[0:], math.Float64bits(13))
+	binary.LittleEndian.PutUint64(want[8:], math.Float64bits(-14))
+	if state.XMM[0] != want {
+		t.Fatalf("XMM0=%x, want %x", state.XMM[0], want)
+	}
+	if got := state.FPUTop(); got != 6 {
+		t.Fatalf("FPU TOP=%d after CVTPI2PD m64, want 6", got)
+	}
+}

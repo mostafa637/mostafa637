@@ -908,8 +908,48 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, sourceErr)
 		}
 		return makeCVTScalar64(address, uint8(inst.Len), inst.Op, destination, source, sourceWidth), false, nil
+	case x86asm.CVTPS2PI, x86asm.CVTTPS2PI:
+		destination, err := operand64FromArg(arg(0), 8)
+		if err != nil || destination.Kind != operand64MMX {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 0)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		if source.Kind == operand64Mem {
+			source.Width = 8
+		}
+		return makeMMXFromPackedFloat64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.CVTPD2PI, x86asm.CVTTPD2PI:
+		destination, err := operand64FromArg(arg(0), 8)
+		if err != nil || destination.Kind != operand64MMX {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 0)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		if source.Kind == operand64Mem {
+			source.Width = 16
+		}
+		return makeMMXFromPackedFloat64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.CVTPI2PS, x86asm.CVTPI2PD:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 0)
+		if err != nil || (source.Kind != operand64MMX && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		if source.Kind == operand64Mem {
+			source.Width = 8
+		}
+		return makePackedIntToFloat64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
 	case x86asm.CVTDQ2PS, x86asm.CVTPS2DQ, x86asm.CVTTPS2DQ, x86asm.CVTDQ2PD, x86asm.CVTPD2DQ,
 		x86asm.CVTPS2PD, x86asm.CVTPD2PS, x86asm.CVTTPD2DQ:
+
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
 			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
@@ -2386,7 +2426,89 @@ func makeSSEPackedConvert64(address uint64, size uint8, op x86asm.Op, dst, src o
 	}}
 }
 
+func makeMMXFromPackedFloat64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		width := uint8(8)
+		if op == x86asm.CVTPD2PI || op == x86asm.CVTTPD2PI {
+			width = 16
+		}
+		source, err := readVectorWidth64(state, src, next, width)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		truncate := op == x86asm.CVTTPS2PI || op == x86asm.CVTTPD2PI
+		var result uint64
+		if op == x86asm.CVTPS2PI || op == x86asm.CVTTPS2PI {
+			for lane := 0; lane < 2; lane++ {
+				value := float64(math.Float32frombits(binary.LittleEndian.Uint32(source[lane*4:])))
+				raw := cvtFloatToInt64(value, 4, truncate)
+				result |= uint64(uint32(raw)) << (lane * 32)
+			}
+		} else if op == x86asm.CVTPD2PI || op == x86asm.CVTTPD2PI {
+			for lane := 0; lane < 2; lane++ {
+				value := math.Float64frombits(binary.LittleEndian.Uint64(source[lane*8:]))
+				raw := cvtFloatToInt64(value, 4, truncate)
+				result |= uint64(uint32(raw)) << (lane * 32)
+			}
+		} else {
+			return Flow64Stop, ErrUnsupported64
+		}
+		if dst.MMX >= uint8(len(state.MMX)) {
+			return Flow64Stop, ErrUnsupported64
+		}
+		state.MMX[dst.MMX] = result
+		state.EnterMMX()
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makePackedIntToFloat64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if dst.XMM >= uint8(len(state.XMM)) {
+			return Flow64Stop, ErrUnsupported64
+		}
+		var source [8]byte
+		fromMMX := src.Kind == operand64MMX
+		if fromMMX {
+			if src.MMX >= uint8(len(state.MMX)) {
+				return Flow64Stop, ErrUnsupported64
+			}
+			binary.LittleEndian.PutUint64(source[:], state.MMX[src.MMX])
+		} else {
+			vector, readErr := readVectorWidth64(state, src, next, 8)
+			if readErr != nil {
+				return Flow64Stop, readErr
+			}
+			copy(source[:], vector[:8])
+		}
+		var result [16]byte
+		switch op {
+		case x86asm.CVTPI2PS:
+			result = state.XMM[dst.XMM]
+			for lane := 0; lane < 2; lane++ {
+				value := int32(binary.LittleEndian.Uint32(source[lane*4:]))
+				binary.LittleEndian.PutUint32(result[lane*4:], math.Float32bits(float32(value)))
+			}
+		case x86asm.CVTPI2PD:
+			for lane := 0; lane < 2; lane++ {
+				value := int32(binary.LittleEndian.Uint32(source[lane*4:]))
+				binary.LittleEndian.PutUint64(result[lane*8:], math.Float64bits(float64(value)))
+			}
+		default:
+			return Flow64Stop, ErrUnsupported64
+		}
+		state.XMM[dst.XMM] = result
+		if op == x86asm.CVTPI2PS || fromMMX {
+			state.EnterMMX()
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
 func packedFloat32NaN(raw uint32) bool {
+
 	return raw&0x7f800000 == 0x7f800000 && raw&0x007fffff != 0
 }
 
