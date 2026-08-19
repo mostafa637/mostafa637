@@ -2490,3 +2490,140 @@ func TestJIT64SSSE3HorizontalArithmetic(t *testing.T) {
 	}, memoryState)
 	checkWords(memoryState.XMM[0], 30, 70, 110, 150, 3, 7, 11, 15)
 }
+
+func TestJIT64SSSE3AbsoluteAndSignPacked(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x34000
+	const dataAddress Address64 = 0x35000
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	memoryData := [32]byte{
+		0x00, 0x80, 0xff, 0xff, 0x00, 0x00, 0x01, 0x00,
+		0xff, 0x7f, 0x2e, 0xfb, 0x34, 0x12, 0x01, 0x80,
+		0xff, 0x00, 0x01, 0xfe, 0x02, 0x00, 0xfd, 0x03,
+		0xfc, 0x04, 0xfb, 0x05, 0xfa, 0x06, 0xf9, 0x07,
+	}
+	if err := memory.Write(dataAddress, memoryData[:]); err != nil {
+		t.Fatal(err)
+	}
+
+	state := NewMachineState64(memory)
+	state.Set(RDI, uint64(dataAddress))
+	for i := range state.XMM[0] {
+		state.XMM[0][i] = 0xa5
+		state.XMM[2][i] = 0x5a
+		state.XMM[4][i] = 0x3c
+		state.XMM[6][i] = 0xc3
+		state.XMM[8][i] = 0x96
+		state.XMM[10][i] = 0x69
+	}
+	for i, value := range []int8{-128, 127, -127, -1, 0, 1, -2, -128, 7, -8, 9, -10, 11, -12, 13, -14} {
+		state.XMM[1][i] = byte(value)
+	}
+	putWords := func(vector *[16]byte, values ...int16) {
+		t.Helper()
+		if len(values) != 8 {
+			t.Fatalf("word count=%d, want 8", len(values))
+		}
+		for i, value := range values {
+			binary.LittleEndian.PutUint16(vector[i*2:], uint16(value))
+		}
+	}
+	putDwords := func(vector *[16]byte, values ...int32) {
+		t.Helper()
+		if len(values) != 4 {
+			t.Fatalf("dword count=%d, want 4", len(values))
+		}
+		for i, value := range values {
+			binary.LittleEndian.PutUint32(vector[i*4:], uint32(value))
+		}
+	}
+	putWords(&state.XMM[3], -32768, -1, 0, 1, 32767, -1234, 1234, -32767)
+	putDwords(&state.XMM[5], -2147483648, -1, 0, 1)
+	putBytes := func(vector *[16]byte, values ...int8) {
+		t.Helper()
+		if len(values) != 16 {
+			t.Fatalf("byte count=%d, want 16", len(values))
+		}
+		for i, value := range values {
+			vector[i] = byte(value)
+		}
+	}
+	putBytes(&state.XMM[6], -128, 1, -2, 3, -4, 5, -6, 7, -8, 9, -10, 11, -12, 13, -14, 15)
+	putBytes(&state.XMM[7], -1, 0, 1, -2, 2, 0, -3, 3, -4, 4, -5, 5, -6, 6, -7, 7)
+	putWords(&state.XMM[8], -32768, 1, -2, 3, -4, 5, -6, 7)
+	putWords(&state.XMM[9], -1, 0, 1, -2, 2, 0, -3, 3)
+	putDwords(&state.XMM[10], 0x69696969, 0x69696969, 0x69696969, 0x69696969)
+	putDwords(&state.XMM[11], -1, 0, 1, -2)
+	putBytes(&state.XMM[13], -1, 2, -3, 4, -5, 6, -7, 8, -9, 10, -11, 12, -13, 14, -15, 16)
+
+	code := []byte{
+		0x66, 0x0f, 0x38, 0x1c, 0xc1, // pabsb xmm0, xmm1
+		0x66, 0x0f, 0x38, 0x1d, 0xd3, // pabsw xmm2, xmm3
+		0x66, 0x0f, 0x38, 0x1e, 0xe5, // pabsd xmm4, xmm5
+		0x66, 0x0f, 0x38, 0x08, 0xf7, // psignb xmm6, xmm7
+		0x66, 0x45, 0x0f, 0x38, 0x09, 0xc1, // psignw xmm8, xmm9
+		0x66, 0x45, 0x0f, 0x38, 0x0a, 0xd3, // psignd xmm10, xmm11
+		0x66, 0x44, 0x0f, 0x38, 0x1d, 0x27, // pabsw xmm12, [rdi]
+		0x66, 0x44, 0x0f, 0x38, 0x08, 0x6f, 0x10, // psignb xmm13, [rdi+16]
+		0xf4,
+	}
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state.RIP = uint64(codeAddress)
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+
+	wantBytes := [16]byte{0x80, 0x7f, 0x7f, 0x01, 0, 1, 2, 0x80, 7, 8, 9, 10, 11, 12, 13, 14}
+	if state.XMM[0] != wantBytes {
+		t.Fatalf("pabsb=%x, want %x", state.XMM[0], wantBytes)
+	}
+	wantWords := [16]byte{}
+	for i, value := range []int16{-32768, 1, 0, 1, 32767, 1234, 1234, 32767} {
+		binary.LittleEndian.PutUint16(wantWords[i*2:], uint16(value))
+	}
+	if state.XMM[2] != wantWords {
+		t.Fatalf("pabsw=%x, want %x", state.XMM[2], wantWords)
+	}
+	wantDwords := [16]byte{}
+	for i, value := range []int32{-2147483648, 1, 0, 1} {
+		binary.LittleEndian.PutUint32(wantDwords[i*4:], uint32(value))
+	}
+	if state.XMM[4] != wantDwords {
+		t.Fatalf("pabsd=%x, want %x", state.XMM[4], wantDwords)
+	}
+	if got, want := state.XMM[6], [16]byte{0x80, 0, 0xfe, 0xfd, 0xfc, 0, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}; got != want {
+		t.Fatalf("psignb=%x, want %x", got, want)
+	}
+	wantSignWords := [16]byte{}
+	for i, value := range []int16{-32768, 0, -2, -3, -4, 0, 6, 7} {
+		binary.LittleEndian.PutUint16(wantSignWords[i*2:], uint16(value))
+	}
+	if state.XMM[8] != wantSignWords {
+		t.Fatalf("psignw=%x, want %x", state.XMM[8], wantSignWords)
+	}
+	wantSignDwords := [16]byte{}
+	for i, value := range []int32{-0x69696969, 0, 0x69696969, -0x69696969} {
+		binary.LittleEndian.PutUint32(wantSignDwords[i*4:], uint32(value))
+	}
+	if state.XMM[10] != wantSignDwords {
+		t.Fatalf("psignd=%x, want %x", state.XMM[10], wantSignDwords)
+	}
+	wantMemoryWords := [16]byte{}
+	for i, value := range []int16{-32768, 1, 0, 1, 32767, 1234, 4660, 32767} {
+		binary.LittleEndian.PutUint16(wantMemoryWords[i*2:], uint16(value))
+	}
+	if state.XMM[12] != wantMemoryWords {
+		t.Fatalf("pabsw memory=%x, want %x", state.XMM[12], wantMemoryWords)
+	}
+	if got, want := state.XMM[13], [16]byte{1, 0, 0xfd, 0xfc, 0xfb, 0, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}; got != want {
+		t.Fatalf("psignb memory=%x, want %x", got, want)
+	}
+}

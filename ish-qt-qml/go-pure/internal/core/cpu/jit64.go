@@ -839,7 +839,9 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		x86asm.PHSUBW, x86asm.PHSUBSW, x86asm.PHSUBD,
 		x86asm.PACKSSWB, x86asm.PACKSSDW, x86asm.PACKUSWB,
 		x86asm.PADDUSB, x86asm.PADDUSW, x86asm.PSUBUSB, x86asm.PSUBUSW,
-		x86asm.PADDSB, x86asm.PADDSW, x86asm.PSUBSB, x86asm.PSUBSW:
+		x86asm.PADDSB, x86asm.PADDSW, x86asm.PSUBSB, x86asm.PSUBSW,
+		x86asm.PSIGNB, x86asm.PSIGNW, x86asm.PSIGND,
+		x86asm.PABSB, x86asm.PABSW, x86asm.PABSD:
 
 		left, err := operand64FromArg(arg(0), 16)
 		if err != nil || left.Kind != operand64XMM {
@@ -2494,6 +2496,74 @@ func makeSSESpecialBinary64(address uint64, size uint8, op x86asm.Op, dst, src o
 					binary.LittleEndian.PutUint16(result[offset:], uint16(clampSigned64(l+r, 0, 65535)))
 				} else {
 					binary.LittleEndian.PutUint16(result[offset:], uint16(clampSigned64(l-r, 0, 65535)))
+				}
+			}
+		case x86asm.PABSB, x86asm.PABSW, x86asm.PABSD:
+			// Legacy PABS reads the second operand and ignores the destination input.
+			switch op {
+			case x86asm.PABSB:
+				for offset := 0; offset < 16; offset++ {
+					value := int16(int8(right[offset]))
+					if value < 0 {
+						value = -value
+					}
+					result[offset] = byte(value)
+				}
+			case x86asm.PABSW:
+				for offset := 0; offset < 16; offset += 2 {
+					value := int32(int16(binary.LittleEndian.Uint16(right[offset:])))
+					if value < 0 {
+						value = -value
+					}
+					binary.LittleEndian.PutUint16(result[offset:], uint16(value))
+				}
+			case x86asm.PABSD:
+				for offset := 0; offset < 16; offset += 4 {
+					value := int64(int32(binary.LittleEndian.Uint32(right[offset:])))
+					if value < 0 {
+						value = -value
+					}
+					binary.LittleEndian.PutUint32(result[offset:], uint32(value))
+				}
+			}
+		case x86asm.PSIGNB, x86asm.PSIGNW, x86asm.PSIGND:
+			// Legacy PSIGN changes the destination using the signed source lane as control.
+			switch op {
+			case x86asm.PSIGNB:
+				for offset := 0; offset < 16; offset++ {
+					value := int16(int8(left[offset]))
+					control := int8(right[offset])
+					switch {
+					case control < 0:
+						value = -value
+					case control == 0:
+						value = 0
+					}
+					result[offset] = byte(value)
+				}
+			case x86asm.PSIGNW:
+				for offset := 0; offset < 16; offset += 2 {
+					value := int32(int16(binary.LittleEndian.Uint16(left[offset:])))
+					control := int16(binary.LittleEndian.Uint16(right[offset:]))
+					switch {
+					case control < 0:
+						value = -value
+					case control == 0:
+						value = 0
+					}
+					binary.LittleEndian.PutUint16(result[offset:], uint16(value))
+				}
+			case x86asm.PSIGND:
+				for offset := 0; offset < 16; offset += 4 {
+					value := int64(int32(binary.LittleEndian.Uint32(left[offset:])))
+					control := int32(binary.LittleEndian.Uint32(right[offset:]))
+					switch {
+					case control < 0:
+						value = -value
+					case control == 0:
+						value = 0
+					}
+					binary.LittleEndian.PutUint32(result[offset:], uint32(value))
 				}
 			}
 		default:
