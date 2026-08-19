@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"bytes"
+	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
@@ -15,9 +16,11 @@ import (
 )
 
 type LoadedImage struct {
-	Image *coreelf.Image
-	Space *coreloader.AddressSpace
-	Stack coreloader.StackLayout
+	Image            *coreelf.Image
+	Space            *coreloader.AddressSpace
+	Stack            coreloader.StackLayout
+	Interpreter      *coreelf.Image
+	InterpreterSpace *coreloader.AddressSpace
 }
 
 // LoadELF maps an i386 ELF image into the process address space and constructs
@@ -40,9 +43,46 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 	if err != nil {
 		return nil, err
 	}
-	space, err := coreloader.Load(r, size, image, p.Memory, bias)
+	mainBias := bias
+	if image.Header.Type == elf.ET_DYN && mainBias == 0 {
+		mainBias = 0x10000000
+	}
+	space, err := coreloader.Load(r, size, image, p.Memory, mainBias)
 	if err != nil {
 		return nil, err
+	}
+	entry := space.Entry
+	var interpreterImage *coreelf.Image
+	var interpreterSpace *coreloader.AddressSpace
+	if image.Interp != "" {
+		if p.FS == nil {
+			return nil, fmt.Errorf("kernel: PT_INTERP %q requires fakefs", image.Interp)
+		}
+		interpreterData, readErr := p.FS.ReadFile(image.Interp)
+		if readErr != nil {
+			return nil, fmt.Errorf("kernel: read interpreter %q: %w", image.Interp, readErr)
+		}
+		interpreterImage, err = coreelf.Parse(bytes.NewReader(interpreterData), int64(len(interpreterData)))
+		if err != nil {
+			return nil, fmt.Errorf("kernel: parse interpreter %q: %w", image.Interp, err)
+		}
+		if interpreterImage.Interp != "" {
+			return nil, fmt.Errorf("kernel: nested PT_INTERP is unsupported")
+		}
+		interpreterBias := uint32(0)
+		if interpreterImage.Header.Type == elf.ET_DYN {
+			start, _, rangeErr := interpreterImage.LoadRange()
+			if rangeErr != nil || start > 0x40000000 {
+				return nil, fmt.Errorf("kernel: invalid interpreter load range")
+			}
+			interpreterBias = 0x40000000 - start
+		}
+		interpreterSpace, err = coreloader.Load(bytes.NewReader(interpreterData), int64(len(interpreterData)), interpreterImage, p.Memory, interpreterBias)
+		if err != nil {
+			return nil, fmt.Errorf("kernel: load interpreter %q: %w", image.Interp, err)
+		}
+		stack.Auxv = dynamicAuxv(space, interpreterSpace)
+		entry = interpreterSpace.Entry
 	}
 	if filename != "" {
 		stack.ExecFilename = filename
@@ -65,7 +105,7 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 	for index := range p.CPU.Regs {
 		p.CPU.Regs[index] = 0
 	}
-	p.CPU.EIP = uint32(space.Entry)
+	p.CPU.EIP = uint32(entry)
 	p.CPU.Regs[corecpu.ESP] = uint32(layout.SP)
 	p.CPU.EFlags = 0
 	p.CPU.CF = 0
@@ -76,7 +116,33 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 	p.CPU.TrapNo = 0
 	p.CPU.FCW = 0x037f
 	p.Executor.Halted = false
-	return &LoadedImage{Image: image, Space: space, Stack: layout}, nil
+	return &LoadedImage{
+		Image:            image,
+		Space:            space,
+		Stack:            layout,
+		Interpreter:      interpreterImage,
+		InterpreterSpace: interpreterSpace,
+	}, nil
+}
+
+func dynamicAuxv(main, interpreter *coreloader.AddressSpace) []coreloader.AuxEntry {
+	return []coreloader.AuxEntry{
+		{Type: coreloader.AT_PHDR, Value: main.Bias + main.Image.Header.ProgramOff},
+		{Type: coreloader.AT_PHENT, Value: uint32(main.Image.Header.ProgramEnt)},
+		{Type: coreloader.AT_PHNUM, Value: uint32(main.Image.Header.ProgramNum)},
+		{Type: coreloader.AT_PAGESZ, Value: coreelf.PageSize},
+		{Type: coreloader.AT_BASE, Value: interpreter.Bias},
+		{Type: coreloader.AT_FLAGS, Value: 0},
+		{Type: coreloader.AT_ENTRY, Value: uint32(main.Entry)},
+		{Type: coreloader.AT_UID, Value: 0},
+		{Type: coreloader.AT_EUID, Value: 0},
+		{Type: coreloader.AT_GID, Value: 0},
+		{Type: coreloader.AT_EGID, Value: 0},
+		{Type: coreloader.AT_SECURE, Value: 0},
+		{Type: coreloader.AT_RANDOM, Value: 0},
+		{Type: coreloader.AT_EXECFN, Value: 0},
+		{Type: coreloader.AT_PLATFORM, Value: 0},
+	}
 }
 
 // execve replaces the current image while retaining PID, descriptors, fakefs,
