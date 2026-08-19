@@ -55,6 +55,12 @@ const (
 	Sys64Lchown        Number64 = 94
 	Sys64Umask         Number64 = 95
 	Sys64Fchmod        Number64 = 91
+	Sys64Fsync         Number64 = 74
+	Sys64Fdatasync     Number64 = 75
+	Sys64Truncate      Number64 = 76
+	Sys64Ftruncate     Number64 = 77
+	Sys64Statfs        Number64 = 137
+	Sys64Fstatfs       Number64 = 138
 
 	Sys64GetRlimit  Number64 = 97
 	Sys64Prctl      Number64 = 157
@@ -333,6 +339,12 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Mremap, mremap64)
 	d.Register(Sys64Madvise, madvise64)
 	d.Register(Sys64Lseek, lseek64)
+	d.Register(Sys64Fsync, fsync64)
+	d.Register(Sys64Fdatasync, fdatasync64)
+	d.Register(Sys64Truncate, truncate64Guest)
+	d.Register(Sys64Ftruncate, ftruncate64Guest)
+	d.Register(Sys64Statfs, statfs64Guest)
+	d.Register(Sys64Fstatfs, fstatfs64Guest)
 	d.Register(Sys64Socket, socket64)
 	d.Register(Sys64Socketpair, socketpair64)
 	d.Register(Sys64Bind, bind64)
