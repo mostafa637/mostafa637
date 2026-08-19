@@ -19,6 +19,7 @@ const (
 	Trap64PageFault     uint64 = 14
 	Trap64Syscall       uint64 = 0x80
 	Trap64Timer         uint64 = 0x100
+	Trap64Exit          uint64 = 0x101
 )
 
 const (
@@ -33,7 +34,11 @@ type JIT64 struct {
 	Memory *Memory64
 	Cache  *BlockCache64
 	Budget uint64
-	poked  uint32
+
+	// OnSyscall64 is supplied by the guest kernel layer. Keeping it as a
+	// callback avoids an import cycle between cpu and syscall packages.
+	OnSyscall64 func(*MachineState64) (resume bool, err error)
+	poked       uint32
 }
 
 func NewJIT64(memory *Memory64) *JIT64 {
@@ -143,6 +148,17 @@ func (j *JIT64) RunToInterrupt(state *MachineState64) uint64 {
 			return j.fault(state, runErr)
 		}
 		if flow == Flow64Interrupt {
+			if state.TrapNo == Trap64Syscall && j.OnSyscall64 != nil {
+				resume, syscallErr := j.OnSyscall64(state)
+				if syscallErr != nil {
+					return j.fault(state, syscallErr)
+				}
+				if resume && !state.Halted {
+					state.TrapNo = Trap64None
+					continue
+				}
+				state.TrapNo = Trap64Exit
+			}
 			return state.TrapNo
 		}
 	}
