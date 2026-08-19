@@ -39,6 +39,7 @@ const (
 	OpTestImm
 	OpShift
 	OpUnary
+	OpSetcc
 	OpIncReg
 	OpDecReg
 	OpPushReg
@@ -92,10 +93,11 @@ type MemoryOperand struct {
 }
 
 type Operand struct {
-	Reg    Reg32
-	Memory MemoryOperand
-	IsMem  bool
-	Width  uint8 // operand width in bytes; the current core supports 1, 2, and 4
+	Reg        Reg32
+	Memory     MemoryOperand
+	IsMem      bool
+	Width      uint8 // operand width in bytes; the current core supports 1, 2, and 4
+	ByteOffset uint8 // byte-register offset within the 32-bit register (0 or 1)
 }
 
 type Instruction struct {
@@ -266,6 +268,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return unary, nil
+	}
+	if setcc, handled, err := decodeX86Setcc(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return setcc, nil
 	}
 	reader := newCodeReader(memory, eip)
 	opcode, err := reader.byte()
@@ -810,4 +818,90 @@ func decodeX86Unary(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{}, true, err
 	}
 	return Instruction{Op: OpUnary, Len: uint32(inst.Len), Dst: dst, Group: group}, true, nil
+}
+
+func x86Operand8(arg x86asm.Arg) (Operand, bool, error) {
+	if memory, ok := arg.(x86asm.Mem); ok {
+		operand, ok, err := x86Operand32(memory)
+		if err != nil || !ok {
+			return Operand{}, false, err
+		}
+		operand.Width = 1
+		return operand, true, nil
+	}
+	reg, ok := arg.(x86asm.Reg)
+	if !ok {
+		return Operand{}, false, nil
+	}
+	var base Reg32
+	var offset uint8
+	switch reg {
+	case x86asm.AL:
+		base = EAX
+	case x86asm.CL:
+		base = ECX
+	case x86asm.DL:
+		base = EDX
+	case x86asm.BL:
+		base = EBX
+	case x86asm.AH:
+		base, offset = EAX, 1
+	case x86asm.CH:
+		base, offset = ECX, 1
+	case x86asm.DH:
+		base, offset = EDX, 1
+	case x86asm.BH:
+		base, offset = EBX, 1
+	default:
+		return Operand{}, false, fmt.Errorf("%w: byte register %v", ErrUnsupportedAddressing, reg)
+	}
+	return Operand{Reg: base, Width: 1, ByteOffset: offset}, true, nil
+}
+
+func decodeX86Setcc(inst x86asm.Inst) (Instruction, bool, error) {
+	if len(inst.Args) < 1 || inst.Args[0] == nil {
+		return Instruction{}, false, nil
+	}
+	var condition uint8
+	switch inst.Op {
+	case x86asm.SETB:
+		condition = 0
+	case x86asm.SETAE:
+		condition = 1
+	case x86asm.SETE:
+		condition = 2
+	case x86asm.SETNE:
+		condition = 3
+	case x86asm.SETBE:
+		condition = 4
+	case x86asm.SETA:
+		condition = 5
+	case x86asm.SETS:
+		condition = 6
+	case x86asm.SETNS:
+		condition = 7
+	case x86asm.SETP:
+		condition = 8
+	case x86asm.SETNP:
+		condition = 9
+	case x86asm.SETL:
+		condition = 10
+	case x86asm.SETGE:
+		condition = 11
+	case x86asm.SETLE:
+		condition = 12
+	case x86asm.SETG:
+		condition = 13
+	case x86asm.SETO:
+		condition = 14
+	case x86asm.SETNO:
+		condition = 15
+	default:
+		return Instruction{}, false, nil
+	}
+	dst, ok, err := x86Operand8(inst.Args[0])
+	if err != nil || !ok {
+		return Instruction{}, true, err
+	}
+	return Instruction{Op: OpSetcc, Len: uint32(inst.Len), Dst: dst, Group: condition}, true, nil
 }

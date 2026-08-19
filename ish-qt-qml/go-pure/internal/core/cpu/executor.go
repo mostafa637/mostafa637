@@ -207,6 +207,15 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			return instruction, err
 		}
 		state.EIP = next
+	case OpSetcc:
+		value := byte(0)
+		if conditionValue(state, instruction.Group) {
+			value = 1
+		}
+		if err := storeOperand(state, instruction.Dst, uint32(value)); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
 	case OpIncReg:
 		carry := state.Flag(FlagCF)
 		reg := state.Get(instruction.Reg)
@@ -474,7 +483,15 @@ func effectiveAddress(state *MachineState, operand Operand) (Address, error) {
 
 func loadOperand(state *MachineState, operand Operand) (uint32, error) {
 	if !operand.IsMem {
-		return state.Get(operand.Reg), nil
+		value := state.Get(operand.Reg)
+		switch operand.Width {
+		case 1:
+			return (value >> (8 * operand.ByteOffset)) & 0xff, nil
+		case 2:
+			return value & 0xffff, nil
+		default:
+			return value, nil
+		}
 	}
 	address, err := effectiveAddress(state, operand)
 	if err != nil {
@@ -502,7 +519,17 @@ func loadOperand(state *MachineState, operand Operand) (uint32, error) {
 
 func storeOperand(state *MachineState, operand Operand, value uint32) error {
 	if !operand.IsMem {
-		state.Set(operand.Reg, value)
+		switch operand.Width {
+		case 1:
+			mask := uint32(0xff) << (8 * operand.ByteOffset)
+			current := state.Get(operand.Reg)
+			state.Set(operand.Reg, (current&^mask)|((value&0xff)<<(8*operand.ByteOffset)))
+		case 2:
+			current := state.Get(operand.Reg)
+			state.Set(operand.Reg, (current&^0xffff)|(value&0xffff))
+		default:
+			state.Set(operand.Reg, value)
+		}
 		return nil
 	}
 	address, err := effectiveAddress(state, operand)
@@ -603,4 +630,48 @@ func shiftValue(value, count uint32, group uint8) (result uint32, carry, overflo
 		return value, false, false
 	}
 	return result, carry, overflow
+}
+
+func conditionValue(state *MachineState, condition uint8) bool {
+	cf := state.Flag(FlagCF)
+	of := state.Flag(FlagOF)
+	sf := state.Flag(FlagSF)
+	zf := state.Flag(FlagZF)
+	pf := state.Flag(FlagPF)
+	switch condition {
+	case 0: // B/NAE/C
+		return cf
+	case 1: // AE/NB/NC
+		return !cf
+	case 2: // E/Z
+		return zf
+	case 3: // NE/NZ
+		return !zf
+	case 4: // BE/NA
+		return cf || zf
+	case 5: // A/NBE
+		return !cf && !zf
+	case 6: // S
+		return sf
+	case 7: // NS
+		return !sf
+	case 8: // P/PE
+		return pf
+	case 9: // NP/PO
+		return !pf
+	case 10: // L/NGE
+		return sf != of
+	case 11: // GE/NL
+		return sf == of
+	case 12: // LE/NG
+		return zf || sf != of
+	case 13: // G/ NLE
+		return !zf && sf == of
+	case 14: // O
+		return of
+	case 15: // NO
+		return !of
+	default:
+		return false
+	}
 }

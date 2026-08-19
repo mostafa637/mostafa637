@@ -477,3 +477,44 @@ func TestExecutorNegFlagsDecodedByX86ASM(t *testing.T) {
 		t.Fatalf("NEG flags: cf=%v of=%v zf=%v", state.Flag(FlagCF), state.Flag(FlagOF), state.Flag(FlagZF))
 	}
 }
+
+func TestExecutorSetccByteRegister(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0x31, 0xC0, // xor eax, eax: ZF=1
+		0x0F, 0x94, 0xC0, // sete al
+		0xF4,
+	})
+	setcc, err := Decode(memory, PageSize+2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if setcc.Op != OpSetcc || setcc.Dst.Width != 1 || setcc.Dst.Reg != EAX || setcc.Dst.ByteOffset != 0 {
+		t.Fatalf("SETE AL decode = %+v", setcc)
+	}
+	if err := NewExecutor(nil).Run(state, 3); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 1 {
+		t.Fatalf("SETE AL changed EAX to %#x, want 1", got)
+	}
+}
+
+func TestExecutorSetccByteMemory(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0x31, 0xC0, // xor eax, eax: ZF=1
+		0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+		0xC7, 0x03, 0x00, 0x00, 0x00, 0x00, // mov dword ptr [ebx], 0
+		0x0F, 0x95, 0x03, // setne byte ptr [ebx] -> 0
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 5); err != nil {
+		t.Fatal(err)
+	}
+	var raw [4]byte
+	if err := memory.Read(Address(2*PageSize), raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 0 {
+		t.Fatalf("SETNE memory = %#x, want 0", got)
+	}
+}
