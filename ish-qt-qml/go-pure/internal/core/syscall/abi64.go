@@ -116,9 +116,14 @@ type Context64 struct {
 	RseqAddress   uint64
 	RseqLength    uint64
 	RseqSignature uint64
-	FDs           *corefd.Table
-	Mappings      []GuestMapping64
-	signalFDs     map[*signalFD64]struct{}
+
+	// Execve is provided by the guest session. It replaces the current ELF
+	// image while preserving process identity and the descriptor table.
+	Execve func(path string, argv, env []string) int64
+
+	FDs       *corefd.Table
+	Mappings  []GuestMapping64
+	signalFDs map[*signalFD64]struct{}
 }
 
 type Dispatcher64 struct {
@@ -131,6 +136,14 @@ func NewContext64(memory *corecpu.Memory64) *Context64 {
 }
 
 const maxFD64 = uint64(^uint32(0) >> 1)
+
+// CloseOnExec closes descriptors marked close-on-exec after a successful image replacement.
+func (c *Context64) CloseOnExec() {
+	if c == nil || c.FDs == nil {
+		return
+	}
+	c.FDs.CloseOnExec()
+}
 
 func (c *Context64) InstallFile(fd uint64, file *corefd.File) error {
 	if c == nil || c.FDs == nil || file == nil || fd > maxFD64 {
@@ -157,6 +170,7 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64GetPID, func(ctx *Context64, args [6]uint64) int64 {
 		return int64(ctx.PID)
 	})
+	d.Register(Sys64Execve, execve64)
 	d.Register(Sys64GetUID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
 	d.Register(Sys64GetGID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
 	d.Register(Sys64GetEUID, func(ctx *Context64, args [6]uint64) int64 { return 0 })

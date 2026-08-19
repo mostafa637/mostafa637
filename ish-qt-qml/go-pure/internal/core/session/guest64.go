@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"debug/elf"
+	pathpkg "path"
+	"strings"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
 	coreelf "github.com/mostafa637/mostafa637/go-pure/internal/core/elf"
@@ -14,6 +16,23 @@ import (
 	coreloader "github.com/mostafa637/mostafa637/go-pure/internal/core/loader"
 	coresyscall "github.com/mostafa637/mostafa637/go-pure/internal/core/syscall"
 )
+
+func resolveSessionPath64(cwd, name string) (string, bool) {
+	if name == "" {
+		return "", false
+	}
+	if strings.HasPrefix(name, "/") {
+		return pathpkg.Clean(name), true
+	}
+	if cwd == "" {
+		cwd = "/"
+	}
+	resolved := pathpkg.Clean(pathpkg.Join(cwd, name))
+	if !strings.HasPrefix(resolved, "/") {
+		return "", false
+	}
+	return resolved, true
+}
 
 func isELF64Image(data []byte) bool {
 	return len(data) >= 5 && bytes.Equal(data[:4], []byte{0x7f, 'E', 'L', 'F'}) && data[4] == byte(elf.ELFCLASS64)
@@ -70,9 +89,57 @@ func (g *guestTransport) start64(ctx context.Context, process *corekernel.Proces
 	if err := sysContext.InstallFile(2, &corefd.File{Writer: writer}); err != nil {
 		return err
 	}
-	dispatcher := coresyscall.NewDispatcher64(sysContext)
 
-	jit := corecpu.NewJIT64(memory)
+	var jit *corecpu.JIT64
+	var dispatcher *coresyscall.Dispatcher64
+	sysContext.Execve = func(path string, argv, env []string) int64 {
+		resolved, ok := resolveSessionPath64(sysContext.CWD, path)
+		if !ok || resolved == "" {
+			return int64(coresyscall.ENOENT)
+		}
+		imageData, readErr := fake.ReadFile(resolved)
+		if readErr != nil {
+			return int64(coresyscall.ENOENT)
+		}
+		newImage, parseErr := coreelf.Parse64(bytesReader(imageData), int64(len(imageData)))
+		if parseErr != nil {
+			return int64(coresyscall.EINVAL)
+		}
+		newMemory := corecpu.NewMemory64()
+		var newBias corecpu.Address64
+		if newImage.Header.Type == elf.ET_DYN {
+			newBias = corecpu.Address64(0x0000000000400000)
+		}
+		newSpace, loadErr := coreloader.Load64(bytesReader(imageData), int64(len(imageData)), newImage, newMemory, newBias)
+		if loadErr != nil {
+			return int64(coresyscall.EINVAL)
+		}
+		newStack := coreloader.DefaultStackConfig64()
+		newStack.Argv = append([]string(nil), argv...)
+		newStack.Env = append([]string(nil), env...)
+		newStack.ExecFilename = resolved
+		newLayout, stackErr := coreloader.BuildStack64ForImage(newMemory, newSpace, newStack)
+		if stackErr != nil {
+			return int64(coresyscall.EINVAL)
+		}
+
+		newState := corecpu.NewMachineState64(newMemory)
+		newState.RIP = uint64(newSpace.Entry)
+		newState.Set(corecpu.RSP, uint64(newLayout.SP))
+		newState.RFLAGS = corecpu.Flag64IF
+		*state = *newState
+		sysContext.Memory = newMemory
+		sysContext.Brk = uint64(newSpace.Brk)
+		sysContext.CloseOnExec()
+		jit = corecpu.NewJIT64(newMemory)
+		jit.OnSyscall64 = func(machine *corecpu.MachineState64) (bool, error) {
+			return dispatcher.Dispatch(machine)
+		}
+		return 0
+	}
+
+	dispatcher = coresyscall.NewDispatcher64(sysContext)
+	jit = corecpu.NewJIT64(memory)
 	jit.OnSyscall64 = func(machine *corecpu.MachineState64) (bool, error) {
 		return dispatcher.Dispatch(machine)
 	}
