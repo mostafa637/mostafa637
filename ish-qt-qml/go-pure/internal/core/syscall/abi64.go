@@ -22,6 +22,8 @@ const (
 	Sys64Write        Number64 = 1
 	Sys64Open         Number64 = 2
 	Sys64Close        Number64 = 3
+	Sys64Stat         Number64 = 4
+	Sys64Fstat        Number64 = 5
 	Sys64Mmap         Number64 = 9
 	Sys64Mprotect     Number64 = 10
 	Sys64Munmap       Number64 = 11
@@ -147,6 +149,13 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Dup2, dup264)
 	d.Register(Sys64Open, open64)
 	d.Register(Sys64Openat, openat64)
+	d.Register(Sys64Stat, stat64Guest)
+	d.Register(Sys64Fstat, fstat64Guest)
+	d.Register(Sys64Fstatat, fstatat64Guest)
+	d.Register(Sys64Mkdir, mkdir64Guest)
+	d.Register(Sys64Rmdir, rmdir64Guest)
+	d.Register(Sys64Unlink, unlink64Guest)
+	d.Register(Sys64Rename, rename64Guest)
 	d.Register(Sys64Getrandom, getrandom64)
 	d.Register(Sys64Brk, brk64)
 	return d
