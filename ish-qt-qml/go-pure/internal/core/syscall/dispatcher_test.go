@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"path/filepath"
 	"testing"
 
 	"github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
+	corefs "github.com/mostafa637/mostafa637/go-pure/internal/core/fs"
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/storage"
 )
 
 func TestDispatcherReadWriteAndPID(t *testing.T) {
@@ -136,5 +139,100 @@ func TestDescriptorSyscalls(t *testing.T) {
 	}
 	if got := dispatcher.Dispatch(state, SysClose, 9); got != EBADF {
 		t.Fatalf("second close = %d", got)
+	}
+}
+
+func TestFakeFSSyscalls(t *testing.T) {
+	db, err := storage.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	fake, err := corefs.New(filepath.Join(t.TempDir(), "root"), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Mkdir("/etc", 0o755, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.WriteFile("/etc/name", []byte("pure-go"), 0o644, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	memory := cpu.NewMemory()
+	if err := memory.Map(1, 9, cpu.PRead|cpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	context := NewContext(memory)
+	context.FS = fake
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+
+	writeGuest := func(address cpu.Address, value string) {
+		t.Helper()
+		if err := memory.Write(address, append([]byte(value), 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readGuest := func(address cpu.Address, size int) []byte {
+		t.Helper()
+		value := make([]byte, size)
+		if err := memory.Read(address, value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+
+	writeGuest(0x1000, "/etc/name")
+	if got := dispatcher.Dispatch(state, SysStat64, 0x1000, 0x2000); got != 0 {
+		t.Fatalf("stat64 = %d", got)
+	}
+	stat := readGuest(0x2000, stat64Size)
+	if mode := binary.LittleEndian.Uint32(stat[16:20]); mode != corefs.ModeRegular|0o644 {
+		t.Fatalf("stat64 mode = %#o", mode)
+	}
+	if size := binary.LittleEndian.Uint64(stat[44:52]); size != uint64(len("pure-go")) {
+		t.Fatalf("stat64 size = %d", size)
+	}
+
+	writeGuest(0x3000, "/etc")
+	if got := dispatcher.Dispatch(state, SysOpen, 0x3000, 0, 0); got < 3 {
+		t.Fatalf("open directory = %d", got)
+	}
+	dirFD := uint32(state.EAXValue())
+	if got := dispatcher.Dispatch(state, SysGetdents64, dirFD, 0x4000, 256); got <= 0 {
+		t.Fatalf("getdents64 = %d", got)
+	}
+	dirents := string(readGuest(0x4000, 256))
+	for _, name := range []string{".", "..", "name"} {
+		if !bytes.Contains([]byte(dirents), []byte(name)) {
+			t.Fatalf("getdents64 missing %q in %q", name, dirents)
+		}
+	}
+
+	writeGuest(0x5000, "/etc")
+	if got := dispatcher.Dispatch(state, SysChdir, 0x5000); got != 0 {
+		t.Fatalf("chdir = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysGetCWD, 0x6000, 64); got != int32(len("/etc")+1) {
+		t.Fatalf("getcwd = %d", got)
+	}
+	if cwd := string(readGuest(0x6000, len("/etc")+1)); cwd != "/etc\x00" {
+		t.Fatalf("cwd = %q", cwd)
+	}
+
+	writeGuest(0x7000, "name")
+	if got := dispatcher.Dispatch(state, SysOpen, 0x7000, 0, 0); got < 3 {
+		t.Fatalf("open relative file = %d", got)
+	}
+	fileFD := uint32(state.EAXValue())
+	if got := dispatcher.Dispatch(state, SysFstat64, fileFD, 0x8000); got != 0 {
+		t.Fatalf("fstat64 = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysRead, fileFD, 0x9000, 7); got != 7 {
+		t.Fatalf("read relative file = %d", got)
+	}
+	if data := string(readGuest(0x9000, 7)); data != "pure-go" {
+		t.Fatalf("relative file data = %q", data)
 	}
 }

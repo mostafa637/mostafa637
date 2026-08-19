@@ -22,9 +22,13 @@ const (
 	SysRead       Number = 3
 	SysOpen       Number = 5
 	SysWrite      Number = 4
+	SysChdir      Number = 12
 	SysClose      Number = 6
 	SysLseek      Number = 19
 	SysGetPID     Number = 20
+	SysGetCWD     Number = 183
+	SysStat64     Number = 195
+	SysFstat64    Number = 197
 	SysDup        Number = 41
 	SysDup2       Number = 63
 	SysBrk        Number = 45
@@ -34,22 +38,26 @@ const (
 	SysMmap2      Number = 192
 	SysExitGroup  Number = 252
 	SysMadvise    Number = 219
+	SysGetdents64 Number = 220
 	SysSchedYield Number = 158
 )
 
 var errFault = errors.New("syscall: bad guest address")
 
 const (
-	EPERM  int32 = -1
-	ENOENT int32 = -2
-	EACCES int32 = -13
-	EEXIST int32 = -17
-	EBADF  int32 = -9
-	ENOMEM int32 = -12
-	EFAULT int32 = -14
-	EINVAL int32 = -22
-	EIO    int32 = -5
-	ENOSYS int32 = -38
+	EPERM        int32 = -1
+	ENOENT       int32 = -2
+	EACCES       int32 = -13
+	EEXIST       int32 = -17
+	EBADF        int32 = -9
+	ENOMEM       int32 = -12
+	EFAULT       int32 = -14
+	EINVAL       int32 = -22
+	EIO          int32 = -5
+	ENOTDIR      int32 = -20
+	ENAMETOOLONG int32 = -36
+	ENOTTY       int32 = -25
+	ENOSYS       int32 = -38
 )
 
 const (
@@ -67,6 +75,7 @@ type Context struct {
 	Memory *corecpu.Memory
 	FS     *corefs.FS
 	PID    uint32
+	CWD    string
 
 	StartBrk uint32
 	Brk      uint32
@@ -90,7 +99,7 @@ type Dispatcher struct {
 }
 
 func NewContext(memory *corecpu.Memory) *Context {
-	return &Context{Memory: memory, FDs: corefd.New(), Files: make(map[uint32]*File)}
+	return &Context{Memory: memory, CWD: "/", FDs: corefd.New(), Files: make(map[uint32]*File)}
 }
 
 // InstallFile installs a descriptor in both the new table and the legacy map.
@@ -113,6 +122,11 @@ func NewDispatcher(context *Context) *Dispatcher {
 	d.Register(SysExit, exit)
 	d.Register(SysExitGroup, exit)
 	d.Register(SysOpen, open)
+	d.Register(SysChdir, chdir)
+	d.Register(SysGetCWD, getcwd)
+	d.Register(SysStat64, stat64)
+	d.Register(SysFstat64, fstat64)
+	d.Register(SysGetdents64, getdents64)
 	d.Register(SysRead, read)
 	d.Register(SysWrite, write)
 	d.Register(SysClose, closeFD)
@@ -179,6 +193,10 @@ func open(context *Context, state *corecpu.MachineState, args [6]uint32) int32 {
 	if !ok {
 		return EFAULT
 	}
+	path, ok = resolveGuestPath(context, path)
+	if !ok {
+		return ENOENT
+	}
 	flags, ok := hostOpenFlags(args[1])
 	if !ok {
 		return EINVAL
@@ -187,12 +205,13 @@ func open(context *Context, state *corecpu.MachineState, args [6]uint32) int32 {
 	if err != nil {
 		return errnoForOpen(err)
 	}
-	fd, err := context.FDs.Open(&corefd.File{Reader: file, Writer: file, Closer: file, Seeker: file})
+	guestFile := &corefd.File{Reader: file, Writer: file, Closer: file, Seeker: file, Path: path}
+	fd, err := context.FDs.Open(guestFile)
 	if err != nil {
 		_ = file.Close()
 		return ENOMEM
 	}
-	context.Files[uint32(fd)] = &corefd.File{Reader: file, Writer: file, Closer: file, Seeker: file}
+	context.Files[uint32(fd)] = guestFile
 	return fd
 }
 

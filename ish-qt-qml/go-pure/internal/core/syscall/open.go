@@ -21,7 +21,7 @@ const (
 )
 
 func readGuestString(context *Context, state *corecpu.MachineState, address corecpu.Address, limit int) (string, bool) {
-	if context == nil || context.Memory == nil || state == nil || limit <= 0 {
+	if context == nil || context.Memory == nil || limit <= 0 {
 		return "", false
 	}
 	buffer := make([]byte, 0, limit)

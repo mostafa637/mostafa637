@@ -20,6 +20,13 @@ type File struct {
 	Writer io.Writer
 	Closer io.Closer
 	Seeker io.Seeker
+
+	// Path is the guest absolute path for descriptors opened through fakefs.
+	// It is empty for pipes, console streams, and other anonymous handles.
+	Path string
+
+	// DirPos is the guest directory-stream cookie used by getdents64.
+	DirPos int
 }
 
 func (f *File) Close() error {
