@@ -267,3 +267,68 @@ func TestABI64DirFDResolutionAndFlagValidation(t *testing.T) {
 		t.Fatalf("close dir: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
 	}
 }
+
+func TestABI64LifecycleAndRobustList(t *testing.T) {
+	_, memory, ctx, dispatcher, state := newABI64FilesystemTest(t)
+	ctx.PID = 321
+	ctx.TID = 321
+	if !ctx.Children.AddChild(uint32(ctx.PID), 654) {
+		t.Fatal("add child failed")
+	}
+	if !ctx.Children.MarkExited(654, 7) {
+		t.Fatal("mark child exited failed")
+	}
+	const statusAddress corecpu.Address64 = 0x10200
+	set64Syscall(state, Sys64Wait4, 654, uint64(statusAddress), 0, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != 654 {
+		t.Fatalf("wait4: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+	var status [4]byte
+	if err := memory.Read(statusAddress, status[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(status[:]); got != 7<<8 {
+		t.Fatalf("wait4 status = %#x", got)
+	}
+	set64Syscall(state, Sys64Wait4, ^uint64(0), 0, 1, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(ECHILD) {
+		t.Fatalf("wait4 reaped: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+
+	set64Syscall(state, Sys64SetRobust, 0x12345000, 24)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != 0 {
+		t.Fatalf("set robust: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+	set64Syscall(state, Sys64GetRobust, 0, uint64(statusAddress), uint64(statusAddress+8))
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != 0 {
+		t.Fatalf("get robust: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+	var robust [16]byte
+	if err := memory.Read(statusAddress, robust[:]); err != nil {
+		t.Fatal(err)
+	}
+	if head, length := binary.LittleEndian.Uint64(robust[0:8]), binary.LittleEndian.Uint64(robust[8:16]); head != 0x12345000 || length != 24 {
+		t.Fatalf("robust list = %#x/%d", head, length)
+	}
+	set64Syscall(state, Sys64GetRobust, 999, uint64(statusAddress), uint64(statusAddress+8))
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(ESRCH) {
+		t.Fatalf("get robust wrong pid: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+
+	for _, syscall := range []Number64{Sys64Clone, Sys64Fork, Sys64Vfork} {
+		set64Syscall(state, syscall)
+		if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(ENOSYS) {
+			t.Fatalf("syscall %d: err=%v rax=%d", syscall, err, int64(state.Get(corecpu.RAX)))
+		}
+	}
+}
+
+func TestABI64GetPPIDUsesParentContext(t *testing.T) {
+	_, _, ctx, dispatcher, state := newABI64FilesystemTest(t)
+	ctx.PID = 654
+	ctx.ParentPID = 321
+	set64Syscall(state, Sys64GetPPID)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != 321 {
+		t.Fatalf("getppid: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+}

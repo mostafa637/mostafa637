@@ -83,6 +83,7 @@ const (
 	Sys64Linkat         Number64 = 265
 	Sys64Symlinkat      Number64 = 266
 	Sys64SetRobust      Number64 = 273
+	Sys64GetRobust      Number64 = 274
 	Sys64Signalfd4      Number64 = 289
 	Sys64Eventfd2       Number64 = 290
 	Sys64EpollCreate1   Number64 = 291
@@ -103,21 +104,25 @@ const (
 type Handler64 func(*Context64, [6]uint64) int64
 
 type Context64 struct {
-	Memory        *corecpu.Memory64
-	FS            *corefs.FS
-	CWD           string
-	WinCols       uint16
-	WinRows       uint16
-	Termios       [44]byte
-	PID           uint64
-	TID           uint64
-	TIDAddress    uint64
-	Brk           uint64
-	Futexes       *FutexRegistry64
-	RseqAddress   uint64
-	RseqLength    uint64
-	RseqSignature uint64
-	RLimits       map[uint64]ResourceLimit64
+	Memory         *corecpu.Memory64
+	FS             *corefs.FS
+	CWD            string
+	WinCols        uint16
+	WinRows        uint16
+	Termios        [44]byte
+	PID            uint64
+	ParentPID      uint64
+	TID            uint64
+	TIDAddress     uint64
+	Children       *ChildRegistry
+	RobustListHead uint64
+	RobustListLen  uint64
+	Brk            uint64
+	Futexes        *FutexRegistry64
+	RseqAddress    uint64
+	RseqLength     uint64
+	RseqSignature  uint64
+	RLimits        map[uint64]ResourceLimit64
 
 	// Execve is provided by the guest session. It replaces the current ELF
 	// image while preserving process identity and the descriptor table.
@@ -134,7 +139,7 @@ type Dispatcher64 struct {
 }
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
-	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), RLimits: defaultResourceLimits64(), signalFDs: make(map[*signalFD64]struct{})}
+	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), signalFDs: make(map[*signalFD64]struct{})}
 }
 
 const maxFD64 = uint64(^uint32(0) >> 1)
@@ -173,11 +178,22 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 		return int64(ctx.PID)
 	})
 	d.Register(Sys64Execve, execve64)
+	d.Register(Sys64Clone, clone64Stub)
+	d.Register(Sys64Fork, fork64Stub)
+	d.Register(Sys64Vfork, vfork64Stub)
+	d.Register(Sys64Wait4, wait4_64)
+	d.Register(Sys64SetRobust, setRobustList64)
+	d.Register(Sys64GetRobust, getRobustList64)
 	d.Register(Sys64GetUID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
 	d.Register(Sys64GetGID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
 	d.Register(Sys64GetEUID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
 	d.Register(Sys64GetEGID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
-	d.Register(Sys64GetPPID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
+	d.Register(Sys64GetPPID, func(ctx *Context64, args [6]uint64) int64 {
+		if ctx == nil {
+			return int64(ESRCH)
+		}
+		return int64(ctx.ParentPID)
+	})
 	d.Register(Sys64GetTID, gettid64)
 	d.Register(Sys64SetTIDAddr, setTIDAddress64)
 	d.Register(Sys64Fcntl, fcntl64_64)
