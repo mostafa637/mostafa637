@@ -180,3 +180,59 @@ func TestDispatcher64EpollAndInotify(t *testing.T) {
 		t.Fatalf("inotify_rm_watch: resume=%v err=%v rax=%d", resume, err, int64(state.Get(corecpu.RAX)))
 	}
 }
+
+func TestDispatcher64SignalFD(t *testing.T) {
+	context64, dispatcher, state, area := newEventsTestContext(t)
+	context64.PID = 42
+	var mask [8]byte
+	binary.LittleEndian.PutUint64(mask[:], uint64(1)<<(15-1))
+	if err := context64.Memory.Write(area, mask[:]); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(corecpu.RAX, uint64(Sys64Signalfd4))
+	state.Set(corecpu.RDI, ^uint64(0))
+	state.Set(corecpu.RSI, uint64(area))
+	state.Set(corecpu.RDX, 8)
+	state.Set(corecpu.R10, sfdNonblock64)
+	resume, err := dispatcher.Dispatch(state)
+	if err != nil || !resume || int64(state.Get(corecpu.RAX)) < 3 {
+		t.Fatalf("signalfd4: resume=%v err=%v rax=%d", resume, err, int64(state.Get(corecpu.RAX)))
+	}
+	fd := state.Get(corecpu.RAX)
+
+	state.Set(corecpu.RAX, uint64(Sys64Read))
+	state.Set(corecpu.RDI, fd)
+	state.Set(corecpu.RSI, uint64(area+0x100))
+	state.Set(corecpu.RDX, 128)
+	resume, err = dispatcher.Dispatch(state)
+	if err != nil || !resume || int64(state.Get(corecpu.RAX)) != int64(EAGAIN) {
+		t.Fatalf("empty nonblock signalfd read: resume=%v err=%v rax=%d", resume, err, int64(state.Get(corecpu.RAX)))
+	}
+
+	state.Set(corecpu.RAX, uint64(Sys64Kill))
+	state.Set(corecpu.RDI, context64.PID)
+	state.Set(corecpu.RSI, 15)
+	resume, err = dispatcher.Dispatch(state)
+	if err != nil || !resume || int64(state.Get(corecpu.RAX)) != 0 {
+		t.Fatalf("kill for signalfd: resume=%v err=%v rax=%d", resume, err, int64(state.Get(corecpu.RAX)))
+	}
+
+	state.Set(corecpu.RAX, uint64(Sys64Read))
+	state.Set(corecpu.RDI, fd)
+	state.Set(corecpu.RSI, uint64(area+0x100))
+	state.Set(corecpu.RDX, 128)
+	resume, err = dispatcher.Dispatch(state)
+	if err != nil || !resume || int64(state.Get(corecpu.RAX)) != 128 {
+		t.Fatalf("queued signalfd read: resume=%v err=%v rax=%d", resume, err, int64(state.Get(corecpu.RAX)))
+	}
+	var info [128]byte
+	if err := context64.Memory.Read(area+0x100, info[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(info[0:4]); got != 15 {
+		t.Fatalf("signalfd signo=%d, want 15", got)
+	}
+	if got := binary.LittleEndian.Uint32(info[12:16]); got != uint32(context64.PID) {
+		t.Fatalf("signalfd pid=%d, want %d", got, context64.PID)
+	}
+}

@@ -344,3 +344,223 @@ func TestJIT64CarryAndFlagTransfers(t *testing.T) {
 		t.Fatalf("SAHF flags: rflags=%#x", state.RFLAGS)
 	}
 }
+
+func TestJIT64ShiftsSetccAndCMOVcc(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0xc000
+	code := []byte{
+		0xb8, 0x01, 0x00, 0x00, 0x80, // mov eax, 0x80000001
+		0xd1, 0xe0, // shl eax, 1 => 2, CF=1, OF=1
+		0x0f, 0x92, 0xc3, // setb bl
+		0x0f, 0x90, 0xc1, // seto cl
+		0x41, 0x0f, 0x95, 0xc0, // setne r8b
+		0xd1, 0xe8, // shr eax, 1 => 1
+		0xd1, 0xf8, // sar eax, 1 => 0
+		0xb8, 0xff, 0xff, 0xff, 0xff, // mov eax, -1
+		0x83, 0xf8, 0x00, // cmp eax, 0: SF=1, OF=0
+		0x41, 0x0f, 0x9c, 0xc1, // setl r9b
+		0x41, 0x0f, 0x9d, 0xc2, // setge r10b
+		0xbe, 0x07, 0x00, 0x00, 0x00, // mov esi, 7
+		0xbf, 0x09, 0x00, 0x00, 0x00, // mov edi, 9
+		0xba, 0x01, 0x00, 0x00, 0x00, // mov edx, 1
+		0x0f, 0x4c, 0xd6, // cmovl edx, esi => 7
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if got := state.Get(RBX) & 0xff; got != 1 {
+		t.Fatalf("setb bl=%d, want 1", got)
+	}
+	if got := state.Get(RCX) & 0xff; got != 1 {
+		t.Fatalf("seto cl=%d, want 1", got)
+	}
+	if got := state.Get(R8) & 0xff; got != 1 {
+		t.Fatalf("setne r8b=%d, want 1", got)
+	}
+	if got := state.Get(R9) & 0xff; got != 1 {
+		t.Fatalf("setl r9b=%d, want 1", got)
+	}
+	if got := state.Get(R10) & 0xff; got != 0 {
+		t.Fatalf("setge r10b=%d, want 0", got)
+	}
+	if got := state.Get(RDX); got != 7 {
+		t.Fatalf("cmovl edx=%d, want 7", got)
+	}
+}
+
+func TestJIT64MultiplyAndDivide(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0xd000
+	code := []byte{
+		0x48, 0xc7, 0xc0, 0x03, 0x00, 0x00, 0x00, // mov rax, 3
+		0x48, 0xc7, 0xc3, 0x04, 0x00, 0x00, 0x00, // mov rbx, 4
+		0x48, 0xf7, 0xe3, // mul rbx => rdx:rax = 12
+		0x48, 0xc7, 0xc1, 0x02, 0x00, 0x00, 0x00, // mov rcx, 2
+		0x48, 0xf7, 0xf1, // div rcx => rax=6, rdx=0
+		0xb8, 0x06, 0x00, 0x00, 0x00, // mov eax, 6
+		0xb9, 0x07, 0x00, 0x00, 0x00, // mov ecx, 7
+		0x0f, 0xaf, 0xc1, // imul eax, ecx => 42
+		0xba, 0x06, 0x00, 0x00, 0x00, // mov edx, 6
+		0xbb, 0x00, 0x00, 0x00, 0x00, // clear ebx
+		0x6b, 0xda, 0x07, // imul ebx, edx, 7 => 42
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if got := state.Get(RAX); got != 42 {
+		t.Fatalf("imul/div rax=%d, want 42", got)
+	}
+	if got := state.Get(RBX); got != 42 {
+		t.Fatalf("imul immediate ebx=%d, want 42", got)
+	}
+	if got := state.Get(RDX); got != 6 {
+		t.Fatalf("source edx=%d, want 6", got)
+	}
+}
+
+func TestJIT64SignedDivide(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0xe000
+	code := []byte{
+		0x48, 0xc7, 0xc0, 0xf4, 0xff, 0xff, 0xff, // mov rax, -12
+		0x48, 0xc7, 0xc2, 0xff, 0xff, 0xff, 0xff, // mov rdx, -1 (sign-extended high half)
+		0x48, 0xc7, 0xc1, 0x03, 0x00, 0x00, 0x00, // mov rcx, 3
+		0x48, 0xf7, 0xf9, // idiv rcx => rax=-4, rdx=0
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if got := state.Get(RAX); got != ^uint64(3) {
+		t.Fatalf("idiv rax=%#x, want %#x", got, ^uint64(3))
+	}
+	if got := state.Get(RDX); got != 0 {
+		t.Fatalf("idiv rdx=%#x, want 0", got)
+	}
+}
+
+func TestJIT64BitOperationsAndBSWAP(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0xf000
+	code := []byte{
+		0xb8, 0x11, 0x00, 0x00, 0x80, // mov eax, 0x80000011
+		0x0f, 0xbc, 0xc8, // bsf ecx, eax => 0
+		0x0f, 0xbd, 0xd0, // bsr edx, eax => 31
+		0xf3, 0x0f, 0xb8, 0xf0, // popcnt esi, eax => 3
+		0x0f, 0xba, 0xe0, 0x04, // bt eax, 4 => CF=1
+		0x0f, 0xba, 0xf0, 0x04, // btr eax, 4 => clear bit 4
+		0x41, 0x89, 0xc0, // mov r8d, eax
+		0x0f, 0xba, 0xe8, 0x01, // bts eax, 1 => set bit 1
+		0x41, 0x89, 0xc1, // mov r9d, eax
+		0x0f, 0xba, 0xf8, 0x00, // btc eax, 0 => clear bit 0
+		0x41, 0x89, 0xc2, // mov r10d, eax
+		0x0f, 0xbc, 0xf8, // bsf edi, eax => 1
+		0x0f, 0xc8, // bswap eax => 0x02000080
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if got := state.Get(RCX); got != 0 {
+		t.Fatalf("bsf ecx=%d, want 0", got)
+	}
+	if got := state.Get(RDX); got != 31 {
+		t.Fatalf("bsr edx=%d, want 31", got)
+	}
+	if got := state.Get(RSI); got != 3 {
+		t.Fatalf("popcnt esi=%d, want 3", got)
+	}
+	if got := state.Get(R8); got != 0x80000001 {
+		t.Fatalf("btr snapshot r8=%#x, want %#x", got, uint64(0x80000001))
+	}
+	if got := state.Get(R9); got != 0x80000003 {
+		t.Fatalf("bts snapshot r9=%#x, want %#x", got, uint64(0x80000003))
+	}
+	if got := state.Get(R10); got != 0x80000002 {
+		t.Fatalf("btc snapshot r10=%#x, want %#x", got, uint64(0x80000002))
+	}
+	if got := state.Get(RDI); got != 1 {
+		t.Fatalf("bsf after bit ops edi=%d, want 1", got)
+	}
+	if got := state.Get(RAX); got != 0x02000080 {
+		t.Fatalf("bswap eax=%#x, want %#x", got, uint64(0x02000080))
+	}
+	if !state.Flag(Flag64CF) {
+		t.Fatal("BTC did not preserve the selected old bit in CF")
+	}
+}
+
+func TestJIT64MOVDAndMOVQ(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x11000
+	code := []byte{
+		0xb8, 0x44, 0x33, 0x22, 0x11, // mov eax, 0x11223344
+		0x66, 0x0f, 0x6e, 0xc0, // movd xmm0, eax
+		0x66, 0x0f, 0x7e, 0xc1, // movd ecx, xmm0
+		0xf3, 0x0f, 0x7e, 0xc8, // movq xmm1, xmm0 (copy low qword)
+		0x66, 0x48, 0x0f, 0x7e, 0xca, // movq rdx, xmm1
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if got := state.Get(RCX); got != 0x11223344 {
+		t.Fatalf("movd ecx=%#x, want %#x", got, uint64(0x11223344))
+	}
+	if got := state.Get(RDX); got != 0x11223344 {
+		t.Fatalf("movq rdx=%#x, want %#x", got, uint64(0x11223344))
+	}
+	for i, value := range state.XMM[1][4:] {
+		if value != 0 {
+			t.Fatalf("movd/movq xmm1 upper byte %d=%#x, want 0", i+4, value)
+		}
+	}
+}
+
+func TestJIT64PushAndPopFlags(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x12000
+	const stackAddress Address64 = 0x18000
+	code := []byte{
+		0x9c,                                     // pushfq
+		0x58,                                     // pop rax
+		0x48, 0xc7, 0xc0, 0x01, 0x02, 0x00, 0x00, // mov rax, 0x201 (CF|IF)
+		0x50,             // push rax
+		0x9d,             // popfq
+		0x0f, 0x92, 0xc1, // setb cl
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	if err := memory.Map(stackAddress-Address64(Page64Size), Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Regs[RSP] = uint64(stackAddress)
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if got := state.Get(RAX); got&Flag64IF == 0 {
+		t.Fatalf("pushfq/pop rax=%#x does not contain IF", got)
+	}
+	if got := state.Get(RCX) & 0xff; got != 1 {
+		t.Fatalf("popfq/setb cl=%d, want 1", got)
+	}
+}

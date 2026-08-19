@@ -544,3 +544,145 @@ func inotifyRmWatch64(ctx *Context64, args [6]uint64) int64 {
 	delete(handle.watches, int32(args[1]))
 	return 0
 }
+
+const (
+	sfdNonblock64 = 0x800
+	sfdCloexec64  = 0x80000
+	sigsetSize64  = 8
+	sigMax64      = 64
+)
+
+// signalFD64 is the guest-visible portion of signalfd. Signals are queued in
+// the guest descriptor rather than delivered through the host process, which
+// keeps the implementation deterministic and avoids CGo/runtime signal state.
+type signalFD64 struct {
+	mu       sync.Mutex
+	cond     *sync.Cond
+	mask     uint64
+	nonblock bool
+	closed   bool
+	queue    [][128]byte
+}
+
+func newSignalFD64(mask uint64, flags uint64) *signalFD64 {
+	s := &signalFD64{mask: mask, nonblock: flags&sfdNonblock64 != 0}
+	s.cond = sync.NewCond(&s.mu)
+	return s
+}
+
+func (s *signalFD64) accepts(signo uint32) bool {
+	return signo >= 1 && signo <= sigMax64 && s.mask&(uint64(1)<<(signo-1)) != 0
+}
+
+func (s *signalFD64) enqueue(signo uint32, pid, uid uint32) {
+	if s == nil || !s.accepts(signo) {
+		return
+	}
+	var info [128]byte
+	binary.LittleEndian.PutUint32(info[0:4], signo)
+	binary.LittleEndian.PutUint32(info[12:16], pid)
+	binary.LittleEndian.PutUint32(info[16:20], uid)
+	s.mu.Lock()
+	if !s.closed {
+		s.queue = append(s.queue, info)
+		s.cond.Broadcast()
+	}
+	s.mu.Unlock()
+}
+
+func (s *signalFD64) Read(dst []byte) (int, error) {
+	if len(dst) < 128 {
+		return 0, io.ErrShortBuffer
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for len(s.queue) == 0 && !s.closed {
+		if s.nonblock {
+			return 0, errWouldBlock64
+		}
+		s.cond.Wait()
+	}
+	if len(s.queue) == 0 {
+		return 0, io.EOF
+	}
+	copy(dst[:128], s.queue[0][:])
+	s.queue = s.queue[1:]
+	return 128, nil
+}
+
+func (s *signalFD64) Poll(events uint16) uint16 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var ready uint16
+	if len(s.queue) > 0 {
+		ready |= uint16(epollIn64)
+	}
+	if s.closed {
+		ready |= uint16(epollHup64)
+	}
+	return ready & events
+}
+
+func (s *signalFD64) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	s.cond.Broadcast()
+	s.mu.Unlock()
+	return nil
+}
+
+func signalfd4_64(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil || ctx.Memory == nil || ctx.FDs == nil || args[2] != sigsetSize64 {
+		return int64(EINVAL)
+	}
+	if args[3]&^uint64(sfdNonblock64|sfdCloexec64) != 0 {
+		return int64(EINVAL)
+	}
+	var maskBytes [sigsetSize64]byte
+	if args[1] == 0 || ctx.Memory.Read(corecpu.Address64(args[1]), maskBytes[:]) != nil {
+		return int64(EFAULT)
+	}
+	mask := binary.LittleEndian.Uint64(maskBytes[:])
+	if args[0] != ^uint64(0) {
+		if args[0] > maxFD64 {
+			return int64(EBADF)
+		}
+		file, err := ctx.GetFile(args[0])
+		if err != nil {
+			return int64(EBADF)
+		}
+		handle, ok := file.Opaque.(*signalFD64)
+		if !ok {
+			return int64(EINVAL)
+		}
+		handle.mu.Lock()
+		handle.mask = mask
+		handle.nonblock = args[3]&sfdNonblock64 != 0
+		handle.mu.Unlock()
+		return int64(args[0])
+	}
+	handle := newSignalFD64(mask, args[3])
+	file := &corefd.File{Reader: handle, Opaque: handle, Closer: handle, Poll: handle.Poll, Cloexec: args[3]&sfdCloexec64 != 0}
+	fd, err := ctx.FDs.Open(file)
+	if err != nil {
+		return int64(ENOMEM)
+	}
+	ctx.signalFDs[handle] = struct{}{}
+	return int64(fd)
+}
+
+func kill64(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil || args[1] > sigMax64 {
+		return int64(EINVAL)
+	}
+	if args[0] != 0 && args[0] != ctx.PID {
+		return int64(ESRCH)
+	}
+	if args[1] == 0 {
+		return 0
+	}
+	for handle := range ctx.signalFDs {
+		handle.enqueue(uint32(args[1]), uint32(ctx.PID), 0)
+	}
+	return 0
+}

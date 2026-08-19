@@ -471,6 +471,73 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("MOV destination: %v", err)
 		}
 		return makeMove64(address, uint8(inst.Len), left, right), false, nil
+	case x86asm.MOVD, x86asm.MOVQ:
+		scalarWidth := uint8(4)
+		if inst.Op == x86asm.MOVQ {
+			scalarWidth = 8
+		}
+		leftWidth, rightWidth := scalarWidth, scalarWidth
+		if reg, ok := arg(0).(x86asm.Reg); ok && reg >= x86asm.X0 && reg <= x86asm.X15 {
+			leftWidth = 16
+		}
+		if reg, ok := arg(1).(x86asm.Reg); ok && reg >= x86asm.X0 && reg <= x86asm.X15 {
+			rightWidth = 16
+		}
+		left, err := operand64FromArg(arg(0), leftWidth)
+		if err != nil {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		right, err := operand64FromArg(arg(1), rightWidth)
+		if err != nil {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		if (left.Kind != operand64XMM && left.Kind != operand64Reg && left.Kind != operand64Mem) || (right.Kind != operand64XMM && right.Kind != operand64Reg && right.Kind != operand64Mem) || (left.Kind == operand64Mem && right.Kind == operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s unsupported operands", inst.Op)
+		}
+		if left.Kind != operand64XMM && right.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s requires an XMM operand", inst.Op)
+		}
+		return makeMOVScalar64(address, uint8(inst.Len), scalarWidth, left, right), false, nil
+	case x86asm.BSWAP:
+		destination, err := operand64FromArg(arg(0), 0)
+		if err != nil || destination.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("BSWAP destination: %v", err)
+		}
+		return makeBSWAP64(address, uint8(inst.Len), destination), false, nil
+	case x86asm.BSF, x86asm.BSR:
+		destination, err := operand64FromArg(arg(0), 0)
+		if err != nil || destination.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), destination.Width)
+		if err != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeBitScan64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.POPCNT:
+		destination, err := operand64FromArg(arg(0), 0)
+		if err != nil || destination.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("POPCNT destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), destination.Width)
+		if err != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("POPCNT source: %v", err)
+		}
+		return makePOPCNT64(address, uint8(inst.Len), destination, source), false, nil
+	case x86asm.BT, x86asm.BTS, x86asm.BTR, x86asm.BTC:
+		destination, err := operand64FromArg(arg(0), width)
+		if err != nil || (destination.Kind != operand64Reg && destination.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		index, err := operand64FromArg(arg(1), width)
+		if err != nil || (index.Kind != operand64Reg && index.Kind != operand64Imm) {
+			return microOp64{}, false, fmt.Errorf("%s bit index: %v", inst.Op, err)
+		}
+		return makeBitTest64(address, uint8(inst.Len), inst.Op, destination, index), false, nil
+	case x86asm.PUSHF, x86asm.PUSHFQ:
+		return makePushFlags64(address, uint8(inst.Len)), false, nil
+	case x86asm.POPF, x86asm.POPFQ:
+		return makePopFlags64(address, uint8(inst.Len)), false, nil
 	case x86asm.MOVZX, x86asm.MOVSX:
 		destination, err := operand64FromArg(arg(0), 0)
 		if err != nil || destination.Kind != operand64Reg {
@@ -493,6 +560,53 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("extend source: %v", err)
 		}
 		return makeExtend64(address, uint8(inst.Len), inst.Op == x86asm.MOVSX, destination, source), false, nil
+	case x86asm.SHL, x86asm.SHR, x86asm.SAR, x86asm.ROL, x86asm.ROR, x86asm.RCL, x86asm.RCR:
+		destination, err := operand64FromArg(arg(0), width)
+		if err != nil || (destination.Kind != operand64Reg && destination.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		count, err := operand64FromArg(arg(1), 1)
+		if err != nil || (count.Kind != operand64Reg && count.Kind != operand64Imm) {
+			return microOp64{}, false, fmt.Errorf("%s count: %v", inst.Op, err)
+		}
+		return makeShift64(address, uint8(inst.Len), inst.Op, destination, count), false, nil
+	case x86asm.MUL, x86asm.DIV, x86asm.IDIV:
+		if arg(0) == nil || arg(1) != nil {
+			return microOp64{}, false, fmt.Errorf("%s requires one operand", inst.Op)
+		}
+		source, err := operand64FromArg(arg(0), width)
+		if err != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeImplicitArithmetic64(address, uint8(inst.Len), inst.Op, source, width), false, nil
+	case x86asm.IMUL:
+		if arg(0) == nil {
+			return microOp64{}, false, errors.New("IMUL requires an operand")
+		}
+		if arg(1) == nil {
+			source, err := operand64FromArg(arg(0), width)
+			if err != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+				return microOp64{}, false, fmt.Errorf("IMUL source: %v", err)
+			}
+			return makeImplicitArithmetic64(address, uint8(inst.Len), inst.Op, source, width), false, nil
+		}
+		destination, err := operand64FromArg(arg(0), width)
+		if err != nil || destination.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("IMUL destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), width)
+		if err != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("IMUL source: %v", err)
+		}
+		if arg(2) == nil {
+			return makeExplicitIMul64(address, uint8(inst.Len), destination, destination, source, width), false, nil
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, errors.New("IMUL third operand must be immediate")
+		}
+		multiplier := operand64{Kind: operand64Imm, Imm: uint64(immediate), Width: width}
+		return makeExplicitIMul64(address, uint8(inst.Len), destination, source, multiplier, width), false, nil
 	case x86asm.ADD, x86asm.SUB, x86asm.XOR, x86asm.AND, x86asm.OR, x86asm.CMP, x86asm.TEST:
 		left, right, err := two()
 		if err != nil {
@@ -629,6 +743,24 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return Flow64Continue, nil
 		}}, false, nil
 	default:
+		if condition, ok := decodeSETcc64(inst.Op); ok {
+			destination, err := operand64FromArg(arg(0), 1)
+			if err != nil || (destination.Kind != operand64Reg && destination.Kind != operand64Mem) {
+				return microOp64{}, false, fmt.Errorf("SETcc destination: %v", err)
+			}
+			return makeSETcc64(address, uint8(inst.Len), condition, destination), false, nil
+		}
+		if condition, ok := decodeCMOVcc64(inst.Op); ok {
+			destination, err := operand64FromArg(arg(0), width)
+			if err != nil || destination.Kind != operand64Reg {
+				return microOp64{}, false, fmt.Errorf("CMOVcc destination: %v", err)
+			}
+			source, err := operand64FromArg(arg(1), width)
+			if err != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+				return microOp64{}, false, fmt.Errorf("CMOVcc source: %v", err)
+			}
+			return makeCMOVcc64(address, uint8(inst.Len), condition, destination, source), false, nil
+		}
 		if condition, ok := decodeCondition64(inst.Op); ok {
 			value, err := operand64FromArg(arg(0), 8)
 			if err != nil {
@@ -638,6 +770,319 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		}
 		return microOp64{}, false, fmt.Errorf("%s", inst.Op)
 	}
+}
+
+func normalizeArithmeticWidth64(width uint8) uint8 {
+	switch width {
+	case 1, 2, 4, 8:
+		return width
+	default:
+		return 8
+	}
+}
+
+func signExtend64Width(value uint64, width uint8) int64 {
+	width = normalizeArithmeticWidth64(width)
+	mask := mask64Width(width)
+	value &= mask
+	sign := uint64(1) << (uint(width)*8 - 1)
+	if value&sign != 0 {
+		value |= ^mask
+	}
+	return int64(value)
+}
+
+func negate12864(hi, lo uint64) (uint64, uint64) {
+	lo = ^lo + 1
+	hi = ^hi
+	if lo == 0 {
+		hi++
+	}
+	return hi, lo
+}
+
+func mulWide64(left, right uint64, width uint8, signed bool) (hi, lo uint64, overflow bool) {
+	width = normalizeArithmeticWidth64(width)
+	mask := mask64Width(width)
+	left &= mask
+	right &= mask
+	if !signed {
+		hi, lo = bits.Mul64(left, right)
+	} else {
+		leftSigned := signExtend64Width(left, width)
+		rightSigned := signExtend64Width(right, width)
+		negative := (leftSigned < 0) != (rightSigned < 0)
+		leftMagnitude := uint64(leftSigned)
+		rightMagnitude := uint64(rightSigned)
+		if leftSigned < 0 {
+			leftMagnitude = ^leftMagnitude + 1
+		}
+		if rightSigned < 0 {
+			rightMagnitude = ^rightMagnitude + 1
+		}
+		hi, lo = bits.Mul64(leftMagnitude, rightMagnitude)
+		if negative {
+			hi, lo = negate12864(hi, lo)
+		}
+	}
+	bitsInWidth := uint(width) * 8
+	if width < 8 {
+		high := (lo >> bitsInWidth) | (hi << (64 - bitsInWidth))
+		lo &= mask
+		hi = high & mask
+	}
+	if signed {
+		expected := uint64(0)
+		if lo&(uint64(1)<<(bitsInWidth-1)) != 0 {
+			expected = mask
+		}
+		overflow = hi != expected
+	} else {
+		overflow = hi != 0
+	}
+	return hi, lo, overflow
+}
+
+func setMultiplyFlags64(state *MachineState64, overflow bool) {
+	state.CF = boolByte64(overflow)
+	state.OF = boolByte64(overflow)
+	state.Lazy = 0
+}
+
+func makeShift64(address uint64, size uint8, op x86asm.Op, destination, countOperand operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readOperand64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		count, err := readOperand64(state, countOperand, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		width := normalizeArithmeticWidth64(destination.Width)
+		bitsInWidth := uint64(width) * 8
+		countMask := uint64(0x1f)
+		if width == 8 {
+			countMask = 0x3f
+		}
+		count &= countMask
+		throughCarry := op == x86asm.RCL || op == x86asm.RCR
+		if op == x86asm.ROL || op == x86asm.ROR {
+			count %= uint64(bitsInWidth)
+		} else if throughCarry {
+			count %= uint64(bitsInWidth + 1)
+		}
+		if count == 0 {
+			state.RIP = next
+			return Flow64Continue, nil
+		}
+		mask := mask64Width(width)
+		value &= mask
+		var result uint64
+		var carry, overflow bool
+		switch op {
+		case x86asm.SHL:
+			result = (value << count) & mask
+			carry = ((value >> (bitsInWidth - count)) & 1) != 0
+			if count == 1 {
+				overflow = ((result ^ value) & (uint64(1) << (bitsInWidth - 1))) != 0
+			}
+		case x86asm.SHR:
+			result = value >> count
+			carry = ((value >> (count - 1)) & 1) != 0
+			if count == 1 {
+				overflow = (value & (uint64(1) << (bitsInWidth - 1))) != 0
+			}
+		case x86asm.SAR:
+			result = uint64(signExtend64Width(value, width)>>count) & mask
+			carry = ((value >> (count - 1)) & 1) != 0
+		case x86asm.ROL:
+			result = ((value << count) | (value >> (bitsInWidth - count))) & mask
+			carry = (result & 1) != 0
+			if count == 1 {
+				overflow = ((result >> (bitsInWidth - 1)) & 1) != boolToUint64(carry)
+			}
+		case x86asm.ROR:
+			result = ((value >> count) | (value << (bitsInWidth - count))) & mask
+			carry = (result>>(bitsInWidth-1))&1 != 0
+			if count == 1 {
+				overflow = ((result >> (bitsInWidth - 1)) & 1) != ((result >> (bitsInWidth - 2)) & 1)
+			}
+		case x86asm.RCL, x86asm.RCR:
+			carryIn := state.Flag(Flag64CF)
+			for i := uint64(0); i < count; i++ {
+				if op == x86asm.RCL {
+					carry = (value & (uint64(1) << (bitsInWidth - 1))) != 0
+					value = ((value << 1) & mask) | boolToUint64(carryIn)
+				} else {
+					carry = (value & 1) != 0
+					value = (value >> 1) | (boolToUint64(carryIn) << (bitsInWidth - 1))
+				}
+				carryIn = carry
+			}
+			result = value
+			if count == 1 {
+				if op == x86asm.RCL {
+					overflow = ((result >> (bitsInWidth - 1)) & 1) != boolToUint64(carry)
+				} else {
+					overflow = ((result >> (bitsInWidth - 1)) & 1) != ((result >> (bitsInWidth - 2)) & 1)
+				}
+			}
+		default:
+			return Flow64Stop, ErrUnsupported64
+		}
+		if op == x86asm.ROL || op == x86asm.ROR || op == x86asm.RCL || op == x86asm.RCR {
+			state.CF = boolByte64(carry)
+			state.OF = boolByte64(overflow)
+		} else {
+			state.SetLazyArithmeticWidth(value, count, result, carry, overflow, false, width)
+		}
+		if err := writeOperand64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func boolToUint64(value bool) uint64 {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func makeImplicitArithmetic64(address uint64, size uint8, op x86asm.Op, source operand64, width uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readOperand64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		width = normalizeArithmeticWidth64(width)
+		if op == x86asm.MUL || op == x86asm.IMUL {
+			hi, lo, overflow := mulWide64(readReg64(state, operand64{Kind: operand64Reg, Reg: RAX, Width: width}), value, width, op == x86asm.IMUL)
+			writeReg64(state, operand64{Kind: operand64Reg, Reg: RAX, Width: width}, lo)
+			writeReg64(state, operand64{Kind: operand64Reg, Reg: RDX, Width: width}, hi)
+			setMultiplyFlags64(state, overflow)
+			state.RIP = next
+			return Flow64Continue, nil
+		}
+		var quotient, remainder uint64
+		if op == x86asm.DIV {
+			quotient, remainder, err = divideUnsigned64(state, value, width)
+		} else {
+			quotient, remainder, err = divideSigned64(state, value, width)
+		}
+		if err != nil {
+			return Flow64Stop, err
+		}
+		writeReg64(state, operand64{Kind: operand64Reg, Reg: RAX, Width: width}, quotient)
+		writeReg64(state, operand64{Kind: operand64Reg, Reg: RDX, Width: width}, remainder)
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeExplicitIMul64(address uint64, size uint8, destination, leftOperand, rightOperand operand64, width uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readOperand64(state, leftOperand, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readOperand64(state, rightOperand, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		_, result, overflow := mulWide64(left, right, width, true)
+		if err := writeOperand64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		setMultiplyFlags64(state, overflow)
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func divideUnsigned64(state *MachineState64, divisor uint64, width uint8) (uint64, uint64, error) {
+	width = normalizeArithmeticWidth64(width)
+	mask := mask64Width(width)
+	divisor &= mask
+	if divisor == 0 {
+		return 0, 0, ErrDivisionByZero
+	}
+	if width < 8 {
+		bitsInWidth := uint(width) * 8
+		dividend := ((state.Get(RDX) & mask) << bitsInWidth) | (state.Get(RAX) & mask)
+		quotient := dividend / divisor
+		if quotient > mask {
+			return 0, 0, ErrDivisionOverflow
+		}
+		return quotient, dividend % divisor, nil
+	}
+	hi, lo := state.Get(RDX), state.Get(RAX)
+	if hi >= divisor {
+		return 0, 0, ErrDivisionOverflow
+	}
+	quotient, remainder := bits.Div64(hi, lo, divisor)
+	return quotient, remainder, nil
+}
+
+func divideSigned64(state *MachineState64, divisor uint64, width uint8) (uint64, uint64, error) {
+	width = normalizeArithmeticWidth64(width)
+	if width < 8 {
+		bitsInWidth := uint(width) * 8
+		dividend := (signExtend64Width(state.Get(RDX), width) << bitsInWidth) | int64(state.Get(RAX)&mask64Width(width))
+		divisorSigned := signExtend64Width(divisor, width)
+		if divisorSigned == 0 {
+			return 0, 0, ErrDivisionByZero
+		}
+		minimum := int64(-1) << (bitsInWidth - 1)
+		maximum := int64(1)<<(bitsInWidth-1) - 1
+		if dividend == minimum && divisorSigned == -1 {
+			return 0, 0, ErrDivisionOverflow
+		}
+		quotient, remainder := dividend/divisorSigned, dividend%divisorSigned
+		if quotient < minimum || quotient > maximum {
+			return 0, 0, ErrDivisionOverflow
+		}
+		return uint64(quotient) & mask64Width(width), uint64(remainder) & mask64Width(width), nil
+	}
+	divisorSigned := int64(divisor)
+	if divisorSigned == 0 {
+		return 0, 0, ErrDivisionByZero
+	}
+	hi, lo := state.Get(RDX), state.Get(RAX)
+	negativeDividend := hi>>63 != 0
+	magnitudeHi, magnitudeLo := hi, lo
+	if negativeDividend {
+		magnitudeHi, magnitudeLo = negate12864(magnitudeHi, magnitudeLo)
+	}
+	negativeDivisor := divisorSigned < 0
+	magnitudeDivisor := divisor
+	if negativeDivisor {
+		magnitudeDivisor = ^magnitudeDivisor + 1
+	}
+	if magnitudeHi >= magnitudeDivisor {
+		return 0, 0, ErrDivisionOverflow
+	}
+	quotientMagnitude, remainderMagnitude := bits.Div64(magnitudeHi, magnitudeLo, magnitudeDivisor)
+	negativeQuotient := negativeDividend != negativeDivisor
+	limit := ^uint64(0) >> 1
+	if negativeQuotient {
+		limit++
+	}
+	if quotientMagnitude > limit {
+		return 0, 0, ErrDivisionOverflow
+	}
+	quotient := quotientMagnitude
+	if negativeQuotient {
+		quotient = ^quotient + 1
+	}
+	remainder := remainderMagnitude
+	if negativeDividend {
+		remainder = ^remainder + 1
+	}
+	return quotient, remainder, nil
 }
 
 func readReg64(state *MachineState64, operand operand64) uint64 {
@@ -1117,7 +1562,7 @@ func makeCarryBinary64(address uint64, size uint8, op x86asm.Op, dst, src operan
 			sign := uint64(1) << (uint(dst.Width)*8 - 1)
 			overflow = ((left ^ right) & (left ^ result) & sign) != 0
 		}
-		state.SetLazyArithmetic(left, right, result, carry, overflow, true)
+		state.SetLazyArithmeticWidth(left, right, result, carry, overflow, true, dst.Width)
 		if err := writeOperand64(state, dst, next, result); err != nil {
 			return Flow64Stop, err
 		}
@@ -1194,23 +1639,23 @@ func makeBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) 
 			var carry bool
 			result, carry = addWithCarry64(left, right, 0, dst.Width)
 			sign := uint64(1) << (uint(dst.Width)*8 - 1)
-			state.SetLazyArithmetic(left, right, result, carry, ((^(left ^ right))&(left^result)&sign) != 0, true)
+			state.SetLazyArithmeticWidth(left, right, result, carry, ((^(left ^ right))&(left^result)&sign) != 0, true, dst.Width)
 		case x86asm.SUB, x86asm.CMP:
 			var borrow bool
 			result, borrow = subWithBorrow64(left, right, 0, dst.Width)
 			sign := uint64(1) << (uint(dst.Width)*8 - 1)
 			result &= mask
 			subtraction = true
-			state.SetLazyArithmetic(left, right, result, borrow, (((left ^ right) & (left ^ result) & sign) != 0), true)
+			state.SetLazyArithmeticWidth(left, right, result, borrow, (((left ^ right) & (left ^ result) & sign) != 0), true, dst.Width)
 		case x86asm.XOR:
 			result = (left ^ right) & mask
-			state.SetLazyArithmetic(left, right, result, false, false, false)
+			state.SetLazyArithmeticWidth(left, right, result, false, false, false, dst.Width)
 		case x86asm.AND, x86asm.TEST:
 			result = (left & right) & mask
-			state.SetLazyArithmetic(left, right, result, false, false, false)
+			state.SetLazyArithmeticWidth(left, right, result, false, false, false, dst.Width)
 		case x86asm.OR:
 			result = (left | right) & mask
-			state.SetLazyArithmetic(left, right, result, false, false, false)
+			state.SetLazyArithmeticWidth(left, right, result, false, false, false, dst.Width)
 		default:
 			return Flow64Stop, ErrUnsupported64
 		}
@@ -1292,7 +1737,7 @@ func makeXadd64(address uint64, size uint8, dst, src operand64) microOp64 {
 		srcValue &= mask
 		result, carry := bits.Add64(old, srcValue, 0)
 		result &= mask
-		state.SetLazyArithmetic(old, srcValue, result, carry != 0, ((^(old ^ srcValue))&(old^result)&(mask^(mask>>1))) != 0, true)
+		state.SetLazyArithmeticWidth(old, srcValue, result, carry != 0, ((^(old ^ srcValue))&(old^result)&(mask^(mask>>1))) != 0, true, src.Width)
 		if err := writeOperand64(state, src, next, old); err != nil {
 			return Flow64Stop, err
 		}
@@ -1331,7 +1776,7 @@ func makeCmpxchg64(address uint64, size uint8, dst, src operand64) microOp64 {
 		observed &= mask
 		result, borrow := bits.Sub64(accValue, observed, 0)
 		result &= mask
-		state.SetLazyArithmetic(accValue, observed, result, borrow != 0, (((accValue ^ observed) & (accValue ^ result) & (mask ^ (mask >> 1))) != 0), true)
+		state.SetLazyArithmeticWidth(accValue, observed, result, borrow != 0, (((accValue ^ observed) & (accValue ^ result) & (mask ^ (mask >> 1))) != 0), true, src.Width)
 		if accValue != observed {
 			writeReg64(state, accumulator, observed)
 		}
@@ -1362,11 +1807,217 @@ func makeUnary64(address uint64, size uint8, op x86asm.Op, dst operand64) microO
 			return Flow64Stop, ErrUnsupported64
 		}
 		if op != x86asm.NOT {
-			state.SetLazyArithmetic(value, 1, result, op == x86asm.DEC || op == x86asm.NEG, false, true)
+			state.SetLazyArithmeticWidth(value, 1, result, op == x86asm.DEC || op == x86asm.NEG, false, true, dst.Width)
 		}
 		if err := writeOperand64(state, dst, next, result); err != nil {
 			return Flow64Stop, err
 		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeMOVScalar64(address uint64, size, scalarWidth uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		var value uint64
+		if source.Kind == operand64XMM {
+			if source.XMM >= uint8(len(state.XMM)) {
+				return Flow64Stop, ErrUnsupported64
+			}
+			for i := uint8(0); i < scalarWidth; i++ {
+				value |= uint64(state.XMM[source.XMM][i]) << (8 * i)
+			}
+		} else {
+			var err error
+			value, err = readOperand64(state, source, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+		}
+
+		if destination.Kind == operand64XMM {
+			if destination.XMM >= uint8(len(state.XMM)) {
+				return Flow64Stop, ErrUnsupported64
+			}
+			state.XMM[destination.XMM] = [16]byte{}
+			for i := uint8(0); i < scalarWidth; i++ {
+				state.XMM[destination.XMM][i] = byte(value >> (8 * i))
+			}
+		} else if err := writeOperand64(state, destination, next, value); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeBSWAP64(address uint64, size uint8, destination operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value := readReg64(state, destination)
+		switch destination.Width {
+		case 2:
+			value = uint64(bits.ReverseBytes16(uint16(value)))
+		case 4:
+			value = uint64(bits.ReverseBytes32(uint32(value)))
+		case 8:
+			value = bits.ReverseBytes64(value)
+		default:
+			return Flow64Stop, ErrUnsupported64
+		}
+		writeReg64(state, destination, value)
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeBitScan64(address uint64, size uint8, op x86asm.Op, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readOperand64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+
+		if value == 0 {
+			state.CollapseFlags()
+			state.RFLAGS |= Flag64ZF
+			state.ExpandFlags()
+			state.RIP = next
+			return Flow64Continue, nil
+		}
+		var index uint
+		if op == x86asm.BSF {
+			if destination.Width == 8 {
+				index = uint(bits.TrailingZeros64(value))
+			} else {
+				index = uint(bits.TrailingZeros32(uint32(value)))
+			}
+		} else {
+			if destination.Width == 8 {
+				index = uint(63 - bits.LeadingZeros64(value))
+			} else {
+				index = uint(31 - bits.LeadingZeros32(uint32(value)))
+			}
+		}
+		writeReg64(state, destination, uint64(index))
+
+		state.CollapseFlags()
+		state.RFLAGS &^= Flag64ZF
+		state.ExpandFlags()
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makePOPCNT64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readOperand64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var count uint64
+		if destination.Width == 8 {
+			count = uint64(bits.OnesCount64(value))
+		} else if destination.Width == 4 {
+			count = uint64(bits.OnesCount32(uint32(value)))
+		} else {
+			count = uint64(bits.OnesCount16(uint16(value)))
+		}
+		writeReg64(state, destination, count)
+		state.CollapseFlags()
+		state.RFLAGS &^= Flag64CF | Flag64PF | Flag64AF | Flag64SF | Flag64OF | Flag64ZF
+		if count == 0 {
+			state.RFLAGS |= Flag64ZF
+		}
+		state.ExpandFlags()
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func bitTestTarget64(state *MachineState64, destination, index operand64, next uint64) (operand64, uint64, error) {
+	bitWidth := uint64(destination.Width) * 8
+	if bitWidth == 0 {
+		return operand64{}, 0, ErrUnsupported64
+	}
+	bitIndex, err := readOperand64(state, index, next)
+	if err != nil {
+		return operand64{}, 0, err
+	}
+	if destination.Kind != operand64Mem {
+		return destination, bitIndex & (bitWidth - 1), nil
+	}
+	element := int64(bitIndex) / int64(bitWidth)
+	bit := bitIndex & (bitWidth - 1)
+	target := destination
+	target.Mem.Disp += element * int64(destination.Width)
+	return target, bit, nil
+}
+
+func makeBitTest64(address uint64, size uint8, op x86asm.Op, destination, index operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		target, bitIndex, err := bitTestTarget64(state, destination, index, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		value, err := readOperand64(state, target, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		bit := uint64(1) << bitIndex
+		oldSet := value&bit != 0
+		state.CollapseFlags()
+		if oldSet {
+			state.RFLAGS |= Flag64CF
+		} else {
+			state.RFLAGS &^= Flag64CF
+		}
+		state.ExpandFlags()
+		switch op {
+		case x86asm.BTS:
+			value |= bit
+		case x86asm.BTR:
+			value &^= bit
+		case x86asm.BTC:
+			value ^= bit
+		case x86asm.BT:
+			return setBitTestResult64(state, next), nil
+		default:
+			return Flow64Stop, ErrUnsupported64
+		}
+		if err := writeOperand64(state, target, next, value); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func setBitTestResult64(state *MachineState64, next uint64) Flow64 {
+	state.RIP = next
+	return Flow64Continue
+}
+
+func makePushFlags64(address uint64, size uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		state.CollapseFlags()
+		state.Regs[RSP] -= 8
+		if err := state.Memory.WriteUint64(Address64(state.Regs[RSP]), state.RFLAGS); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makePopFlags64(address uint64, size uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := state.Memory.ReadUint64(Address64(state.Regs[RSP]))
+		if err != nil {
+			return Flow64Stop, err
+		}
+		state.Regs[RSP] += 8
+		state.SetRFLAGS(value)
+		state.RFLAGS |= Flag64IF
 		state.RIP = next
 		return Flow64Continue, nil
 	}}
@@ -1468,6 +2119,84 @@ const (
 	condition64LE
 )
 
+func decodeSETcc64(op x86asm.Op) (conditionCode64, bool) {
+	switch op {
+	case x86asm.SETO:
+		return condition64O, true
+	case x86asm.SETNO:
+		return condition64O | 0x80, true
+	case x86asm.SETB:
+		return condition64B, true
+	case x86asm.SETAE:
+		return condition64B | 0x80, true
+	case x86asm.SETE:
+		return condition64E, true
+	case x86asm.SETNE:
+		return condition64E | 0x80, true
+	case x86asm.SETBE:
+		return condition64BE, true
+	case x86asm.SETA:
+		return condition64BE | 0x80, true
+	case x86asm.SETS:
+		return condition64S, true
+	case x86asm.SETNS:
+		return condition64S | 0x80, true
+	case x86asm.SETP:
+		return condition64P, true
+	case x86asm.SETNP:
+		return condition64P | 0x80, true
+	case x86asm.SETL:
+		return condition64L, true
+	case x86asm.SETGE:
+		return condition64L | 0x80, true
+	case x86asm.SETLE:
+		return condition64LE, true
+	case x86asm.SETG:
+		return condition64LE | 0x80, true
+	default:
+		return 0, false
+	}
+}
+
+func decodeCMOVcc64(op x86asm.Op) (conditionCode64, bool) {
+	switch op {
+	case x86asm.CMOVO:
+		return condition64O, true
+	case x86asm.CMOVNO:
+		return condition64O | 0x80, true
+	case x86asm.CMOVB:
+		return condition64B, true
+	case x86asm.CMOVAE:
+		return condition64B | 0x80, true
+	case x86asm.CMOVE:
+		return condition64E, true
+	case x86asm.CMOVNE:
+		return condition64E | 0x80, true
+	case x86asm.CMOVBE:
+		return condition64BE, true
+	case x86asm.CMOVA:
+		return condition64BE | 0x80, true
+	case x86asm.CMOVS:
+		return condition64S, true
+	case x86asm.CMOVNS:
+		return condition64S | 0x80, true
+	case x86asm.CMOVP:
+		return condition64P, true
+	case x86asm.CMOVNP:
+		return condition64P | 0x80, true
+	case x86asm.CMOVL:
+		return condition64L, true
+	case x86asm.CMOVGE:
+		return condition64L | 0x80, true
+	case x86asm.CMOVLE:
+		return condition64LE, true
+	case x86asm.CMOVG:
+		return condition64LE | 0x80, true
+	default:
+		return 0, false
+	}
+}
+
 func decodeCondition64(op x86asm.Op) (conditionCode64, bool) {
 	switch op {
 	case x86asm.JO:
@@ -1534,6 +2263,36 @@ func conditionValue64(state *MachineState64, condition conditionCode64) bool {
 		return !value
 	}
 	return value
+}
+
+func makeSETcc64(address uint64, size uint8, condition conditionCode64, destination operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value := uint64(0)
+		if conditionValue64(state, condition) {
+			value = 1
+		}
+		if err := writeOperand64(state, destination, next, value); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeCMOVcc64(address uint64, size uint8, condition conditionCode64, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if conditionValue64(state, condition) {
+			value, err := readOperand64(state, source, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			if err := writeOperand64(state, destination, next, value); err != nil {
+				return Flow64Stop, err
+			}
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
 }
 
 func makeJcc64(address uint64, size uint8, condition conditionCode64, target operand64) microOp64 {

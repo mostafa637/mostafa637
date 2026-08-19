@@ -100,12 +100,13 @@ type MachineState64 struct {
 	RIP    uint64
 	RFLAGS uint64
 
-	CF   uint8
-	OF   uint8
-	Res  uint64
-	Op1  uint64
-	Op2  uint64
-	Lazy uint8
+	CF        uint8
+	OF        uint8
+	Res       uint64
+	Op1       uint64
+	Op2       uint64
+	Lazy      uint8
+	LazyWidth uint8
 
 	XMM    [16][16]byte
 	FP     [8]fpu.Value
@@ -152,7 +153,11 @@ func (s *MachineState64) Flag(flag uint64) bool {
 		}
 	case Flag64SF:
 		if s.Lazy&lazy64SF != 0 {
-			return int64(s.Res) < 0
+			width := s.LazyWidth
+			if width != 1 && width != 2 && width != 4 && width != 8 {
+				width = 8
+			}
+			return s.Res&(uint64(1)<<(uint(width)*8-1)) != 0
 		}
 	case Flag64PF:
 		if s.Lazy&lazy64PF != 0 {
@@ -167,11 +172,16 @@ func (s *MachineState64) Flag(flag uint64) bool {
 }
 
 func (s *MachineState64) SetLazyArithmetic(op1, op2, result uint64, carry, overflow bool, computeAF bool) {
+	s.SetLazyArithmeticWidth(op1, op2, result, carry, overflow, computeAF, 8)
+}
+
+func (s *MachineState64) SetLazyArithmeticWidth(op1, op2, result uint64, carry, overflow bool, computeAF bool, width uint8) {
 	s.Op1 = op1
 	s.Op2 = op2
 	s.Res = result
 	s.CF = boolByte64(carry)
 	s.OF = boolByte64(overflow)
+	s.LazyWidth = width
 	s.Lazy = lazy64PF | lazy64ZF | lazy64SF
 	if computeAF {
 		s.Lazy |= lazy64AF
@@ -190,12 +200,14 @@ func (s *MachineState64) CollapseFlags() {
 	s.CF = boolByte64(s.RFLAGS&Flag64CF != 0)
 	s.OF = boolByte64(s.RFLAGS&Flag64OF != 0)
 	s.Lazy = 0
+	s.LazyWidth = 0
 }
 
 func (s *MachineState64) ExpandFlags() {
 	s.CF = boolByte64(s.RFLAGS&Flag64CF != 0)
 	s.OF = boolByte64(s.RFLAGS&Flag64OF != 0)
 	s.Lazy = 0
+	s.LazyWidth = 0
 }
 
 func (s *MachineState64) SetRFLAGS(value uint64) {

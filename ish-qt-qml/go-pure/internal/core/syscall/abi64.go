@@ -99,13 +99,14 @@ const (
 type Handler64 func(*Context64, [6]uint64) int64
 
 type Context64 struct {
-	Memory *corecpu.Memory64
-	FS     *corefs.FS
-	CWD    string
-	PID    uint64
-	TID    uint64
-	Brk    uint64
-	FDs    *corefd.Table
+	Memory    *corecpu.Memory64
+	FS        *corefs.FS
+	CWD       string
+	PID       uint64
+	TID       uint64
+	Brk       uint64
+	FDs       *corefd.Table
+	signalFDs map[*signalFD64]struct{}
 }
 
 type Dispatcher64 struct {
@@ -114,7 +115,7 @@ type Dispatcher64 struct {
 }
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
-	return &Context64{Memory: memory, CWD: "/", FDs: corefd.New()}
+	return &Context64{Memory: memory, CWD: "/", FDs: corefd.New(), signalFDs: make(map[*signalFD64]struct{})}
 }
 
 const maxFD64 = uint64(^uint32(0) >> 1)
@@ -180,6 +181,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Sendto, sendto64)
 	d.Register(Sys64Recvfrom, recvfrom64)
 	d.Register(Sys64Shutdown, shutdown64)
+	d.Register(Sys64Kill, kill64)
+	d.Register(Sys64Signalfd4, signalfd4_64)
 	d.Register(Sys64Eventfd2, eventfd2_64)
 	d.Register(Sys64TimerfdCreate, timerfdCreate64)
 	d.Register(Sys64TimerfdSettime, timerfdSettime64)
@@ -251,6 +254,9 @@ func read64(ctx *Context64, args [6]uint64) int64 {
 		}
 	}
 	if readErr != nil && readErr != io.EOF && n == 0 {
+		if readErr == errWouldBlock64 {
+			return int64(EAGAIN)
+		}
 		return int64(EIO)
 	}
 	return int64(n)
