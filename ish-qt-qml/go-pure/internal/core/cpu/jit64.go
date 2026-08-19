@@ -481,7 +481,11 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("SSE move source: %v", err)
 		}
 		return makeSSEMove64(address, uint8(inst.Len), left, right), false, nil
-	case x86asm.PXOR, x86asm.PAND, x86asm.POR:
+	case x86asm.PXOR, x86asm.PAND, x86asm.POR, x86asm.PANDN,
+		x86asm.PADDB, x86asm.PADDW, x86asm.PADDD, x86asm.PADDQ,
+		x86asm.PSUBB, x86asm.PSUBW, x86asm.PSUBD, x86asm.PSUBQ,
+		x86asm.PCMPEQB, x86asm.PCMPEQW, x86asm.PCMPEQD, x86asm.PCMPEQQ:
+
 		left, err := operand64FromArg(arg(0), 16)
 		if err != nil || left.Kind != operand64XMM {
 			return microOp64{}, false, fmt.Errorf("SSE ALU destination: %v", err)
@@ -944,6 +948,21 @@ func makeSSEMove64(address uint64, size uint8, dst, src operand64) microOp64 {
 	}}
 }
 
+func sseLaneWidth64(op x86asm.Op) (int, bool) {
+	switch op {
+	case x86asm.PADDB, x86asm.PSUBB, x86asm.PCMPEQB:
+		return 1, true
+	case x86asm.PADDW, x86asm.PSUBW, x86asm.PCMPEQW:
+		return 2, true
+	case x86asm.PADDD, x86asm.PSUBD, x86asm.PCMPEQD:
+		return 4, true
+	case x86asm.PADDQ, x86asm.PSUBQ, x86asm.PCMPEQQ:
+		return 8, true
+	default:
+		return 0, false
+	}
+}
+
 func makeSSEBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
 	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
 		left, err := readVector64(state, dst, next)
@@ -954,16 +973,44 @@ func makeSSEBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand6
 		if err != nil {
 			return Flow64Stop, err
 		}
-		for i := range left {
-			switch op {
-			case x86asm.PXOR:
-				left[i] ^= right[i]
-			case x86asm.PAND:
-				left[i] &= right[i]
-			case x86asm.POR:
-				left[i] |= right[i]
-			default:
+		if op == x86asm.PXOR || op == x86asm.PAND || op == x86asm.POR || op == x86asm.PANDN {
+			for i := range left {
+				switch op {
+				case x86asm.PXOR:
+					left[i] ^= right[i]
+				case x86asm.PAND:
+					left[i] &= right[i]
+				case x86asm.POR:
+					left[i] |= right[i]
+				case x86asm.PANDN:
+					left[i] = (^left[i]) & right[i]
+				}
+			}
+		} else {
+			lane, ok := sseLaneWidth64(op)
+			if !ok {
 				return Flow64Stop, ErrUnsupported64
+			}
+			for offset := 0; offset < len(left); offset += lane {
+				var l, r uint64
+				for i := 0; i < lane; i++ {
+					l |= uint64(left[offset+i]) << (8 * i)
+					r |= uint64(right[offset+i]) << (8 * i)
+				}
+				var result uint64
+				switch op {
+				case x86asm.PADDB, x86asm.PADDW, x86asm.PADDD, x86asm.PADDQ:
+					result = l + r
+				case x86asm.PSUBB, x86asm.PSUBW, x86asm.PSUBD, x86asm.PSUBQ:
+					result = l - r
+				case x86asm.PCMPEQB, x86asm.PCMPEQW, x86asm.PCMPEQD, x86asm.PCMPEQQ:
+					if l == r {
+						result = (uint64(1) << (8 * lane)) - 1
+					}
+				}
+				for i := 0; i < lane; i++ {
+					left[offset+i] = byte(result >> (8 * i))
+				}
 			}
 		}
 		if err := writeVector64(state, dst, next, left); err != nil {

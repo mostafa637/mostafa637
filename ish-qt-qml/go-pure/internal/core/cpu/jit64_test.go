@@ -230,3 +230,54 @@ func TestJIT64X87StackAndMemory(t *testing.T) {
 		t.Fatalf("FPU top=%d, want 7 after one pop", state.FPUTop())
 	}
 }
+
+func TestJIT64SSE2PackedArithmetic(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x7000
+	const dataAddress Address64 = 0x9000
+	code := []byte{
+		0x66, 0x0f, 0x6f, 0x07, // movdqa xmm0, [rdi]
+		0x66, 0x0f, 0x6f, 0x4f, 0x10, // movdqa xmm1, [rdi+16]
+		0x66, 0x0f, 0xd4, 0xc1, // paddq xmm0, xmm1
+		0x66, 0x0f, 0x76, 0xc1, // pcmpeqd xmm0, xmm1
+		0x66, 0x0f, 0xdf, 0xc1, // pandn xmm0, xmm1
+		0xf3, 0x0f, 0x7f, 0x47, 0x20, // movdqu [rdi+32], xmm0
+		0xf4, // hlt
+	}
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	left := [16]byte{1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0}
+	right := [16]byte{3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0}
+	if err := memory.Write(dataAddress, left[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(dataAddress+16, right[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v", trap, state.Halted)
+	}
+	var output [16]byte
+	if err := memory.Read(dataAddress+32, output[:]); err != nil {
+		t.Fatal(err)
+	}
+	var want [16]byte
+	// After PADDQ, the 32-bit lanes are [4,0,6,0], while xmm1 is
+	// [3,0,4,0]. No lane is equal, so PCMPEQD produces zero and PANDN
+	// with xmm1 leaves xmm1 unchanged.
+	want = right
+	if output != want {
+		t.Fatalf("packed output=%x want=%x", output, want)
+	}
+}
