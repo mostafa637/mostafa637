@@ -54,9 +54,6 @@ func mremap64(ctx *Context64, args [6]uint64) int64 {
 	if flags&^(mremapMayMove64|mremapFixed64|mremapDontUnmap64) != 0 || flags&mremapFixed64 != 0 && flags&mremapMayMove64 == 0 {
 		return int64(EINVAL)
 	}
-	if flags&mremapDontUnmap64 != 0 {
-		return int64(ENOSYS)
-	}
 	oldPages, ok := pagesFor64(oldSize)
 	if !ok || !mappingRangeMapped64(ctx.Memory, oldBase, oldPages) {
 		return int64(EINVAL)
@@ -72,7 +69,12 @@ func mremap64(ctx *Context64, args [6]uint64) int64 {
 		// A PROT_NONE mapping is valid; retain an explicit anonymous page flag.
 		baseFlags = corecpu.PAnonymous
 	}
-
+	if flags&mremapDontUnmap64 != 0 {
+		if flags&mremapMayMove64 == 0 {
+			return int64(EINVAL)
+		}
+		return mremapDontUnmap64Guest(ctx, oldBase, oldLength, oldPages, newSize, newPages, newLength, args[4], flags, baseFlags)
+	}
 	if newPages <= oldPages {
 		if newPages < oldPages {
 			if err := ctx.Memory.UnmapAlways(oldBase+corecpu.Address64(newLength), oldLength-newLength); err != nil {
@@ -132,6 +134,63 @@ func mremap64(ctx *Context64, args [6]uint64) int64 {
 		return int64(EINVAL)
 	}
 	ctx.updateMapping64(oldBase, oldLength, newBase, newSize, newPages)
+	return int64(newBase)
+}
+
+func mremapDontUnmap64Guest(ctx *Context64, oldBase corecpu.Address64, oldLength, oldPages, newSize, newPages, newLength, requestedBase, flags uint64, baseFlags corecpu.Flags) int64 {
+	if ctx == nil || ctx.Memory == nil || newLength == 0 {
+		return int64(EINVAL)
+	}
+	var inherited GuestMapping64
+	var hasMetadata bool
+	for _, mapping := range ctx.Mappings {
+		if mapping.Base == oldBase {
+			if mapping.Path != "" || mapping.Shared {
+				return int64(EINVAL)
+			}
+			inherited = mapping
+			hasMetadata = true
+			break
+		}
+	}
+	var newBase corecpu.Address64
+	if flags&mremapFixed64 != 0 {
+		newBase = corecpu.Address64(requestedBase)
+		if uint64(newBase)&(corecpu.Page64Size-1) != 0 || newBase == oldBase || !mappingRangeFree64(ctx.Memory, newBase, newPages) {
+			return int64(EINVAL)
+		}
+	} else {
+		var result int64
+		newBase, result = findHole64(ctx.Memory, corecpu.Address64(requestedBase), newPages, false)
+		if result != 0 {
+			return result
+		}
+		if newBase == oldBase {
+			return int64(EINVAL)
+		}
+	}
+	data, err := readRawRange64(ctx.Memory, oldBase, oldLength, oldPages)
+	if err != nil {
+		return int64(EFAULT)
+	}
+	mapFlags := baseFlags | corecpu.PWrite
+	if err := ctx.Memory.Map(newBase, newLength, mapFlags); err != nil {
+		return int64(ENOMEM)
+	}
+	if err := ctx.Memory.Write(newBase, data); err != nil {
+		_ = ctx.Memory.UnmapAlways(newBase, newLength)
+		return int64(EFAULT)
+	}
+	if err := ctx.Memory.SetFlags(newBase, newLength, baseFlags); err != nil {
+		_ = ctx.Memory.UnmapAlways(newBase, newLength)
+		return int64(EFAULT)
+	}
+	if hasMetadata {
+		inherited.Base = newBase
+		inherited.Length = newSize
+		inherited.Pages = newPages
+		ctx.addMapping64(inherited)
+	}
 	return int64(newBase)
 }
 

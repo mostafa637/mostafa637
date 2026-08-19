@@ -44,6 +44,32 @@ func TestABI64MremapAndMadvise(t *testing.T) {
 	if len(ctx.Mappings) != 0 {
 		t.Fatalf("anonymous remap metadata length = %d, want 0", len(ctx.Mappings))
 	}
+
+	if err := memory.Write(source, payload); err != nil {
+		t.Fatal(err)
+	}
+	const duplicate corecpu.Address64 = 0x34000
+	set64Syscall(state, Sys64Mremap, uint64(source), corecpu.Page64Size, corecpu.Page64Size, mremapMayMove64|mremapFixed64|mremapDontUnmap64, uint64(duplicate))
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != uint64(duplicate) {
+		t.Fatalf("mremap dontunmap: err=%v rax=%#x", err, state.Get(corecpu.RAX))
+	}
+	var original [len("mremap-payload")]byte
+	var copied [len("mremap-payload")]byte
+	if err := memory.Read(source, original[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Read(duplicate, copied[:]); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(original[:], payload) || !bytes.Equal(copied[:], payload) {
+		t.Fatalf("dontunmap payloads = %q/%q, want %q", original[:], copied[:], payload)
+	}
+	if _, ok := memory.MappingFlags(corecpu.Page64(uint64(source) >> corecpu.Page64Bits)); !ok {
+		t.Fatal("mremap dontunmap removed original mapping")
+	}
+	if _, ok := memory.MappingFlags(corecpu.Page64(uint64(duplicate) >> corecpu.Page64Bits)); !ok {
+		t.Fatal("mremap dontunmap did not create duplicate mapping")
+	}
 }
 
 func TestABI64Faccessat2(t *testing.T) {
