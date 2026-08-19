@@ -4642,3 +4642,47 @@ func TestJIT64PCMPGTQAndPACKUSDW(t *testing.T) {
 		}
 	}
 }
+
+func TestJIT64MOVNTDQAFromMemory(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x60000
+		dataAddress Address64 = 0x61000
+	)
+	memory := NewMemory64()
+	mapExecutable64(t, memory, codeAddress, []byte{
+		0x66, 0x44, 0x0f, 0x38, 0x2a, 0x07, // movntdqa xmm8,[rdi]
+		0xf4, // hlt
+	})
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	input := [16]byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+	if err := memory.Write(dataAddress, input[:]); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	for i := range state.XMM[8] {
+		state.XMM[8][i] = 0xa5
+	}
+	state.RFLAGS = Flag64IF | Flag64CF | Flag64ZF | Flag64SF
+	flagsBefore := state.RFLAGS
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.XMM[8] != input {
+		t.Fatalf("MOVNTDQA xmm8=%x, want %x", state.XMM[8], input)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("MOVNTDQA changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	var sourceAfter [16]byte
+	if err := memory.Read(dataAddress, sourceAfter[:]); err != nil {
+		t.Fatal(err)
+	}
+	if sourceAfter != input {
+		t.Fatalf("MOVNTDQA modified source=%x, want %x", sourceAfter, input)
+	}
+}

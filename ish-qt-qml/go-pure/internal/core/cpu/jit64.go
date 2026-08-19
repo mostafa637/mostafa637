@@ -1067,6 +1067,16 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
 		}
 		return makeSSEWiden64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.MOVNTDQA:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("MOVNTDQA destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || source.Kind != operand64Mem {
+			return microOp64{}, false, fmt.Errorf("MOVNTDQA requires a memory source: %v", err)
+		}
+		return makeSSEMove64(address, uint8(inst.Len), destination, source), false, nil
 	case x86asm.MOVNTDQ, x86asm.MOVNTPS:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64Mem {
