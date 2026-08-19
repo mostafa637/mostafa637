@@ -920,3 +920,53 @@ func TestExecutorStringDirectionFlag(t *testing.T) {
 		t.Fatalf("DF REP MOVSB indices = esi %#x edi %#x", state.Get(ESI), state.Get(EDI))
 	}
 }
+
+func TestExecutorPushPopMemory(t *testing.T) {
+	code := []byte{
+		0xBB, 0x00, 0x11, 0x00, 0x00, // mov ebx, 0x1100
+		0xB8, 0x78, 0x56, 0x34, 0x12, // mov eax, 0x12345678
+		0x50,             // push eax
+		0x8F, 0x43, 0x04, // pop dword ptr [ebx+4]
+		0xF4, // hlt
+	}
+	memory, state := mappedCode(t, code)
+	if err := memory.Map(3, 1, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewExecutor(nil).Run(state, 16); err != nil {
+		t.Fatal(err)
+	}
+	var raw [4]byte
+	if err := memory.Read(Address(0x1104), raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 0x12345678 {
+		t.Fatalf("memory value = %#x, want %#x", got, uint32(0x12345678))
+	}
+	if got := state.Get(ESP); got != 2*PageSize {
+		t.Fatalf("esp = %#x, want %#x", got, 2*PageSize)
+	}
+}
+
+func TestExecutorCallRegisterAndRetImm(t *testing.T) {
+	code := make([]byte, 32)
+	copy(code, []byte{
+		0xB8, 0x0C, 0x10, 0x00, 0x00, // mov eax, 0x100c
+		0xFF, 0xD0, // call eax
+		0xF4, // return target: hlt
+	})
+	copy(code[12:], []byte{
+		0xB8, 0x2A, 0x00, 0x00, 0x00, // mov eax, 42
+		0xC2, 0x08, 0x00, // ret 8
+	})
+	_, state := mappedCode(t, code)
+	if err := NewExecutor(nil).Run(state, 16); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 42 {
+		t.Fatalf("eax = %d, want 42", got)
+	}
+	if got := state.Get(ESP); got != 2*PageSize+8 {
+		t.Fatalf("esp = %#x, want %#x", got, 2*PageSize+8)
+	}
+}

@@ -241,3 +241,55 @@ func TestDecodeX86StringInstructions(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX86StackAndControlFlow(t *testing.T) {
+	tests := []struct {
+		name string
+		code []byte
+		op   Op
+		reg  Reg32
+		imm  int32
+		rel  int32
+		src  Operand
+		dst  Operand
+	}{
+		{name: "push register", code: []byte{0x50}, op: OpPushReg, reg: EAX},
+		{name: "pop register", code: []byte{0x58}, op: OpPopReg, reg: EAX},
+		{name: "push immediate", code: []byte{0x6A, 0xF9}, op: OpPushImm, imm: -7},
+		{name: "push memory", code: []byte{0xFF, 0x33}, op: OpPushMem, src: Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1}}},
+		{name: "pop memory", code: []byte{0x8F, 0x43, 0x04}, op: OpPopMem, dst: Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1, Disp: 4}}},
+		{name: "call relative", code: []byte{0xE8, 0x05, 0x00, 0x00, 0x00}, op: OpCallRel, rel: 5},
+		{name: "call register", code: []byte{0xFF, 0xD0}, op: OpCallOperand, src: regOperand(EAX)},
+		{name: "ret", code: []byte{0xC3}, op: OpRet},
+		{name: "ret immediate", code: []byte{0xC2, 0x08, 0x00}, op: OpRetImm, imm: 8},
+		{name: "push flags", code: []byte{0x9C}, op: OpPushFlags},
+		{name: "pop flags", code: []byte{0x9D}, op: OpPopFlags},
+		{name: "push all", code: []byte{0x60}, op: OpPushAll},
+		{name: "pop all", code: []byte{0x61}, op: OpPopAll},
+		{name: "leave", code: []byte{0xC9}, op: OpLeave},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Len != uint32(len(test.code)) {
+				t.Fatalf("instruction = %#v, want op %v len %d", instruction, test.op, len(test.code))
+			}
+			if test.reg != 0 && instruction.Reg != test.reg {
+				t.Fatalf("register = %v, want %v", instruction.Reg, test.reg)
+			}
+			if instruction.Imm != test.imm || instruction.Rel != test.rel {
+				t.Fatalf("immediate/relative = %d/%d, want %d/%d", instruction.Imm, instruction.Rel, test.imm, test.rel)
+			}
+			if test.src != (Operand{}) && instruction.Src != test.src {
+				t.Fatalf("source = %#v, want %#v", instruction.Src, test.src)
+			}
+			if test.dst != (Operand{}) && instruction.Dst != test.dst {
+				t.Fatalf("destination = %#v, want %#v", instruction.Dst, test.dst)
+			}
+		})
+	}
+}

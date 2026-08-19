@@ -422,6 +422,15 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		}
 		state.Set(instruction.Reg, value)
 		state.EIP = next
+	case OpPopMem:
+		value, err := pop(state)
+		if err != nil {
+			return instruction, err
+		}
+		if err := storeOperand(state, instruction.Dst, value); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
 	case OpPushImm:
 		if err := push(state, uint32(instruction.Imm)); err != nil {
 			return instruction, err
