@@ -2162,3 +2162,98 @@ func TestExecutorX87IntegerMemorySIBAndM64(t *testing.T) {
 		t.Fatalf("FPU TOP = %d, want 0 after SIB and m64 operations", state.FPUTop())
 	}
 }
+
+func TestExecutorX87CompareAndStatus(t *testing.T) {
+	t.Run("fcom status and fnstsw ax", func(t *testing.T) {
+		_, state := mappedCode(t, []byte{
+			0xd9, 0xe8, // fld1
+			0xd9, 0xee, // fldz
+			0xd8, 0xd1, // fcom st1: 0 < 1
+			0xdf, 0xe0, // fnstsw ax
+			0xf4,
+		})
+		if err := NewExecutor(nil).Run(state, 16); err != nil {
+			t.Fatal(err)
+		}
+		status := uint16(state.Get(EAX))
+		if status&fpuStatusC0 == 0 || status&fpuStatusC2 != 0 || status&fpuStatusC3 != 0 {
+			t.Fatalf("fcom status = %#x, want C0 only", status)
+		}
+		if state.FPUTop() != 6 {
+			t.Fatalf("fcom changed TOP to %d, want 6", state.FPUTop())
+		}
+	})
+
+	t.Run("fcompp equal pops two", func(t *testing.T) {
+		_, state := mappedCode(t, []byte{
+			0xd9, 0xe8, // fld1
+			0xd9, 0xe8, // fld1
+			0xde, 0xd9, // fcompp
+			0xf4,
+		})
+		if err := NewExecutor(nil).Run(state, 8); err != nil {
+			t.Fatal(err)
+		}
+		if state.FPUTop() != 0 || state.FSW&fpuStatusC3 == 0 || state.FSW&(fpuStatusC0|fpuStatusC2) != 0 {
+			t.Fatalf("fcompp state top=%d fsw=%#x, want top=0 C3", state.FPUTop(), state.FSW)
+		}
+	})
+
+	t.Run("fcom memory", func(t *testing.T) {
+		memory, state := mappedCode(t, []byte{
+			0xd9, 0xe8, // fld1
+			0xd8, 0x15, 0x00, 0x20, 0x00, 0x00, // fcom dword ptr [0x2000]
+			0xf4,
+		})
+		var raw [4]byte
+		binary.LittleEndian.PutUint32(raw[:], math.Float32bits(2))
+		if err := memory.Write(0x2000, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+		if err := NewExecutor(nil).Run(state, 8); err != nil {
+			t.Fatal(err)
+		}
+		if state.FSW&fpuStatusC0 == 0 || state.FSW&fpuStatusC2 != 0 || state.FSW&fpuStatusC3 != 0 {
+			t.Fatalf("fcom m32 status = %#x, want C0 only", state.FSW)
+		}
+	})
+
+	t.Run("fcomi preserves unrelated flags", func(t *testing.T) {
+		_, state := mappedCode(t, []byte{
+			0xd9, 0xe8, // fld1
+			0xd9, 0xee, // fldz
+			0xdb, 0xf1, // fcomi st0, st1: 0 < 1
+			0xf4,
+		})
+		state.SetEFlags(FlagOF | FlagSF | FlagAF)
+		if err := NewExecutor(nil).Run(state, 8); err != nil {
+			t.Fatal(err)
+		}
+		if !state.Flag(FlagCF) || state.Flag(FlagPF) || state.Flag(FlagZF) || !state.Flag(FlagOF) || !state.Flag(FlagSF) || !state.Flag(FlagAF) {
+			t.Fatalf("fcomi flags cf=%v pf=%v zf=%v of=%v sf=%v af=%v", state.Flag(FlagCF), state.Flag(FlagPF), state.Flag(FlagZF), state.Flag(FlagOF), state.Flag(FlagSF), state.Flag(FlagAF))
+		}
+	})
+
+	t.Run("fucomip unordered pops one", func(t *testing.T) {
+		memory, state := mappedCode(t, []byte{
+			0xdd, 0x05, 0x00, 0x20, 0x00, 0x00, // fld qword ptr [0x2000]
+			0xd9, 0xe8, // fld1
+			0xdf, 0xe9, // fucomip st0, st1
+			0xf4,
+		})
+		var raw [8]byte
+		binary.LittleEndian.PutUint64(raw[:], math.Float64bits(math.NaN()))
+		if err := memory.Write(0x2000, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+		if err := NewExecutor(nil).Run(state, 8); err != nil {
+			t.Fatal(err)
+		}
+		if !state.Flag(FlagCF) || !state.Flag(FlagPF) || !state.Flag(FlagZF) {
+			t.Fatalf("unordered FUCOMIP flags cf=%v pf=%v zf=%v", state.Flag(FlagCF), state.Flag(FlagPF), state.Flag(FlagZF))
+		}
+		if state.FPUTop() != 7 {
+			t.Fatalf("fucomip TOP=%d, want 7 after one pop", state.FPUTop())
+		}
+	})
+}

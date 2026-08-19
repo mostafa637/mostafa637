@@ -111,6 +111,8 @@ const (
 	OpFPUUnary
 	OpFPUStack
 	OpFPUBinary
+	OpFPUCompare
+	OpFNSTSW
 )
 
 type Segment uint8
@@ -1886,6 +1888,16 @@ func decodeX86String(inst x86asm.Inst) (Instruction, bool, error) {
 }
 
 const (
+	fpuCompareStatus uint8 = iota
+	fpuCompareEFlags
+)
+
+const (
+	fpuComparePopSingle uint8 = 1 << 7
+	fpuComparePopDouble uint8 = 1 << 6
+)
+
+const (
 	fpuBinaryAdd uint8 = iota
 	fpuBinarySub
 	fpuBinarySubReverse
@@ -2044,6 +2056,82 @@ func decodeX86FPU(inst x86asm.Inst) (Instruction, bool, error) {
 			group |= 1 << 7
 		}
 		return Instruction{Op: OpFPUBinary, Len: uint32(inst.Len), Group: group, FPUReg: dst, FPUReg2: src}, true, nil
+	case x86asm.FCOM, x86asm.FCOMP, x86asm.FUCOM, x86asm.FUCOMP:
+		if len(inst.Args) == 0 || inst.Args[0] == nil {
+			return unsupported("requires ST(i) or m32/m64 operand")
+		}
+		if _, isMemory := inst.Args[0].(x86asm.Mem); isMemory {
+			if inst.MemBytes != 4 && inst.MemBytes != 8 {
+				return unsupported(fmt.Sprintf("unsupported compare memory width %d", inst.MemBytes))
+			}
+			operand, ok, err := x86Operand32(inst.Args[0])
+			if err != nil {
+				return Instruction{}, true, err
+			}
+			if !ok {
+				return unsupported("invalid compare memory operand")
+			}
+			group := fpuCompareStatus
+			if inst.Op == x86asm.FCOMP || inst.Op == x86asm.FUCOMP {
+				group |= fpuComparePopSingle
+			}
+			operand.Width = uint8(inst.MemBytes)
+			return Instruction{Op: OpFPUCompare, Len: uint32(inst.Len), Group: group, Dst: operand, FPUMemWidth: uint8(inst.MemBytes)}, true, nil
+		}
+		reg, ok := registerArg(0)
+		if !ok {
+			return unsupported("requires ST(i) register or m32/m64 memory")
+		}
+		group := fpuCompareStatus
+		if inst.Op == x86asm.FCOMP || inst.Op == x86asm.FUCOMP {
+			group |= fpuComparePopSingle
+		}
+		return Instruction{Op: OpFPUCompare, Len: uint32(inst.Len), Group: group, FPUReg: reg}, true, nil
+	case x86asm.FCOMPP, x86asm.FUCOMPP:
+		if len(inst.Args) != 0 && inst.Args[0] != nil {
+			return unsupported("unexpected operand")
+		}
+		return Instruction{Op: OpFPUCompare, Len: uint32(inst.Len), Group: fpuCompareStatus | fpuComparePopDouble, FPUReg: 1}, true, nil
+	case x86asm.FCOMI, x86asm.FUCOMI, x86asm.FCOMIP, x86asm.FUCOMIP:
+		if len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+			return unsupported("requires ST(0), ST(i) operands")
+		}
+		first, ok := registerArg(0)
+		if !ok || first != 0 {
+			return unsupported("requires ST(0) as destination")
+		}
+		second, ok := registerArg(1)
+		if !ok {
+			return unsupported("requires ST(i) source")
+		}
+		group := fpuCompareEFlags
+		if inst.Op == x86asm.FCOMIP || inst.Op == x86asm.FUCOMIP {
+			group |= fpuComparePopSingle
+		}
+		return Instruction{Op: OpFPUCompare, Len: uint32(inst.Len), Group: group, FPUReg: first, FPUReg2: second}, true, nil
+	case x86asm.FTST:
+		if len(inst.Args) != 0 && inst.Args[0] != nil {
+			return unsupported("unexpected operand")
+		}
+		return Instruction{Op: OpFPUCompare, Len: uint32(inst.Len), Group: fpuCompareStatus, FPUReg: 0, FPUReg2: 0}, true, nil
+	case x86asm.FNSTSW:
+		if len(inst.Args) == 0 || inst.Args[0] == nil {
+			return unsupported("requires AX or m16 operand")
+		}
+		if reg, ok := inst.Args[0].(x86asm.Reg); ok {
+			if reg != x86asm.AX {
+				return unsupported("requires AX register")
+			}
+			return Instruction{Op: OpFNSTSW, Len: uint32(inst.Len), Dst: Operand{Reg: EAX, Width: 2}}, true, nil
+		}
+		operand, ok, err := x86Operand16(inst.Args[0])
+		if err != nil {
+			return Instruction{}, true, err
+		}
+		if !ok || !operand.IsMem || inst.MemBytes != 2 {
+			return unsupported("requires m16 memory operand")
+		}
+		return Instruction{Op: OpFNSTSW, Len: uint32(inst.Len), Dst: operand, FPUMemWidth: 2}, true, nil
 	default:
 		return Instruction{}, false, nil
 	}

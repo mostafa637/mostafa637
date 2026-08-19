@@ -75,6 +75,11 @@ func executeFPU(state *MachineState, instruction Instruction) error {
 			return executeFPUMemory(state, instruction)
 		}
 
+	case OpFPUCompare:
+		return executeFPUCompare(state, instruction)
+	case OpFNSTSW:
+		return executeFNSTSW(state, instruction)
+
 	case OpFPUBinary:
 		dst := state.FPAt(instruction.FPUReg)
 		src := state.FPAt(instruction.FPUReg2)
@@ -98,6 +103,75 @@ func executeFPU(state *MachineState, instruction Instruction) error {
 			state.PopFP()
 		}
 	}
+	return nil
+}
+
+func compareFPUValues(lhs, rhs fpu.Value) (less, unordered, equal bool) {
+	if lhs.IsNaN() || rhs.IsNaN() {
+		return false, true, false
+	}
+	return lhs.Lt(rhs), false, lhs.Eq(rhs)
+}
+
+func executeFPUCompare(state *MachineState, instruction Instruction) error {
+	lhs := state.FPAt(0)
+	var rhs fpu.Value
+	if instruction.Dst.IsMem {
+		address, err := effectiveAddress(state, instruction.Dst)
+		if err != nil {
+			return err
+		}
+		var raw [8]byte
+		switch instruction.FPUMemWidth {
+		case 4:
+			if err := state.Memory.Read(address, raw[:4]); err != nil {
+				return err
+			}
+			rhs = fpu.FromFloat64(float64(math.Float32frombits(binary.LittleEndian.Uint32(raw[:4]))))
+		case 8:
+			if err := state.Memory.Read(address, raw[:]); err != nil {
+				return err
+			}
+			rhs = fpu.FromFloat64(math.Float64frombits(binary.LittleEndian.Uint64(raw[:])))
+		default:
+			return ErrUnsupportedAddressing
+		}
+	} else {
+		compareReg := instruction.FPUReg
+		if instruction.Group&fpuCompareEFlags != 0 {
+			compareReg = instruction.FPUReg2
+		}
+		rhs = state.FPAt(compareReg)
+	}
+
+	less, unordered, equal := compareFPUValues(lhs, rhs)
+	if instruction.Group&fpuCompareEFlags != 0 {
+		state.SetFPUCompareFlags(less, unordered, equal)
+	} else {
+		state.SetFPUCondition(less || unordered, unordered, equal || unordered)
+	}
+	if instruction.Group&fpuComparePopDouble != 0 {
+		state.PopFP()
+		state.PopFP()
+	} else if instruction.Group&fpuComparePopSingle != 0 {
+		state.PopFP()
+	}
+	return nil
+}
+
+func executeFNSTSW(state *MachineState, instruction Instruction) error {
+	status := state.FPUStatusWord()
+	if instruction.Dst.IsMem {
+		address, err := effectiveAddress(state, instruction.Dst)
+		if err != nil {
+			return err
+		}
+		var raw [2]byte
+		binary.LittleEndian.PutUint16(raw[:], status)
+		return state.Memory.Write(address, raw[:])
+	}
+	value := state.Get(EAX)
+	state.Set(EAX, value&0xffff0000|uint32(status))
 	return nil
 }
 
@@ -244,7 +318,7 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			return instruction, err
 		}
 		state.EIP = next
-	case OpFPUConst, OpFPUUnary, OpFPUStack, OpFPUBinary:
+	case OpFPUConst, OpFPUUnary, OpFPUStack, OpFPUBinary, OpFPUCompare, OpFNSTSW:
 		if err := executeFPU(state, instruction); err != nil {
 			return instruction, err
 		}

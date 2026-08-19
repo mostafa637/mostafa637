@@ -795,3 +795,42 @@ func TestDecodeX87IntegerMemory(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX87CompareAndStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		code   []byte
+		op     Op
+		group  uint8
+		reg    uint8
+		reg2   uint8
+		width  uint8
+		memory bool
+	}{
+		{name: "fcom st1", code: []byte{0xd8, 0xd1}, op: OpFPUCompare, group: fpuCompareStatus, reg: 1},
+		{name: "fcomp st1", code: []byte{0xd8, 0xd9}, op: OpFPUCompare, group: fpuCompareStatus | fpuComparePopSingle, reg: 1},
+		{name: "fcompp", code: []byte{0xde, 0xd9}, op: OpFPUCompare, group: fpuCompareStatus | fpuComparePopDouble, reg: 1},
+		{name: "fucom st2", code: []byte{0xdd, 0xe2}, op: OpFPUCompare, group: fpuCompareStatus, reg: 2},
+		{name: "fcomi st0 st1", code: []byte{0xdb, 0xf1}, op: OpFPUCompare, group: fpuCompareEFlags, reg: 0, reg2: 1},
+		{name: "fcomip st0 st1", code: []byte{0xdf, 0xf1}, op: OpFPUCompare, group: fpuCompareEFlags | fpuComparePopSingle, reg: 0, reg2: 1},
+		{name: "fcom m32", code: []byte{0xd8, 0x11}, op: OpFPUCompare, group: fpuCompareStatus, width: 4, memory: true},
+		{name: "fcom m64", code: []byte{0xdc, 0x11}, op: OpFPUCompare, group: fpuCompareStatus, width: 8, memory: true},
+		{name: "fnstsw ax", code: []byte{0xdf, 0xe0}, op: OpFNSTSW},
+		{name: "fnstsw m16", code: []byte{0xdd, 0x38}, op: OpFNSTSW, width: 2, memory: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Len != uint32(len(test.code)) || instruction.Group != test.group || instruction.FPUReg != test.reg || instruction.FPUReg2 != test.reg2 || instruction.FPUMemWidth != test.width {
+				t.Fatalf("instruction = %#v, want op=%v len=%d group=%d fpu=%d/%d width=%d", instruction, test.op, len(test.code), test.group, test.reg, test.reg2, test.width)
+			}
+			if instruction.Dst.IsMem != test.memory {
+				t.Fatalf("memory destination = %v, want %v", instruction.Dst.IsMem, test.memory)
+			}
+		})
+	}
+}

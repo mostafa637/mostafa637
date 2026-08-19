@@ -181,6 +181,48 @@ func (s *MachineState) SetEFlags(value uint32) {
 	s.ExpandFlags()
 }
 
+const (
+	fpuStatusC0 uint16 = 1 << 8
+	fpuStatusC1 uint16 = 1 << 9
+	fpuStatusC2 uint16 = 1 << 10
+	fpuStatusC3 uint16 = 1 << 14
+)
+
+// SetFPUCondition updates the x87 condition-code bits and clears C1, which
+// x87 comparisons define as zero. TOP and all unrelated status bits remain
+// unchanged.
+func (s *MachineState) SetFPUCondition(c0, c2, c3 bool) {
+	s.FSW &^= fpuStatusC0 | fpuStatusC1 | fpuStatusC2 | fpuStatusC3
+	if c0 {
+		s.FSW |= fpuStatusC0
+	}
+	if c2 {
+		s.FSW |= fpuStatusC2
+	}
+	if c3 {
+		s.FSW |= fpuStatusC3
+	}
+}
+
+func (s *MachineState) FPUStatusWord() uint16 { return s.FSW }
+
+// SetFPUCompareFlags applies FCOMI/FUCOMI condition codes. The integer
+// compare variants define CF/PF/ZF and leave OF/SF/AF unchanged.
+func (s *MachineState) SetFPUCompareFlags(less, unordered, equal bool) {
+	s.CollapseFlags()
+	s.EFlags &^= FlagCF | FlagPF | FlagZF
+	if less || unordered {
+		s.EFlags |= FlagCF
+	}
+	if unordered {
+		s.EFlags |= FlagPF
+	}
+	if equal || unordered {
+		s.EFlags |= FlagZF
+	}
+	s.ExpandFlags()
+}
+
 // FPUTop returns the physical FP register selected as logical ST(0).
 // The x87 TOP field occupies bits 11..13 of the status word.
 func (s *MachineState) FPUTop() uint8 {
