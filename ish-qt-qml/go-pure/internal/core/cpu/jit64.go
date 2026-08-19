@@ -834,6 +834,20 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
 		}
 		return makeSSEBlend64(address, uint8(inst.Len), inst.Op, destination, source, 0, true), false, nil
+	case x86asm.DPPS, x86asm.DPPD:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("%s requires an immediate mask", inst.Op)
+		}
+		return makeSSEDotProduct64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
 	case x86asm.PMOVSXBW, x86asm.PMOVSXBD, x86asm.PMOVSXBQ, x86asm.PMOVSXWD, x86asm.PMOVSXWQ, x86asm.PMOVSXDQ,
 		x86asm.PMOVZXBW, x86asm.PMOVZXBD, x86asm.PMOVZXBQ, x86asm.PMOVZXWD, x86asm.PMOVZXWQ, x86asm.PMOVZXDQ:
 		sourceWidth, _, _, _, ok := packedWidenSpec64(inst.Op)
@@ -2152,6 +2166,56 @@ func makeSSEBlend64(address uint64, size uint8, op x86asm.Op, destination, sourc
 			}
 			if selected {
 				copy(result[lane*width:(lane+1)*width], sourceBytes[lane*width:(lane+1)*width])
+			}
+		}
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEDotProduct64(address uint64, size uint8, op x86asm.Op, destination, source operand64, immediate uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var result [16]byte
+		if op == x86asm.DPPS {
+			var products [4]float32
+			for lane := 0; lane < 4; lane++ {
+				if immediate&(uint8(1)<<uint(4+lane)) != 0 {
+					leftValue := math.Float32frombits(binary.LittleEndian.Uint32(left[lane*4:]))
+					rightValue := math.Float32frombits(binary.LittleEndian.Uint32(right[lane*4:]))
+					products[lane] = leftValue * rightValue
+				}
+			}
+			sum := (products[0] + products[1]) + (products[2] + products[3])
+			for lane := 0; lane < 4; lane++ {
+				if immediate&(uint8(1)<<uint(lane)) != 0 {
+					binary.LittleEndian.PutUint32(result[lane*4:], math.Float32bits(sum))
+				}
+			}
+		} else {
+			var products [2]float64
+			for lane := 0; lane < 2; lane++ {
+				if immediate&(uint8(1)<<uint(4+lane)) != 0 {
+					leftValue := math.Float64frombits(binary.LittleEndian.Uint64(left[lane*8:]))
+					rightValue := math.Float64frombits(binary.LittleEndian.Uint64(right[lane*8:]))
+					products[lane] = leftValue * rightValue
+				}
+			}
+			sum := products[0] + products[1]
+			for lane := 0; lane < 2; lane++ {
+				if immediate&(uint8(1)<<uint(lane)) != 0 {
+					binary.LittleEndian.PutUint64(result[lane*8:], math.Float64bits(sum))
+				}
 			}
 		}
 		if err := writeVector64(state, destination, next, result); err != nil {
