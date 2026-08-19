@@ -300,3 +300,90 @@ func TestWait4ChildRegistry(t *testing.T) {
 		t.Fatalf("wait4 reaped child = %d", got)
 	}
 }
+
+func TestShellProbeSyscalls(t *testing.T) {
+	db, err := storage.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	fake, err := corefs.New(filepath.Join(t.TempDir(), "root"), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Mkdir("/bin", 0o755, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.WriteFile("/bin/sh", []byte("shell"), 0o755, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Symlink("sh", "/bin/link", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	memory := cpu.NewMemory()
+	if err := memory.Map(1, 4, cpu.PRead|cpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	context := NewContext(memory)
+	context.FS = fake
+	context.PID = 123
+	if err := context.InstallFile(3, &File{Reader: bytes.NewBuffer(nil), Writer: &bytes.Buffer{}}); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+	writeGuest := func(address cpu.Address, value string) {
+		t.Helper()
+		if err := memory.Write(address, append([]byte(value), 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeGuest(0x1000, "/bin/sh")
+	if got := dispatcher.Dispatch(state, SysAccess, 0x1000, 0); got != 0 {
+		t.Fatalf("access = %d", got)
+	}
+	writeGuest(0x1100, "/bin/link")
+	if got := dispatcher.Dispatch(state, SysReadlink, 0x1100, 0x1200, 32); got != 2 {
+		t.Fatalf("readlink = %d", got)
+	}
+	linkTarget := make([]byte, 2)
+	if err := memory.Read(0x1200, linkTarget); err != nil {
+		t.Fatal(err)
+	}
+	if string(linkTarget) != "sh" {
+		t.Fatalf("readlink target = %q", linkTarget)
+	}
+	if got := dispatcher.Dispatch(state, SysUname, 0x2000); got != 0 {
+		t.Fatalf("uname = %d", got)
+	}
+	uname := make([]byte, 65)
+	if err := memory.Read(0x2000, uname); err != nil {
+		t.Fatal(err)
+	}
+	if string(uname[:5]) != "Linux" {
+		t.Fatalf("uname sysname = %q", uname[:5])
+	}
+	if got := dispatcher.Dispatch(state, SysFcntl64, 3, 3); got != 0 {
+		t.Fatalf("fcntl F_GETFL = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysFcntl64, 3, 0); got < 4 {
+		t.Fatalf("fcntl F_DUPFD = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysIoctl, 3, 0x5413, 0x3000); got != 0 {
+		t.Fatalf("ioctl TIOCGWINSZ = %d", got)
+	}
+	var winsize [8]byte
+	if err := memory.Read(0x3000, winsize[:]); err != nil {
+		t.Fatal(err)
+	}
+	if rows, cols := binary.LittleEndian.Uint16(winsize[0:2]), binary.LittleEndian.Uint16(winsize[2:4]); rows != 24 || cols != 80 {
+		t.Fatalf("winsize = %dx%d", cols, rows)
+	}
+	if got := dispatcher.Dispatch(state, SysGetUID); got != 0 {
+		t.Fatalf("getuid = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysGetPPID); got != 1 {
+		t.Fatalf("getppid = %d", got)
+	}
+}

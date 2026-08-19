@@ -55,6 +55,7 @@ func (m *ProcessManager) CreateChild(parent *Process) (*Process, error) {
 	}
 	pid := m.allocatePIDLocked()
 	child := NewProcess(pid, parent.FS)
+	child.Context.ParentPID = parent.PID
 	if parent.Context.Children == nil {
 		parent.Context.Children = coresyscall.NewChildRegistry()
 	}

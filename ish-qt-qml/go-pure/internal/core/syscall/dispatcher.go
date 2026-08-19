@@ -23,10 +23,19 @@ const (
 	SysRead          Number = 3
 	SysOpen          Number = 5
 	SysWrite         Number = 4
+	SysAccess        Number = 33
+	SysIoctl         Number = 54
+	SysReadlink      Number = 85
+	SysUname         Number = 122
 	SysChdir         Number = 12
 	SysClose         Number = 6
 	SysLseek         Number = 19
 	SysGetPID        Number = 20
+	SysGetUID        Number = 24
+	SysGetGID        Number = 47
+	SysGetEUID       Number = 49
+	SysGetEGID       Number = 50
+	SysGetPPID       Number = 64
 	SysKill          Number = 37
 	SysSignal        Number = 48
 	SysWait4         Number = 114
@@ -44,6 +53,7 @@ const (
 	SysExitGroup     Number = 252
 	SysMadvise       Number = 219
 	SysGetdents64    Number = 220
+	SysFcntl64       Number = 221
 	SysGetTID        Number = 224
 	SysSchedYield    Number = 158
 	SysRtSigaction   Number = 174
@@ -87,9 +97,12 @@ type Context struct {
 	Memory     *corecpu.Memory
 	FS         *corefs.FS
 	PID        uint32
+	ParentPID  uint32
 	CWD        string
 	TIDAddress uint32
 	Children   *ChildRegistry
+	WinCols    uint16
+	WinRows    uint16
 
 	StartBrk uint32
 	Brk      uint32
@@ -113,7 +126,7 @@ type Dispatcher struct {
 }
 
 func NewContext(memory *corecpu.Memory) *Context {
-	return &Context{Memory: memory, CWD: "/", FDs: corefd.New(), Files: make(map[uint32]*File), Children: NewChildRegistry()}
+	return &Context{Memory: memory, CWD: "/", FDs: corefd.New(), Files: make(map[uint32]*File), Children: NewChildRegistry(), WinCols: 80, WinRows: 24}
 }
 
 // InstallFile installs a descriptor in both the new table and the legacy map.
@@ -145,6 +158,11 @@ func NewDispatcher(context *Context) *Dispatcher {
 	d.Register(SysSetTIDAddress, setTIDAddress)
 	d.Register(SysGetTID, gettid)
 	d.Register(SysOpen, open)
+	d.Register(SysAccess, access)
+	d.Register(SysIoctl, ioctl)
+	d.Register(SysReadlink, readlink)
+	d.Register(SysUname, uname)
+	d.Register(SysFcntl64, fcntl64)
 	d.Register(SysChdir, chdir)
 	d.Register(SysGetCWD, getcwd)
 	d.Register(SysStat64, stat64)
@@ -155,6 +173,11 @@ func NewDispatcher(context *Context) *Dispatcher {
 	d.Register(SysClose, closeFD)
 	d.Register(SysLseek, lseek)
 	d.Register(SysGetPID, getpid)
+	d.Register(SysGetUID, getuid)
+	d.Register(SysGetGID, getgid)
+	d.Register(SysGetEUID, getuid)
+	d.Register(SysGetEGID, getgid)
+	d.Register(SysGetPPID, getppid)
 	d.Register(SysDup, dup)
 	d.Register(SysDup2, dup2)
 	d.Register(SysBrk, brk)

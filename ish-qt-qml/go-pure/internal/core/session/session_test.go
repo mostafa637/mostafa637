@@ -137,3 +137,89 @@ func TestCoreSessionGuestELFExit(t *testing.T) {
 		t.Fatalf("guest exit: exited=%v code=%d", exited, code)
 	}
 }
+
+func guestEchoELF() []byte {
+	const (
+		headerSize    = 52
+		programSize   = 32
+		programOffset = headerSize
+		payloadOffset = 0x1000
+		entry         = 0x08048000
+		buffer        = 0x08048100
+	)
+	code := []byte{
+		0xb8, 0x03, 0, 0, 0, // mov eax, SYS_read
+		0xbb, 0, 0, 0, 0, // mov ebx, 0
+		0xb9, 0x00, 0x81, 0x04, 0x08, // mov ecx, buffer
+		0xba, 0x04, 0, 0, 0, // mov edx, 4
+		0xcd, 0x80,
+		0xb8, 0x04, 0, 0, 0, // mov eax, SYS_write
+		0xbb, 0x01, 0, 0, 0, // mov ebx, 1
+		0xb9, 0x00, 0x81, 0x04, 0x08, // mov ecx, buffer
+		0xba, 0x04, 0, 0, 0, // mov edx, 4
+		0xcd, 0x80,
+		0xb8, 0x01, 0, 0, 0, // mov eax, SYS_exit
+		0xbb, 0, 0, 0, 0, // mov ebx, 0
+		0xcd, 0x80,
+	}
+	data := make([]byte, payloadOffset+0x104)
+	copy(data[0:4], []byte{0x7f, 'E', 'L', 'F'})
+	data[4], data[5], data[6], data[7] = 1, 1, 1, 3
+	binary.LittleEndian.PutUint16(data[16:], 2)
+	binary.LittleEndian.PutUint16(data[18:], 3)
+	binary.LittleEndian.PutUint32(data[20:], 1)
+	binary.LittleEndian.PutUint32(data[24:], entry)
+	binary.LittleEndian.PutUint32(data[28:], programOffset)
+	binary.LittleEndian.PutUint16(data[40:], headerSize)
+	binary.LittleEndian.PutUint16(data[42:], programSize)
+	binary.LittleEndian.PutUint16(data[44:], 1)
+	ph := data[programOffset : programOffset+programSize]
+	binary.LittleEndian.PutUint32(ph[0:], 1)
+	binary.LittleEndian.PutUint32(ph[4:], payloadOffset)
+	binary.LittleEndian.PutUint32(ph[8:], entry)
+	binary.LittleEndian.PutUint32(ph[12:], entry)
+	binary.LittleEndian.PutUint32(ph[16:], uint32(len(data)-payloadOffset))
+	binary.LittleEndian.PutUint32(ph[20:], 0x2000)
+	binary.LittleEndian.PutUint32(ph[24:], 7)
+	binary.LittleEndian.PutUint32(ph[28:], 0x1000)
+	copy(data[payloadOffset:], code)
+	_ = buffer
+	return data
+}
+
+func TestCoreSessionGuestStdinStdout(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "echo4"), guestEchoELF(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{Rootfs: root, Shell: "/bin/echo4", UseGuest: true, Bootstrap: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Start(context.Background(), 80, 24); err != nil {
+		t.Fatalf("guest Start: %v", err)
+	}
+	if err := s.Write([]byte("pong")); err != nil {
+		t.Fatalf("guest Write: %v", err)
+	}
+	var output strings.Builder
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case chunk, ok := <-s.Output():
+			if !ok {
+				t.Fatalf("guest output closed before echo: %q", output.String())
+			}
+			output.Write(chunk)
+			if output.String() == "pong" {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for guest echo: %q", output.String())
+		}
+	}
+}
