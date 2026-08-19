@@ -1020,3 +1020,114 @@ func TestExecutorJccSignedCondition(t *testing.T) {
 		t.Fatalf("not-taken JG eax = %d, want 1", got)
 	}
 }
+
+func TestExecutorLoopFamily(t *testing.T) {
+	tests := []struct {
+		name string
+		code []byte
+	}{
+		{
+			name: "loop",
+			code: []byte{
+				0xB9, 0x02, 0x00, 0x00, 0x00, // mov ecx, 2
+				0x31, 0xC0, // xor eax, eax: ZF=1
+				0xE2, 0xFE, // loop -2
+				0xF4,
+			},
+		},
+		{
+			name: "loope",
+			code: []byte{
+				0xB9, 0x02, 0x00, 0x00, 0x00,
+				0x31, 0xC0, // keep ZF=1
+				0xE1, 0xFE, // loope -2
+				0xF4,
+			},
+		},
+		{
+			name: "loopne",
+			code: []byte{
+				0xB9, 0x02, 0x00, 0x00, 0x00,
+				0xB8, 0x01, 0x00, 0x00, 0x00,
+				0x3D, 0x00, 0x00, 0x00, 0x00, // cmp eax, 0: ZF=0
+				0xE0, 0xFE, // loopne -2
+				0xF4,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, state := mappedCode(t, test.code)
+			if err := NewExecutor(nil).Run(state, 32); err != nil {
+				t.Fatal(err)
+			}
+			if got := state.Get(ECX); got != 0 {
+				t.Fatalf("%s left ECX=%#x, want 0", test.name, got)
+			}
+		})
+	}
+}
+
+func TestExecutorLoopDoesNotBranchWhenCounterReachesZero(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xB9, 0x01, 0x00, 0x00, 0x00, // mov ecx, 1
+		0xE2, 0xFE, // loop -2: decrement to zero, then fall through
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(ECX) != 0 || state.EIP != PageSize+8 {
+		t.Fatalf("LOOP termination: ecx=%#x eip=%#x", state.Get(ECX), state.EIP)
+	}
+}
+
+func TestExecutorJECXZ(t *testing.T) {
+	code := []byte{
+		0xE3, 0x05, // jecxz +5: target offset 7
+		0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (not-taken path)
+		0xF4,
+	}
+	_, taken := mappedCode(t, code)
+	taken.Set(ECX, 0)
+	if err := NewExecutor(nil).Run(taken, 8); err != nil {
+		t.Fatal(err)
+	}
+	if taken.Get(EAX) != 0 || taken.Get(ECX) != 0 {
+		t.Fatalf("taken JECXZ: eax=%d ecx=%#x", taken.Get(EAX), taken.Get(ECX))
+	}
+
+	_, notTaken := mappedCode(t, code)
+	notTaken.Set(ECX, 1)
+	if err := NewExecutor(nil).Run(notTaken, 8); err != nil {
+		t.Fatal(err)
+	}
+	if notTaken.Get(EAX) != 1 || notTaken.Get(ECX) != 1 {
+		t.Fatalf("not-taken JECXZ: eax=%d ecx=%#x", notTaken.Get(EAX), notTaken.Get(ECX))
+	}
+}
+
+func TestExecutorJCXZUsesLowSixteenBits(t *testing.T) {
+	code := []byte{
+		0x67, 0xE3, 0x05, // jcxz +5: target offset 8
+		0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (not-taken path)
+		0xF4,
+	}
+	_, taken := mappedCode(t, code)
+	taken.Set(ECX, 0x00010000) // CX == 0, ECX != 0.
+	if err := NewExecutor(nil).Run(taken, 8); err != nil {
+		t.Fatal(err)
+	}
+	if taken.Get(EAX) != 0 || taken.Get(ECX) != 0x00010000 {
+		t.Fatalf("taken JCXZ: eax=%d ecx=%#x", taken.Get(EAX), taken.Get(ECX))
+	}
+
+	_, notTaken := mappedCode(t, code)
+	notTaken.Set(ECX, 1)
+	if err := NewExecutor(nil).Run(notTaken, 8); err != nil {
+		t.Fatal(err)
+	}
+	if notTaken.Get(EAX) != 1 || notTaken.Get(ECX) != 1 {
+		t.Fatalf("not-taken JCXZ: eax=%d ecx=%#x", notTaken.Get(EAX), notTaken.Get(ECX))
+	}
+}

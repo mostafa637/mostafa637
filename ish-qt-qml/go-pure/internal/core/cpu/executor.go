@@ -3,6 +3,7 @@ package cpu
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math/bits"
 )
 
@@ -478,6 +479,33 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		}
 	case OpJcc:
 		if conditionValue(state, instruction.Group) {
+			state.EIP = uint32(int64(next) + int64(instruction.Rel))
+		} else {
+			state.EIP = next
+		}
+	case OpLoop:
+		take := false
+		switch instruction.Group {
+		case 0: // LOOP: decrement ECX and branch when non-zero.
+			count := state.Get(ECX) - 1
+			state.Set(ECX, count)
+			take = count != 0
+		case 1: // LOOPE/LOOPZ: decrement ECX and require ZF.
+			count := state.Get(ECX) - 1
+			state.Set(ECX, count)
+			take = count != 0 && state.Flag(FlagZF)
+		case 2: // LOOPNE/LOOPNZ: decrement ECX and require !ZF.
+			count := state.Get(ECX) - 1
+			state.Set(ECX, count)
+			take = count != 0 && !state.Flag(FlagZF)
+		case 3: // JECXZ: test the full 32-bit ECX without changing it.
+			take = state.Get(ECX) == 0
+		case 4: // JCXZ: address-size override selects the low 16-bit CX.
+			take = uint16(state.Get(ECX)) == 0
+		default:
+			return instruction, fmt.Errorf("cpu: unsupported loop group %d", instruction.Group)
+		}
+		if take {
 			state.EIP = uint32(int64(next) + int64(instruction.Rel))
 		} else {
 			state.EIP = next

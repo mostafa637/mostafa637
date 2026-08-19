@@ -341,3 +341,30 @@ func TestDecodeX86JccNear(t *testing.T) {
 		t.Fatalf("instruction = %#v, want near JL group 10 rel 5", instruction)
 	}
 }
+
+func TestDecodeX86LoopInstructions(t *testing.T) {
+	tests := []struct {
+		name      string
+		code      []byte
+		length    uint32
+		condition uint8
+	}{
+		{name: "loop", code: []byte{0xE2, 0xFE}, length: 2, condition: 0},
+		{name: "loope", code: []byte{0xE1, 0xFE}, length: 2, condition: 1},
+		{name: "loopne", code: []byte{0xE0, 0xFE}, length: 2, condition: 2},
+		{name: "jecxz", code: []byte{0xE3, 0xFE}, length: 2, condition: 3},
+		{name: "jcxz", code: []byte{0x67, 0xE3, 0xFE}, length: 3, condition: 4},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != OpLoop || instruction.Len != test.length || instruction.Rel != -2 || instruction.Group != test.condition {
+				t.Fatalf("instruction = %#v, want OpLoop len %d rel -2 group %d", instruction, test.length, test.condition)
+			}
+		})
+	}
+}

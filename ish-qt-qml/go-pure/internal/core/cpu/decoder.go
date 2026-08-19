@@ -57,6 +57,7 @@ const (
 	OpJzRel
 	OpJnzRel
 	OpJcc
+	OpLoop
 	OpInt
 	OpHalt
 	OpPushFlags
@@ -320,6 +321,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return jcc, nil
+	}
+	if loop, handled, err := decodeX86Loop(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return loop, nil
 	}
 	if xchg, handled, err := decodeX86Xchg(disassembled); handled {
 		if err != nil {
@@ -1065,6 +1072,47 @@ func decodeX86Jcc(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{}, true, fmt.Errorf("%w: %v operand %T", ErrUnsupportedAddressing, inst.Op, inst.Args[0])
 	}
 	return Instruction{Op: OpJcc, Len: uint32(inst.Len), Rel: int32(relative), Group: condition}, true, nil
+}
+
+func decodeX86Loop(inst x86asm.Inst) (Instruction, bool, error) {
+	if len(inst.Args) < 1 || inst.Args[0] == nil {
+		return Instruction{}, false, nil
+	}
+	var group uint8
+	switch inst.Op {
+	case x86asm.LOOP:
+		if inst.DataSize != 32 || inst.AddrSize != 32 {
+			return Instruction{}, true, fmt.Errorf("%w: LOOP data/address size %d/%d", ErrUnsupportedAddressing, inst.DataSize, inst.AddrSize)
+		}
+		group = 0
+	case x86asm.LOOPE:
+		if inst.DataSize != 32 || inst.AddrSize != 32 {
+			return Instruction{}, true, fmt.Errorf("%w: LOOPE data/address size %d/%d", ErrUnsupportedAddressing, inst.DataSize, inst.AddrSize)
+		}
+		group = 1
+	case x86asm.LOOPNE:
+		if inst.DataSize != 32 || inst.AddrSize != 32 {
+			return Instruction{}, true, fmt.Errorf("%w: LOOPNE data/address size %d/%d", ErrUnsupportedAddressing, inst.DataSize, inst.AddrSize)
+		}
+		group = 2
+	case x86asm.JECXZ:
+		if inst.DataSize != 32 || inst.AddrSize != 32 {
+			return Instruction{}, true, fmt.Errorf("%w: JECXZ data/address size %d/%d", ErrUnsupportedAddressing, inst.DataSize, inst.AddrSize)
+		}
+		group = 3
+	case x86asm.JCXZ:
+		if inst.DataSize != 32 || inst.AddrSize != 16 {
+			return Instruction{}, true, fmt.Errorf("%w: JCXZ data/address size %d/%d", ErrUnsupportedAddressing, inst.DataSize, inst.AddrSize)
+		}
+		group = 4
+	default:
+		return Instruction{}, false, nil
+	}
+	relative, ok := inst.Args[0].(x86asm.Rel)
+	if !ok {
+		return Instruction{}, true, fmt.Errorf("%w: %v operand %T", ErrUnsupportedAddressing, inst.Op, inst.Args[0])
+	}
+	return Instruction{Op: OpLoop, Len: uint32(inst.Len), Rel: int32(relative), Group: group}, true, nil
 }
 
 func decodeX86Xchg(inst x86asm.Inst) (Instruction, bool, error) {
