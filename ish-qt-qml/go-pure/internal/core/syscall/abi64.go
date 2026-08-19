@@ -6,6 +6,8 @@ import (
 	"runtime"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
+	corefd "github.com/mostafa637/mostafa637/go-pure/internal/core/fd"
+	corefs "github.com/mostafa637/mostafa637/go-pure/internal/core/fs"
 )
 
 // Number64 contains the native Linux x86-64 syscall numbers. It is kept
@@ -83,9 +85,12 @@ type Handler64 func(*Context64, [6]uint64) int64
 
 type Context64 struct {
 	Memory *corecpu.Memory64
+	FS     *corefs.FS
+	CWD    string
 	PID    uint64
 	TID    uint64
 	Brk    uint64
+	FDs    *corefd.Table
 }
 
 type Dispatcher64 struct {
@@ -94,7 +99,23 @@ type Dispatcher64 struct {
 }
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
-	return &Context64{Memory: memory}
+	return &Context64{Memory: memory, CWD: "/", FDs: corefd.New()}
+}
+
+const maxFD64 = uint64(^uint32(0) >> 1)
+
+func (c *Context64) InstallFile(fd uint64, file *corefd.File) error {
+	if c == nil || c.FDs == nil || file == nil || fd > maxFD64 {
+		return corefd.ErrBadFD
+	}
+	return c.FDs.InstallAt(int32(fd), file, true)
+}
+
+func (c *Context64) GetFile(fd uint64) (*corefd.File, error) {
+	if c == nil || c.FDs == nil || fd > maxFD64 {
+		return nil, corefd.ErrBadFD
+	}
+	return c.FDs.Get(int32(fd))
 }
 
 func NewDispatcher64(context *Context64) *Dispatcher64 {
@@ -117,6 +138,11 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 		runtime.Gosched()
 		return 0
 	})
+	d.Register(Sys64Read, read64)
+	d.Register(Sys64Write, write64)
+	d.Register(Sys64Close, close64)
+	d.Register(Sys64Dup, dup64)
+	d.Register(Sys64Dup2, dup264)
 	d.Register(Sys64Getrandom, getrandom64)
 	d.Register(Sys64Brk, brk64)
 	return d
@@ -158,6 +184,84 @@ func (d *Dispatcher64) Dispatch(state *corecpu.MachineState64) (bool, error) {
 	}
 	state.TrapNo = 0
 	return true, nil
+}
+
+func read64(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil || ctx.Memory == nil {
+		return int64(EFAULT)
+	}
+	file, err := ctx.GetFile(args[0])
+	if err != nil {
+		return int64(EBADF)
+	}
+	if args[2] > 1<<20 {
+		return int64(EINVAL)
+	}
+	buffer := make([]byte, int(args[2]))
+	n, readErr := file.Read(buffer)
+	if n > 0 {
+		if err := ctx.Memory.Write(corecpu.Address64(args[1]), buffer[:n]); err != nil {
+			return int64(EFAULT)
+		}
+	}
+	if readErr != nil && readErr != io.EOF && n == 0 {
+		return int64(EIO)
+	}
+	return int64(n)
+}
+
+func write64(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil || ctx.Memory == nil {
+		return int64(EFAULT)
+	}
+	file, err := ctx.GetFile(args[0])
+	if err != nil {
+		return int64(EBADF)
+	}
+	if args[2] > 1<<20 {
+		return int64(EINVAL)
+	}
+	buffer := make([]byte, int(args[2]))
+	if err := ctx.Memory.Read(corecpu.Address64(args[1]), buffer); err != nil {
+		return int64(EFAULT)
+	}
+	n, writeErr := file.Write(buffer)
+	if writeErr != nil && n == 0 {
+		return int64(EIO)
+	}
+	return int64(n)
+}
+
+func close64(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil || ctx.FDs == nil || args[0] > maxFD64 {
+		return int64(EBADF)
+	}
+	if err := ctx.FDs.Close(int32(args[0])); err != nil {
+		return int64(EBADF)
+	}
+	return 0
+}
+
+func dup64(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil || ctx.FDs == nil || args[0] > maxFD64 {
+		return int64(EBADF)
+	}
+	fd, err := ctx.FDs.Dup(int32(args[0]))
+	if err != nil {
+		return int64(EBADF)
+	}
+	return int64(fd)
+}
+
+func dup264(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil || ctx.FDs == nil || args[0] > maxFD64 || args[1] > maxFD64 {
+		return int64(EBADF)
+	}
+	fd, err := ctx.FDs.Dup2(int32(args[0]), int32(args[1]))
+	if err != nil {
+		return int64(EBADF)
+	}
+	return int64(fd)
 }
 
 func getrandom64(ctx *Context64, args [6]uint64) int64 {

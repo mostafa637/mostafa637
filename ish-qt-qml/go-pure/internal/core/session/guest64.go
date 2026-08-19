@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"debug/elf"
-	"io"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
 	coreelf "github.com/mostafa637/mostafa637/go-pure/internal/core/elf"
+	corefd "github.com/mostafa637/mostafa637/go-pure/internal/core/fd"
 	corefs "github.com/mostafa637/mostafa637/go-pure/internal/core/fs"
+
 	corekernel "github.com/mostafa637/mostafa637/go-pure/internal/core/kernel"
 	coreloader "github.com/mostafa637/mostafa637/go-pure/internal/core/loader"
 	coresyscall "github.com/mostafa637/mostafa637/go-pure/internal/core/syscall"
@@ -59,49 +60,16 @@ func (g *guestTransport) start64(ctx context.Context, process *corekernel.Proces
 	sysContext.PID = uint64(process.PID)
 	sysContext.TID = uint64(process.PID)
 	sysContext.Brk = uint64(space.Brk)
+	if err := sysContext.InstallFile(0, &corefd.File{Reader: reader}); err != nil {
+		return err
+	}
+	if err := sysContext.InstallFile(1, &corefd.File{Writer: writer}); err != nil {
+		return err
+	}
+	if err := sysContext.InstallFile(2, &corefd.File{Writer: writer}); err != nil {
+		return err
+	}
 	dispatcher := coresyscall.NewDispatcher64(sysContext)
-	dispatcher.Register(coresyscall.Sys64Read, func(context *coresyscall.Context64, args [6]uint64) int64 {
-		if context == nil || context.Memory == nil {
-			return int64(coresyscall.EFAULT)
-		}
-		if args[0] != 0 {
-			return int64(coresyscall.EBADF)
-		}
-		if args[2] > 1<<20 {
-			return int64(coresyscall.EINVAL)
-		}
-		buffer := make([]byte, int(args[2]))
-		n, readErr := reader.Read(buffer)
-		if n > 0 {
-			if err := context.Memory.Write(corecpu.Address64(args[1]), buffer[:n]); err != nil {
-				return int64(coresyscall.EFAULT)
-			}
-		}
-		if readErr != nil && readErr != io.EOF && n == 0 {
-			return int64(coresyscall.EIO)
-		}
-		return int64(n)
-	})
-	dispatcher.Register(coresyscall.Sys64Write, func(context *coresyscall.Context64, args [6]uint64) int64 {
-		if context == nil || context.Memory == nil {
-			return int64(coresyscall.EFAULT)
-		}
-		if args[0] != 1 && args[0] != 2 {
-			return int64(coresyscall.EBADF)
-		}
-		if args[2] > 1<<20 {
-			return int64(coresyscall.EINVAL)
-		}
-		buffer := make([]byte, int(args[2]))
-		if err := context.Memory.Read(corecpu.Address64(args[1]), buffer); err != nil {
-			return int64(coresyscall.EFAULT)
-		}
-		n, writeErr := writer.Write(buffer)
-		if writeErr != nil && n == 0 {
-			return int64(coresyscall.EIO)
-		}
-		return int64(n)
-	})
 
 	jit := corecpu.NewJIT64(memory)
 	jit.OnSyscall64 = func(machine *corecpu.MachineState64) (bool, error) {
