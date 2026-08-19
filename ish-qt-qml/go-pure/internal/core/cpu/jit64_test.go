@@ -777,3 +777,42 @@ func TestJIT64MOVBEAndAccumulatorConversions(t *testing.T) {
 		t.Fatalf("movbe qword rsi=%#x, want 0x0102030405060708", state.Get(RSI))
 	}
 }
+
+func TestJIT64LeaveFencesAndUD2(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x16000
+	const frameAddress Address64 = 0x25000
+	const savedBase Address64 = 0x2a000
+	code := []byte{
+		0xc9,             // leave
+		0x0f, 0xae, 0xe8, // lfence
+		0x0f, 0xae, 0xf0, // mfence
+		0x0f, 0xae, 0xf8, // sfence
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	if err := memory.Map(frameAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.WriteUint64(frameAddress, uint64(savedBase)); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RBP, uint64(frameAddress))
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("leave/fence trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.Get(RBP) != uint64(savedBase) || state.Get(RSP) != uint64(frameAddress+8) {
+		t.Fatalf("leave rbp=%#x rsp=%#x, want rbp=%#x rsp=%#x", state.Get(RBP), state.Get(RSP), savedBase, frameAddress+8)
+	}
+
+	invalidMemory := NewMemory64()
+	const invalidAddress Address64 = 0x17000
+	mapExecutable64(t, invalidMemory, invalidAddress, []byte{0x0f, 0x0b}) // ud2
+	invalidState := NewMachineState64(invalidMemory)
+	invalidState.RIP = uint64(invalidAddress)
+	if trap := NewJIT64(invalidMemory).RunToInterrupt(invalidState); trap != Trap64InvalidOpcode || invalidState.TrapNo != Trap64InvalidOpcode {
+		t.Fatalf("ud2 trap=%#x trapNo=%#x, want %#x", trap, invalidState.TrapNo, Trap64InvalidOpcode)
+	}
+}

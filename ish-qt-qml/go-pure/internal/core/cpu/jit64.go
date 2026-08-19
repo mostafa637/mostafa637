@@ -737,6 +737,21 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		return makeCall64(address, uint8(inst.Len), value), true, nil
 	case x86asm.RET:
 		return makeRet64(address, uint8(inst.Len)), true, nil
+	case x86asm.LEAVE:
+		stackWidth := uint8(8)
+		if inst.DataSize == 16 {
+			// In long mode 0x66 selects the 32-bit LEAVE form.
+			stackWidth = 4
+		}
+		return makeLeave64(address, uint8(inst.Len), stackWidth), false, nil
+	case x86asm.LFENCE, x86asm.MFENCE, x86asm.SFENCE:
+		return makeFence64(address, uint8(inst.Len)), false, nil
+	case x86asm.UD2:
+		return microOp64{Address: address, Size: uint8(inst.Len), Run: func(state *MachineState64, next uint64) (Flow64, error) {
+			state.RIP = next
+			state.TrapNo = Trap64InvalidOpcode
+			return Flow64Interrupt, nil
+		}}, true, nil
 	case x86asm.SYSCALL:
 		return microOp64{Address: address, Size: uint8(inst.Len), Run: func(state *MachineState64, next uint64) (Flow64, error) {
 			state.RIP = next
@@ -2589,6 +2604,36 @@ func makeConvertAccumulator64(address uint64, size uint8, op x86asm.Op) microOp6
 		default:
 			return Flow64Stop, ErrUnsupported64
 		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeLeave64(address uint64, size, stackWidth uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		stackPointer := state.Get(RBP)
+		if stackWidth == 4 {
+			stackPointer = uint64(uint32(stackPointer))
+		}
+		value, err := readString64(state, stackPointer, stackWidth)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		if stackWidth == 4 {
+			state.Set(RSP, uint64(uint32(stackPointer+4)))
+		} else {
+			state.Set(RSP, stackPointer+8)
+		}
+		writeReg64(state, operand64{Kind: operand64Reg, Reg: RBP, Width: stackWidth}, value)
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeFence64(address uint64, size uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		// Guest memory operations are sequenced by the interpreter/JIT loop. The
+		// fence has no additional observable effect in this single-guest model.
 		state.RIP = next
 		return Flow64Continue, nil
 	}}
