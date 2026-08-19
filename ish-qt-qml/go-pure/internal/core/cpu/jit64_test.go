@@ -4994,3 +4994,51 @@ func TestJIT64PSHUFW(t *testing.T) {
 		t.Fatalf("FPU TOP=%d after PSHUFW, want 0", got)
 	}
 }
+
+func TestJIT64PauseAndPrefetchHints(t *testing.T) {
+	const codeAddress Address64 = 0x6c000
+	const unmappedAddress Address64 = 0x7f0000000000
+	memory := NewMemory64()
+	code := []byte{
+		0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax,unmappedAddress
+		0xf3, 0x90, // pause
+		0x0f, 0x18, 0x00, // prefetchnta [rax]
+		0x0f, 0x18, 0x08, // prefetcht0 [rax]
+		0x0f, 0x18, 0x10, // prefetcht1 [rax]
+		0x0f, 0x18, 0x18, // prefetcht2 [rax]
+		0x0f, 0x0d, 0x08, // prefetchw [rax]
+		0xf4, // hlt
+	}
+	binary.LittleEndian.PutUint64(code[2:], uint64(unmappedAddress))
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Regs[RDI] = 0x1122334455667788
+	state.XMM[3] = [16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+	state.MMX[3] = 0x8877665544332211
+	state.SetFPUTop(4)
+	state.RFLAGS = Flag64OF | Flag64SF | Flag64AF | Flag64PF | Flag64CF | Flag64ZF
+	flagsBefore := state.RFLAGS
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("hints changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	if state.Get(RAX) != uint64(unmappedAddress) {
+		t.Fatalf("RAX=%#x, want %#x", state.Get(RAX), unmappedAddress)
+	}
+	if state.Get(RDI) != 0x1122334455667788 {
+		t.Fatalf("RDI changed to %#x", state.Get(RDI))
+	}
+	if state.XMM[3] != [16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15} {
+		t.Fatalf("XMM3 changed to %x", state.XMM[3])
+	}
+	if state.MMX[3] != 0x8877665544332211 {
+		t.Fatalf("MMX3 changed to %#x", state.MMX[3])
+	}
+	if state.FPUTop() != 4 {
+		t.Fatalf("FPU TOP changed to %d, want 4", state.FPUTop())
+	}
+}

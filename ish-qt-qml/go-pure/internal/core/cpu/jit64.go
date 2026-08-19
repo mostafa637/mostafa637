@@ -420,11 +420,14 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		return left, right, err
 	}
 	switch inst.Op {
-	case x86asm.NOP:
-		return microOp64{Address: address, Size: uint8(inst.Len), Run: func(state *MachineState64, next uint64) (Flow64, error) {
-			state.RIP = next
-			return Flow64Continue, nil
-		}}, false, nil
+	case x86asm.NOP, x86asm.PAUSE:
+		return makeNoOp64(address, uint8(inst.Len)), false, nil
+	case x86asm.PREFETCHNTA, x86asm.PREFETCHT0, x86asm.PREFETCHT1, x86asm.PREFETCHT2, x86asm.PREFETCHW:
+		source, err := operand64FromArg(arg(0), 1)
+		if err != nil || source.Kind != operand64Mem {
+			return microOp64{}, false, fmt.Errorf("%s requires a memory operand: %v", inst.Op, err)
+		}
+		return makeNoOp64(address, uint8(inst.Len)), false, nil
 	case x86asm.RDRAND:
 		destination, err := rdrandDestination64(inst, arg(0))
 		if err != nil || destination.Kind != operand64Reg || (destination.Width != 2 && destination.Width != 4 && destination.Width != 8) {
@@ -4199,6 +4202,13 @@ func makeUnary64(address uint64, size uint8, op x86asm.Op, dst operand64) microO
 		if err := writeOperand64(state, dst, next, result); err != nil {
 			return Flow64Stop, err
 		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeNoOp64(address uint64, size uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
 		state.RIP = next
 		return Flow64Continue, nil
 	}}
