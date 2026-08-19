@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component xmlns="https://specifications.freedesktop.org/metainfo/1.0" type="desktop-application">
+  <id>com.example.GtkHelloWorld</id>
+  <name>GTK Hello World</name>
+  <summary>تطبيق GTK بسيط لأندرويد</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>تطبيق تجريبي بسيط مكتوب بلغة C باستخدام GTK4 ويعرض رسالة Hello World.</p>
+  </description>
+  <launchable type="desktop-id">com.example.GtkHelloWorld.desktop</launchable>
+  <provides>
+    <binary>gtk-hello-android</binary>
+  </provides>
+  <releases>
+    <release version="1.0.0" date="2026-08-19" />
+  </releases>
+</component>
