@@ -232,3 +232,155 @@ func TestCoreSessionGuestStdinStdout(t *testing.T) {
 		}
 	}
 }
+
+func guestExitELF64() []byte {
+	const (
+		headerSize    = 64
+		programSize   = 56
+		programOffset = headerSize
+		payloadOffset = 0x1000
+		entry         = 0x00400000
+	)
+	code := []byte{
+		0xb8, 0x3c, 0x00, 0x00, 0x00, // mov eax, SYS_exit
+		0xbf, 0x2a, 0x00, 0x00, 0x00, // mov edi, 42
+		0x0f, 0x05, // syscall
+	}
+	data := make([]byte, payloadOffset+len(code))
+	copy(data[0:4], []byte{0x7f, 'E', 'L', 'F'})
+	data[4], data[5], data[6], data[7] = 2, 1, 1, 0
+	binary.LittleEndian.PutUint16(data[16:], 2)
+	binary.LittleEndian.PutUint16(data[18:], 62)
+	binary.LittleEndian.PutUint32(data[20:], 1)
+	binary.LittleEndian.PutUint64(data[24:], entry)
+	binary.LittleEndian.PutUint64(data[32:], programOffset)
+	binary.LittleEndian.PutUint16(data[52:], headerSize)
+	binary.LittleEndian.PutUint16(data[54:], programSize)
+	binary.LittleEndian.PutUint16(data[56:], 1)
+	ph := data[programOffset : programOffset+programSize]
+	binary.LittleEndian.PutUint32(ph[0:], 1)
+	binary.LittleEndian.PutUint32(ph[4:], 5)
+	binary.LittleEndian.PutUint64(ph[8:], payloadOffset)
+	binary.LittleEndian.PutUint64(ph[16:], entry)
+	binary.LittleEndian.PutUint64(ph[24:], entry)
+	binary.LittleEndian.PutUint64(ph[32:], uint64(len(code)))
+	binary.LittleEndian.PutUint64(ph[40:], 0x1000)
+	binary.LittleEndian.PutUint64(ph[48:], 0x1000)
+	copy(data[payloadOffset:], code)
+	return data
+}
+
+func TestCoreSessionGuestELF64Exit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "exit64"), guestExitELF64(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{Rootfs: root, Shell: "/bin/exit64", UseGuest: true, Bootstrap: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Start(context.Background(), 80, 24); err != nil {
+		t.Fatalf("ELF64 Start: %v", err)
+	}
+	select {
+	case _, ok := <-s.Output():
+		if ok {
+			for range s.Output() {
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ELF64 guest exit")
+	}
+	if code, exited := s.Kernel().ExitCode(); !exited || code != 42 {
+		t.Fatalf("ELF64 guest exit: exited=%v code=%d", exited, code)
+	}
+}
+
+func guestEchoELF64() []byte {
+	const (
+		headerSize    = 64
+		programSize   = 56
+		programOffset = headerSize
+		payloadOffset = 0x1000
+		entry         = 0x00400000
+		buffer        = 0x00401000
+	)
+	code := []byte{
+		0xb8, 0x00, 0x00, 0x00, 0x00, // mov eax, SYS_read
+		0xbf, 0x00, 0x00, 0x00, 0x00, // mov edi, 0
+		0xbe, byte(buffer & 0xff), byte((buffer >> 8) & 0xff), byte((buffer >> 16) & 0xff), byte((buffer >> 24) & 0xff), // mov esi, buffer
+		0xba, 0x04, 0x00, 0x00, 0x00, // mov edx, 4
+		0x0f, 0x05, // syscall
+		0xb8, 0x01, 0x00, 0x00, 0x00, // mov eax, SYS_write
+		0xbf, 0x01, 0x00, 0x00, 0x00, // mov edi, 1
+		0xbe, byte(buffer & 0xff), byte((buffer >> 8) & 0xff), byte((buffer >> 16) & 0xff), byte((buffer >> 24) & 0xff), // mov esi, buffer
+		0xba, 0x04, 0x00, 0x00, 0x00, // mov edx, 4
+		0x0f, 0x05, // syscall
+		0xb8, 0x3c, 0x00, 0x00, 0x00, // mov eax, SYS_exit
+		0x31, 0xff, // xor edi, edi
+		0x0f, 0x05, // syscall
+	}
+	data := make([]byte, payloadOffset+len(code))
+	copy(data[0:4], []byte{0x7f, 'E', 'L', 'F'})
+	data[4], data[5], data[6], data[7] = 2, 1, 1, 0
+	binary.LittleEndian.PutUint16(data[16:], 2)
+	binary.LittleEndian.PutUint16(data[18:], 62)
+	binary.LittleEndian.PutUint32(data[20:], 1)
+	binary.LittleEndian.PutUint64(data[24:], entry)
+	binary.LittleEndian.PutUint64(data[32:], programOffset)
+	binary.LittleEndian.PutUint16(data[52:], headerSize)
+	binary.LittleEndian.PutUint16(data[54:], programSize)
+	binary.LittleEndian.PutUint16(data[56:], 1)
+	ph := data[programOffset : programOffset+programSize]
+	binary.LittleEndian.PutUint32(ph[0:], 1)
+	binary.LittleEndian.PutUint32(ph[4:], 7)
+	binary.LittleEndian.PutUint64(ph[8:], payloadOffset)
+	binary.LittleEndian.PutUint64(ph[16:], entry)
+	binary.LittleEndian.PutUint64(ph[24:], entry)
+	binary.LittleEndian.PutUint64(ph[32:], uint64(len(code)))
+	binary.LittleEndian.PutUint64(ph[40:], 0x2000)
+	binary.LittleEndian.PutUint64(ph[48:], 0x1000)
+	copy(data[payloadOffset:], code)
+	return data
+}
+
+func TestCoreSessionGuestELF64StdinStdout(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "echo64"), guestEchoELF64(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{Rootfs: root, Shell: "/bin/echo64", UseGuest: true, Bootstrap: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Start(context.Background(), 80, 24); err != nil {
+		t.Fatalf("ELF64 echo Start: %v", err)
+	}
+	if err := s.Write([]byte("pong")); err != nil {
+		t.Fatalf("ELF64 echo Write: %v", err)
+	}
+	var output strings.Builder
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case chunk, ok := <-s.Output():
+			if !ok {
+				t.Fatalf("ELF64 output closed before echo: %q", output.String())
+			}
+			output.Write(chunk)
+			if output.String() == "pong" {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for ELF64 echo: %q", output.String())
+		}
+	}
+}

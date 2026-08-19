@@ -105,6 +105,21 @@ func (p *Process) ExitCode() (int32, bool) {
 	return p.Context.ExitCode, p.Context.Exited
 }
 
+// SetExitStatus records termination from an architecture-specific guest runner.
+// The i386 dispatcher writes the same fields internally; this method keeps the
+// x86-64 JIT lifecycle from reaching into the process context without locking.
+func (p *Process) SetExitStatus(code int32) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.Context != nil {
+		p.Context.ExitCode = code
+		p.Context.Exited = true
+	}
+}
+
 func (p *Process) Close() error {
 	p.mu.Lock()
 	if p.closed {

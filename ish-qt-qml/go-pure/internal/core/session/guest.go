@@ -47,6 +47,9 @@ func (g *guestTransport) start(ctx context.Context, process *corekernel.Process,
 	if rows < 1 {
 		rows = 24
 	}
+	if isELF64Image(data) {
+		return g.start64(ctx, process, fake, data, cols, rows)
+	}
 	if err := process.SetWindowSize(uint16(cols), uint16(rows)); err != nil {
 		return err
 	}
