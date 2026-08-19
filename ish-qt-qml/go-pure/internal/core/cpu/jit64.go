@@ -3,9 +3,11 @@ package cpu
 import (
 	"errors"
 	"fmt"
+	"math"
 	"math/bits"
 	"sync"
 
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/emu/fpu"
 	"golang.org/x/arch/x86/x86asm"
 )
 
@@ -412,6 +414,57 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			state.RIP = next
 			return Flow64Continue, nil
 		}}, false, nil
+	case x86asm.FLD1, x86asm.FLDZ:
+		return makeFPUConst64(address, uint8(inst.Len), inst.Op), false, nil
+	case x86asm.FCHS, x86asm.FABS:
+		return makeFPUUnary64(address, uint8(inst.Len), inst.Op), false, nil
+	case x86asm.FINCSTP, x86asm.FDECSTP:
+		return makeFPUTopMove64(address, uint8(inst.Len), inst.Op), false, nil
+	case x86asm.FXCH:
+		index, ok := x87Index64(arg(0))
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("FXCH operand %v", arg(0))
+		}
+		return makeFPUFXCH64(address, uint8(inst.Len), index), false, nil
+	case x86asm.FLD:
+		if index, ok := x87Index64(arg(0)); ok {
+			return makeFPULoadReg64(address, uint8(inst.Len), index), false, nil
+		}
+		if mem, ok := arg(0).(x86asm.Mem); ok && (inst.MemBytes == 4 || inst.MemBytes == 8) {
+			operand, err := operand64FromArg(mem, uint8(inst.MemBytes))
+			if err != nil {
+				return microOp64{}, false, err
+			}
+			return makeFPULoadMem64(address, uint8(inst.Len), operand), false, nil
+		}
+		return microOp64{}, false, fmt.Errorf("FLD operand %v", arg(0))
+	case x86asm.FST, x86asm.FSTP:
+		if index, ok := x87Index64(arg(0)); ok {
+			return makeFPUStoreReg64(address, uint8(inst.Len), inst.Op, index), false, nil
+		}
+		if mem, ok := arg(0).(x86asm.Mem); ok && (inst.MemBytes == 4 || inst.MemBytes == 8) {
+			operand, err := operand64FromArg(mem, uint8(inst.MemBytes))
+			if err != nil {
+				return microOp64{}, false, err
+			}
+			return makeFPUStoreMem64(address, uint8(inst.Len), inst.Op, operand), false, nil
+		}
+		return microOp64{}, false, fmt.Errorf("FST operand %v", arg(0))
+	case x86asm.FADD, x86asm.FADDP, x86asm.FSUB, x86asm.FSUBP, x86asm.FSUBRP, x86asm.FMUL, x86asm.FMULP, x86asm.FDIV, x86asm.FDIVP, x86asm.FDIVRP:
+		if mem, ok := arg(0).(x86asm.Mem); ok && (inst.MemBytes == 4 || inst.MemBytes == 8) {
+			operand, err := operand64FromArg(mem, uint8(inst.MemBytes))
+			if err != nil {
+				return microOp64{}, false, err
+			}
+			return makeFPUArithmeticMem64(address, uint8(inst.Len), inst.Op, operand), false, nil
+		}
+		left, leftOK := x87Index64(arg(0))
+		right, rightOK := x87Index64(arg(1))
+		if !leftOK || !rightOK {
+			return microOp64{}, false, fmt.Errorf("FPU arithmetic operands %v", inst.Args)
+		}
+		return makeFPUArithmeticReg64(address, uint8(inst.Len), inst.Op, left, right), false, nil
+
 	case x86asm.MOV:
 		left, right, err := two()
 		if err != nil || left.Kind == operand64Imm || left.Kind == operand64Rel {
@@ -669,6 +722,170 @@ func writeOperand64(state *MachineState64, operand operand64, next, value uint64
 		raw[i] = byte(value >> (8 * i))
 	}
 	return state.Memory.Write(address, raw[:operand.Width])
+}
+
+func x87Index64(arg x86asm.Arg) (uint8, bool) {
+	reg, ok := arg.(x86asm.Reg)
+	if !ok || reg < x86asm.F0 || reg > x86asm.F7 {
+		return 0, false
+	}
+	return uint8(reg - x86asm.F0), true
+}
+
+func makeFPUConst64(address uint64, size uint8, op x86asm.Op) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value := fpu.FromFloat64(0)
+		if op == x86asm.FLD1 {
+			value = fpu.FromFloat64(1)
+		}
+		state.PushFP(value)
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeFPUUnary64(address uint64, size uint8, op x86asm.Op) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value := state.FPAt(0)
+		if op == x86asm.FCHS {
+			value = value.Neg()
+		} else {
+			value = value.Abs()
+		}
+		state.SetFPAt(0, value)
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeFPUTopMove64(address uint64, size uint8, op x86asm.Op) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if op == x86asm.FINCSTP {
+			state.MoveFPUTop(1)
+		} else {
+			state.MoveFPUTop(-1)
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeFPUFXCH64(address uint64, size uint8, index uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		first := state.FPAt(0)
+		second := state.FPAt(index)
+		state.SetFPAt(0, second)
+		state.SetFPAt(index, first)
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeFPULoadReg64(address uint64, size uint8, index uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		state.PushFP(state.FPAt(index))
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeFPUStoreReg64(address uint64, size uint8, op x86asm.Op, index uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		state.SetFPAt(index, state.FPAt(0))
+		if op == x86asm.FSTP {
+			state.PopFP()
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeFPULoadMem64(address uint64, size uint8, operand operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		raw, err := readOperand64(state, operand, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var value float64
+		if operand.Width == 4 {
+			value = float64(math.Float32frombits(uint32(raw)))
+		} else {
+			value = math.Float64frombits(raw)
+		}
+		state.PushFP(fpu.FromFloat64(value))
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeFPUStoreMem64(address uint64, size uint8, op x86asm.Op, operand operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value := state.FPAt(0).ToFloat64()
+		var raw uint64
+		if operand.Width == 4 {
+			raw = uint64(math.Float32bits(float32(value)))
+		} else {
+			raw = math.Float64bits(value)
+		}
+		if err := writeOperand64(state, operand, next, raw); err != nil {
+			return Flow64Stop, err
+		}
+		if op == x86asm.FSTP {
+			state.PopFP()
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func fpu64Arithmetic(op x86asm.Op, left, right fpu.Value) fpu.Value {
+	switch op {
+	case x86asm.FADD, x86asm.FADDP:
+		return left.Add(right)
+	case x86asm.FSUB, x86asm.FSUBP:
+		return left.Sub(right)
+	case x86asm.FSUBRP:
+		return right.Sub(left)
+	case x86asm.FMUL, x86asm.FMULP:
+		return left.Mul(right)
+	case x86asm.FDIV, x86asm.FDIVP:
+		return left.Div(right)
+	case x86asm.FDIVRP:
+		return right.Div(left)
+	default:
+		return left
+	}
+}
+
+func makeFPUArithmeticReg64(address uint64, size uint8, op x86asm.Op, leftIndex, rightIndex uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left := state.FPAt(leftIndex)
+		right := state.FPAt(rightIndex)
+		state.SetFPAt(leftIndex, fpu64Arithmetic(op, left, right))
+		if op == x86asm.FADDP || op == x86asm.FSUBP || op == x86asm.FSUBRP || op == x86asm.FMULP || op == x86asm.FDIVP || op == x86asm.FDIVRP {
+			state.PopFP()
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeFPUArithmeticMem64(address uint64, size uint8, op x86asm.Op, operand operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		raw, err := readOperand64(state, operand, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var value float64
+		if operand.Width == 4 {
+			value = float64(math.Float32frombits(uint32(raw)))
+		} else {
+			value = math.Float64frombits(raw)
+		}
+		state.SetFPAt(0, fpu64Arithmetic(op, state.FPAt(0), fpu.FromFloat64(value)))
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
 }
 
 func readVector64(state *MachineState64, operand operand64, next uint64) ([16]byte, error) {

@@ -1,6 +1,9 @@
 package cpu
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func mapExecutable64(t *testing.T, memory *Memory64, start Address64, code []byte) {
 	t.Helper()
@@ -184,5 +187,46 @@ func TestJIT64SSE2MovesAndLogicalOps(t *testing.T) {
 	}
 	if output != want || state.XMM[0] != want {
 		t.Fatalf("SSE result output=%x xmm0=%x want=%x", output, state.XMM[0], want)
+	}
+}
+
+func TestJIT64X87StackAndMemory(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x3000
+	const dataAddress Address64 = 0x6000
+	code := []byte{
+		0xd9, 0xe8, // fld1
+		0xd9, 0xee, // fldz
+		0xd9, 0xe0, // fchs
+		0xd8, 0xc1, // fadd st0, st1
+		0xdd, 0x1f, // fstp qword ptr [rdi]
+		0xf4, // hlt
+	}
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	jit := NewJIT64(memory)
+	trap := jit.RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v", trap, state.Halted)
+	}
+	value, err := memory.ReadUint64(dataAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := math.Float64frombits(value); got != 1 {
+		t.Fatalf("stored x87 value=%v, want 1", got)
+	}
+	if state.FPUTop() != 7 {
+		t.Fatalf("FPU top=%d, want 7 after one pop", state.FPUTop())
 	}
 }

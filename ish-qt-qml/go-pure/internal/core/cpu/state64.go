@@ -1,6 +1,10 @@
 package cpu
 
-import "math/bits"
+import (
+	"math/bits"
+
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/emu/fpu"
+)
 
 // Reg64 identifies one of the sixteen general-purpose registers available in
 // long mode. The numbering deliberately matches the architectural register
@@ -104,6 +108,9 @@ type MachineState64 struct {
 	Lazy uint8
 
 	XMM    [16][16]byte
+	FP     [8]fpu.Value
+	FSW    uint16
+	FCW    uint16
 	FSBase uint64
 	GSBase uint64
 	TLS    uint64
@@ -117,7 +124,7 @@ type MachineState64 struct {
 }
 
 func NewMachineState64(memory *Memory64) *MachineState64 {
-	return &MachineState64{Memory: memory, RFLAGS: Flag64IF}
+	return &MachineState64{Memory: memory, RFLAGS: Flag64IF, FCW: 0x037f}
 }
 
 func (s *MachineState64) Get(reg Reg64) uint64 {
@@ -194,6 +201,69 @@ func (s *MachineState64) ExpandFlags() {
 func (s *MachineState64) SetRFLAGS(value uint64) {
 	s.RFLAGS = value | Flag64IF
 	s.ExpandFlags()
+}
+
+const (
+	fpu64StatusC0 uint16 = 1 << 8
+	fpu64StatusC1 uint16 = 1 << 9
+	fpu64StatusC2 uint16 = 1 << 10
+	fpu64StatusC3 uint16 = 1 << 14
+)
+
+func (s *MachineState64) FPUTop() uint8 {
+	return uint8((s.FSW >> 11) & 7)
+}
+
+func (s *MachineState64) SetFPUTop(top uint8) {
+	s.FSW = (s.FSW &^ (7 << 11)) | uint16(top&7)<<11
+}
+
+func (s *MachineState64) MoveFPUTop(delta int8) {
+	top := int16(s.FPUTop()) + int16(delta)
+	top %= 8
+	if top < 0 {
+		top += 8
+	}
+	s.SetFPUTop(uint8(top))
+}
+
+func (s *MachineState64) FPAt(index uint8) fpu.Value {
+	return s.FP[(s.FPUTop()+index)&7]
+}
+
+func (s *MachineState64) SetFPAt(index uint8, value fpu.Value) {
+	s.FP[(s.FPUTop()+index)&7] = value
+}
+
+func (s *MachineState64) PushFP(value fpu.Value) {
+	s.MoveFPUTop(-1)
+	s.FP[s.FPUTop()] = value
+}
+
+func (s *MachineState64) PopFP() fpu.Value {
+	value := s.FPAt(0)
+	s.MoveFPUTop(1)
+	return value
+}
+
+func (s *MachineState64) SetFPUCondition(c0, c1, c2, c3 bool) {
+	s.FSW &^= fpu64StatusC0 | fpu64StatusC1 | fpu64StatusC2 | fpu64StatusC3
+	if c0 {
+		s.FSW |= fpu64StatusC0
+	}
+	if c1 {
+		s.FSW |= fpu64StatusC1
+	}
+	if c2 {
+		s.FSW |= fpu64StatusC2
+	}
+	if c3 {
+		s.FSW |= fpu64StatusC3
+	}
+}
+
+func (s *MachineState64) FPUStatusWord() uint16 {
+	return s.FSW
 }
 
 func boolByte64(value bool) uint8 {
