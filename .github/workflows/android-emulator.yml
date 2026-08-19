@@ -22,14 +22,14 @@ jobs:
       - name: Run APK on Android Emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
-          target: default
+          api-level: 34
+          target: aosp
           arch: x86_64
           profile: pixel_2
           force-avd-creation: true
-          cores: 2
-          ram-size: 2048M
-          heap-size: 512M
+          cores: 4
+          ram-size: 4096M
+          heap-size: 1024M
           disk-size: 4096M
           emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
           disable-animations: true
@@ -41,6 +41,9 @@ jobs:
             adb shell am force-stop com.example.gtkhelloworld || true
             adb logcat -c || true
             timeout 30s adb shell am start -n com.example.gtkhelloworld/org.gtk.android.ToplevelActivity
+            sleep 20
+            adb exec-out screencap -p > gtk-hello-android/emulator-screen-before-dismiss.png || true
+            adb shell input keyevent KEYCODE_BACK || true
             sleep 10
             adb logcat -d -v threadtime > gtk-hello-android/logcat.txt || true
             adb exec-out screencap -p > gtk-hello-android/emulator-screen.png || true
@@ -55,6 +58,7 @@ jobs:
           path: |
             gtk-hello-android/gtk-hello-android-release.apk
             gtk-hello-android/emulator-screen.png
+            gtk-hello-android/emulator-screen-before-dismiss.png
             gtk-hello-android/logcat.txt
           if-no-files-found: warn
 
@@ -68,6 +72,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch --orphan debug/emulator-latest
           git rm -r --cached . >/dev/null 2>&1 || true
-          git add gtk-hello-android/emulator-screen.png gtk-hello-android/logcat.txt
+          git add gtk-hello-android/emulator-screen.png gtk-hello-android/emulator-screen-before-dismiss.png gtk-hello-android/logcat.txt
           git commit -m "chore: publish latest emulator diagnostics [skip ci]" || true
           git push origin HEAD:refs/heads/debug/emulator-latest --force
