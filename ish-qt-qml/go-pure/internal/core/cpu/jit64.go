@@ -760,6 +760,38 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("scalar SSE compare right: %v", rightErr)
 		}
 		return makeSSECompare64(address, uint8(inst.Len), width, left, right), false, nil
+	case x86asm.CMPPS, x86asm.CMPPD:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, sourceErr := operand64FromArg(arg(1), 16)
+		if sourceErr != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, sourceErr)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("%s requires an immediate predicate", inst.Op)
+		}
+		return makeSSEComparePredicate64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
+	case x86asm.CMPSS, x86asm.CMPSD_XMM:
+		width := uint8(4)
+		if inst.Op == x86asm.CMPSD_XMM {
+			width = 8
+		}
+		destination, err := operand64ScalarSSEFromArg(arg(0), width)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, sourceErr := operand64ScalarSSEFromArg(arg(1), width)
+		if sourceErr != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, sourceErr)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("%s requires an immediate predicate", inst.Op)
+		}
+		return makeSSEComparePredicate64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
 	case x86asm.CVTSI2SS, x86asm.CVTSI2SD:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
@@ -2518,6 +2550,110 @@ func makeSSEFloatMovemask64(address uint64, size uint8, op x86asm.Op, destinatio
 		state.RIP = next
 		return Flow64Continue, nil
 	}}
+}
+
+func makeSSEComparePredicate64(address uint64, size uint8, op x86asm.Op, destination, source operand64, immediate uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		width := uint8(4)
+		packed := op == x86asm.CMPPS || op == x86asm.CMPPD
+		if op == x86asm.CMPPD || op == x86asm.CMPSD_XMM {
+			width = 8
+		}
+		var right [16]byte
+		if packed || source.Kind == operand64XMM {
+			right, err = readVector64(state, source, next)
+		} else {
+			right, err = readVectorWidth64(state, source, next, width)
+		}
+		if err != nil {
+			return Flow64Stop, err
+		}
+		result := left
+		lanes := 1
+		if packed {
+			lanes = int(16 / width)
+			result = [16]byte{}
+		}
+		allOnes := uint64(^uint32(0))
+		if width == 8 {
+			allOnes = ^uint64(0)
+		}
+		for lane := 0; lane < lanes; lane++ {
+			offset := lane * int(width)
+			aBits := uint64(0)
+			bBits := uint64(0)
+			if width == 4 {
+				aBits = uint64(binary.LittleEndian.Uint32(left[offset:]))
+				bBits = uint64(binary.LittleEndian.Uint32(right[offset:]))
+			} else {
+				aBits = binary.LittleEndian.Uint64(left[offset:])
+				bBits = binary.LittleEndian.Uint64(right[offset:])
+			}
+			if sseComparePredicate64(aBits, bBits, width, immediate&7) {
+				if width == 4 {
+					binary.LittleEndian.PutUint32(result[offset:], uint32(allOnes))
+				} else {
+					binary.LittleEndian.PutUint64(result[offset:], allOnes)
+				}
+			} else if width == 4 {
+				binary.LittleEndian.PutUint32(result[offset:], 0)
+			} else {
+				binary.LittleEndian.PutUint64(result[offset:], 0)
+			}
+		}
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func sseComparePredicate64(aBits, bBits uint64, width, predicate uint8) bool {
+	var a, b float64
+	var unordered bool
+	if width == 4 {
+		a32 := math.Float32frombits(uint32(aBits))
+		b32 := math.Float32frombits(uint32(bBits))
+		a, b = float64(a32), float64(b32)
+		unordered = math.IsNaN(float64(a32)) || math.IsNaN(float64(b32))
+	} else {
+		a = math.Float64frombits(aBits)
+		b = math.Float64frombits(bBits)
+		unordered = math.IsNaN(a) || math.IsNaN(b)
+	}
+	if unordered {
+		switch predicate & 7 {
+		case 3, 4, 5, 6:
+			return true
+		default:
+			return false
+		}
+	}
+	switch predicate & 7 {
+	case 0:
+		return a == b
+	case 1:
+		return a < b
+	case 2:
+		return a <= b
+	case 3:
+		return false
+	case 4:
+		return a != b
+	case 5:
+		return !(a < b)
+	case 6:
+		return !(a <= b)
+	case 7:
+		return true
+	default:
+		return false
+	}
 }
 
 func makeSSEPTest64(address uint64, size uint8, destination, source operand64) microOp64 {

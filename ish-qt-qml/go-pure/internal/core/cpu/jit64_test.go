@@ -4462,3 +4462,102 @@ func TestJIT64PMULLDPMULDQ(t *testing.T) {
 		t.Fatalf("PMULDQ memory high=%#x, want %#x", got, uint64(0xc000000080000000))
 	}
 }
+
+func TestJIT64SSEFloatComparePredicates(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x6a000
+		dataAddress Address64 = 0x6b000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	// CMPPS xmm0,xmm1,EQ_OQ; CMPPD xmm2,xmm3,UNORD_Q;
+	// CMPSS xmm4,xmm5,NEQ_UQ; CMPSD_XMM xmm6,[rdi],ORD_Q; hlt.
+	code := []byte{
+		0x0f, 0xc2, 0xc1, 0x00,
+		0x66, 0x0f, 0xc2, 0xd3, 0x03,
+		0xf3, 0x0f, 0xc2, 0xe5, 0x04,
+		0xf2, 0x0f, 0xc2, 0x37, 0x07,
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	var memoryValue [8]byte
+	binary.LittleEndian.PutUint64(memoryValue[:], math.Float64bits(math.NaN()))
+	if err := memory.Write(dataAddress, memoryValue[:]); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	state.RFLAGS = Flag64CF | Flag64ZF | Flag64SF
+	flagsBefore := state.RFLAGS
+	putFloat32 := func(index uint8, values ...float32) {
+		var raw [16]byte
+		for lane, value := range values {
+			binary.LittleEndian.PutUint32(raw[lane*4:], math.Float32bits(value))
+		}
+		copy(state.XMM[index][:], raw[:])
+	}
+	putFloat64 := func(index uint8, values ...float64) {
+		var raw [16]byte
+		for lane, value := range values {
+			binary.LittleEndian.PutUint64(raw[lane*8:], math.Float64bits(value))
+		}
+		copy(state.XMM[index][:], raw[:])
+	}
+	putFloat32(0, 1, 2, float32(math.NaN()), -1)
+	putFloat32(1, 1, 3, 0, -2)
+	putFloat64(2, 1, math.NaN())
+	putFloat64(3, 2, 0)
+	putFloat32(4, 1)
+	putFloat32(5, 2)
+	putFloat64(6, -1)
+	for i := 4; i < 16; i++ {
+		state.XMM[4][i] = byte(0xa0 + i)
+		state.XMM[6][i] = byte(0xb0 + i)
+	}
+	upper4 := state.XMM[4][4:]
+	upper6 := state.XMM[6][8:]
+	jit := NewJIT64(memory)
+	trap := jit.RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	var want0 [16]byte
+	binary.LittleEndian.PutUint32(want0[0:], math.Float32bits(float32(math.NaN())))
+	binary.LittleEndian.PutUint32(want0[4:], 0)
+	binary.LittleEndian.PutUint32(want0[8:], 0)
+	binary.LittleEndian.PutUint32(want0[12:], 0)
+	// The NaN lane is false for EQ_OQ; replace the first lane with true.
+	binary.LittleEndian.PutUint32(want0[0:], ^uint32(0))
+	if state.XMM[0] != want0 {
+		t.Fatalf("CMPPS result=%x want=%x", state.XMM[0], want0)
+	}
+	var want2 [16]byte
+	binary.LittleEndian.PutUint64(want2[0:], 0)
+	binary.LittleEndian.PutUint64(want2[8:], ^uint64(0))
+	if state.XMM[2] != want2 {
+		t.Fatalf("CMPPD result=%x want=%x", state.XMM[2], want2)
+	}
+	if got := binary.LittleEndian.Uint32(state.XMM[4][:]); got != ^uint32(0) {
+		t.Fatalf("CMPSS low=%#x want all ones", got)
+	}
+	if !bytes.Equal(state.XMM[4][4:], upper4) {
+		t.Fatalf("CMPSS upper=%x want=%x", state.XMM[4][4:], upper4)
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[6][:]); got != 0 {
+		t.Fatalf("CMPSD_XMM low=%#x want zero for unordered ORD_Q", got)
+	}
+	if !bytes.Equal(state.XMM[6][8:], upper6) {
+		t.Fatalf("CMPSD_XMM upper=%x want=%x", state.XMM[6][8:], upper6)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("CMP predicates changed flags: got=%#x want=%#x", state.RFLAGS, flagsBefore)
+	}
+}
