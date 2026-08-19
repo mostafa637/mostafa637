@@ -181,6 +181,43 @@ func (s *MachineState) SetEFlags(value uint32) {
 	s.ExpandFlags()
 }
 
+// FPUTop returns the physical FP register selected as logical ST(0).
+// The x87 TOP field occupies bits 11..13 of the status word.
+func (s *MachineState) FPUTop() uint8 {
+	return uint8((s.FSW >> 11) & 7)
+}
+
+func (s *MachineState) SetFPUTop(top uint8) {
+	s.FSW = (s.FSW &^ (7 << 11)) | uint16(top&7)<<11
+}
+
+func (s *MachineState) MoveFPUTop(delta int) {
+	top := int(s.FPUTop()) + delta
+	top %= 8
+	if top < 0 {
+		top += 8
+	}
+	s.SetFPUTop(uint8(top))
+}
+
+// FPAt accesses the logical x87 stack register ST(index).
+func (s *MachineState) FPAt(index uint8) fpu.Value {
+	return s.FP[(int(s.FPUTop())+int(index))&7]
+}
+
+func (s *MachineState) SetFPAt(index uint8, value fpu.Value) {
+	s.FP[(int(s.FPUTop())+int(index))&7] = value
+}
+
+func (s *MachineState) PushFP(value fpu.Value) {
+	s.MoveFPUTop(-1)
+	s.FP[(int(s.FPUTop()))&7] = value
+}
+
+func (s *MachineState) PopFP() {
+	s.MoveFPUTop(1)
+}
+
 func boolByte(value bool) uint8 {
 	if value {
 		return 1

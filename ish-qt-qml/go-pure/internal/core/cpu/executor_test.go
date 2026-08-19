@@ -3,7 +3,10 @@ package cpu
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"testing"
+
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/emu/fpu"
 )
 
 func mappedCode(t *testing.T, code []byte) (*Memory, *MachineState) {
@@ -1899,4 +1902,92 @@ func TestExecutorMovbe(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestExecutorFPUStackAndUnary(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xD9, 0xE8, // fld1
+		0xD9, 0xE0, // fchs
+		0xD9, 0xE1, // fabs
+		0xD9, 0xEE, // fldz
+		0xD9, 0xC9, // fxch st1
+		0xD9, 0xC1, // fld st1
+		0xF4,
+	})
+	beforeFlags := state.EFlags
+	if err := NewExecutor(nil).Run(state, 16); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.FPUTop(); got != 5 {
+		t.Fatalf("FPU TOP = %d, want 5 after three pushes", got)
+	}
+	if got := state.FPAt(0).ToFloat64(); math.Abs(got) > 1e-12 {
+		t.Fatalf("ST0 = %v, want 0 after FLD ST1", got)
+	}
+	if got := state.FPAt(1).ToFloat64(); math.Abs(got-1) > 1e-12 {
+		t.Fatalf("ST1 = %v, want 1 after FXCH", got)
+	}
+	if state.EFlags != beforeFlags {
+		t.Fatalf("x87 stack/unary changed EFLAGS: before %#x after %#x", beforeFlags, state.EFlags)
+	}
+}
+
+func TestExecutorFPUArithmetic(t *testing.T) {
+	tests := []struct {
+		name string
+		code []byte
+		want float64
+	}{
+		{name: "fadd", code: []byte{0xD8, 0xC1}, want: 5},
+		{name: "fsub", code: []byte{0xD8, 0xE1}, want: -1},
+		{name: "fmul", code: []byte{0xD8, 0xC9}, want: 6},
+		{name: "fdiv", code: []byte{0xD8, 0xF1}, want: 2.0 / 3.0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, state := mappedCode(t, append(append([]byte{}, test.code...), 0xF4))
+			state.FP[0] = fpu.FromFloat64(2)
+			state.FP[1] = fpu.FromFloat64(3)
+			if err := NewExecutor(nil).Run(state, 4); err != nil {
+				t.Fatal(err)
+			}
+			if got := state.FPAt(0).ToFloat64(); math.Abs(got-test.want) > 1e-12 {
+				t.Fatalf("ST0 = %.17g, want %.17g", got, test.want)
+			}
+		})
+	}
+
+	_, state := mappedCode(t, []byte{0xDE, 0xC1, 0xF4}) // faddp st1, st0
+	state.FP[0] = fpu.FromFloat64(2)
+	state.FP[1] = fpu.FromFloat64(3)
+	if err := NewExecutor(nil).Run(state, 4); err != nil {
+		t.Fatal(err)
+	}
+	if state.FPUTop() != 1 || math.Abs(state.FPAt(0).ToFloat64()-5) > 1e-12 {
+		t.Fatalf("FADDP result/TOP = %.17g/%d, want 5/1", state.FPAt(0).ToFloat64(), state.FPUTop())
+	}
+}
+
+func TestExecutorFPUStorePopAndTopRotation(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xDD, 0xD9, // fstp st1
+		0xD9, 0xF7, // fincstp
+		0xD9, 0xF6, // fdecstp
+		0xF4,
+	})
+	state.FP[0] = fpu.FromFloat64(42)
+	state.FP[1] = fpu.FromFloat64(-7)
+	beforeFlags := state.EFlags
+	if err := NewExecutor(nil).Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	if state.FPUTop() != 1 {
+		t.Fatalf("FPU TOP = %d, want 1 after FSTP followed by INCSTP/DECSTP", state.FPUTop())
+	}
+	if got := state.FP[1].ToFloat64(); math.Abs(got-42) > 1e-12 {
+		t.Fatalf("physical FP1 = %v, want 42 after FSTP ST1", got)
+	}
+	if state.EFlags != beforeFlags {
+		t.Fatalf("x87 store/top changed EFLAGS: before %#x after %#x", beforeFlags, state.EFlags)
+	}
 }

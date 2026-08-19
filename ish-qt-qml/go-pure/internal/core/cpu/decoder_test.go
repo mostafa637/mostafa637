@@ -680,3 +680,38 @@ func TestDecodeX86Movbe(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX86FPUStack(t *testing.T) {
+	tests := []struct {
+		name  string
+		code  []byte
+		op    Op
+		group uint8
+		reg   uint8
+		reg2  uint8
+	}{
+		{name: "fld1", code: []byte{0xD9, 0xE8}, op: OpFPUConst, group: 1},
+		{name: "fldz", code: []byte{0xD9, 0xEE}, op: OpFPUConst, group: 0},
+		{name: "fchs", code: []byte{0xD9, 0xE0}, op: OpFPUUnary, group: 0},
+		{name: "fabs", code: []byte{0xD9, 0xE1}, op: OpFPUUnary, group: 1},
+		{name: "fxch st1", code: []byte{0xD9, 0xC9}, op: OpFPUStack, group: fpuStackXchg, reg: 1},
+		{name: "fld st1", code: []byte{0xD9, 0xC1}, op: OpFPUStack, group: fpuStackLoad, reg: 1},
+		{name: "fstp st1", code: []byte{0xDD, 0xD9}, op: OpFPUStack, group: fpuStackStorePop, reg: 1},
+		{name: "fincstp", code: []byte{0xD9, 0xF7}, op: OpFPUStack, group: fpuStackIncTop},
+		{name: "fdecstp", code: []byte{0xD9, 0xF6}, op: OpFPUStack, group: fpuStackDecTop},
+		{name: "fadd st0, st1", code: []byte{0xD8, 0xC1}, op: OpFPUBinary, group: fpuBinaryAdd, reg: 0, reg2: 1},
+		{name: "faddp st1, st0", code: []byte{0xDE, 0xC1}, op: OpFPUBinary, group: fpuBinaryAdd | 0x80, reg: 1, reg2: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Len != uint32(len(test.code)) || instruction.Group != test.group || instruction.FPUReg != test.reg || instruction.FPUReg2 != test.reg2 {
+				t.Fatalf("instruction = %#v, want op=%v len=%d group=%d fpu=%d/%d", instruction, test.op, len(test.code), test.group, test.reg, test.reg2)
+			}
+		})
+	}
+}

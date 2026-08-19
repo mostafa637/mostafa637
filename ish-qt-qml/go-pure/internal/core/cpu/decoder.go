@@ -107,6 +107,10 @@ const (
 	OpBitTest
 	OpBitScan
 	OpPopcnt
+	OpFPUConst
+	OpFPUUnary
+	OpFPUStack
+	OpFPUBinary
 )
 
 type Segment uint8
@@ -136,16 +140,18 @@ type Operand struct {
 }
 
 type Instruction struct {
-	Op     Op
-	Len    uint32
-	Reg    Reg32
-	Reg2   Reg32
-	Imm    int32
-	Rel    int32
-	Vector uint8
-	Group  uint8
-	Dst    Operand
-	Src    Operand
+	Op      Op
+	Len     uint32
+	Reg     Reg32
+	Reg2    Reg32
+	Imm     int32
+	Rel     int32
+	Vector  uint8
+	Group   uint8
+	FPUReg  uint8
+	FPUReg2 uint8
+	Dst     Operand
+	Src     Operand
 }
 
 type codeReader struct {
@@ -309,6 +315,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return stringInstruction, nil
+	}
+	if fpuInstruction, handled, err := decodeX86FPU(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return fpuInstruction, nil
 	}
 	if byteMove, handled, err := decodeX86ByteMove(disassembled); handled {
 		if err != nil {
@@ -1870,6 +1882,116 @@ func decodeX86String(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{}, true, fmt.Errorf("%w: REPNE %v", ErrUnsupportedInstruction, inst.Op)
 	}
 	return Instruction{Op: op, Len: uint32(inst.Len), Imm: int32(width), Group: repeat}, true, nil
+}
+
+const (
+	fpuBinaryAdd uint8 = iota
+	fpuBinarySub
+	fpuBinarySubReverse
+	fpuBinaryMul
+	fpuBinaryDiv
+	fpuBinaryDivReverse
+)
+
+func decodeX87Reg(arg x86asm.Arg) (uint8, bool) {
+	reg, ok := arg.(x86asm.Reg)
+	if !ok || reg < x86asm.F0 || reg > x86asm.F7 {
+		return 0, false
+	}
+	return uint8(reg - x86asm.F0), true
+}
+
+func decodeX86FPU(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.DataSize != 32 || inst.AddrSize != 32 {
+		return Instruction{}, false, nil
+	}
+	firstArg := func() (x86asm.Arg, bool) {
+		if len(inst.Args) == 0 || inst.Args[0] == nil {
+			return nil, false
+		}
+		return inst.Args[0], true
+	}
+	registerArg := func(index int) (uint8, bool) {
+		if index >= len(inst.Args) || inst.Args[index] == nil {
+			return 0, false
+		}
+		return decodeX87Reg(inst.Args[index])
+	}
+	unsupported := func(detail string) (Instruction, bool, error) {
+		return Instruction{}, true, fmt.Errorf("%w: %v %s", ErrUnsupportedAddressing, inst.Op, detail)
+	}
+
+	switch inst.Op {
+	case x86asm.FLD1:
+		if len(inst.Args) != 0 && inst.Args[0] != nil {
+			return unsupported("unexpected operand")
+		}
+		return Instruction{Op: OpFPUConst, Len: uint32(inst.Len), Group: 1}, true, nil
+	case x86asm.FLDZ:
+		if len(inst.Args) != 0 && inst.Args[0] != nil {
+			return unsupported("unexpected operand")
+		}
+		return Instruction{Op: OpFPUConst, Len: uint32(inst.Len), Group: 0}, true, nil
+	case x86asm.FCHS, x86asm.FABS:
+		if _, ok := firstArg(); ok {
+			return unsupported("unexpected operand")
+		}
+		group := uint8(0)
+		if inst.Op == x86asm.FABS {
+			group = 1
+		}
+		return Instruction{Op: OpFPUUnary, Len: uint32(inst.Len), Group: group}, true, nil
+	case x86asm.FXCH, x86asm.FLD, x86asm.FST, x86asm.FSTP:
+		reg, ok := registerArg(0)
+		if !ok {
+			return unsupported("requires ST(i) register")
+		}
+		group := fpuStackXchg
+		switch inst.Op {
+		case x86asm.FLD:
+			group = fpuStackLoad
+		case x86asm.FST:
+			group = fpuStackStore
+		case x86asm.FSTP:
+			group = fpuStackStorePop
+		}
+		return Instruction{Op: OpFPUStack, Len: uint32(inst.Len), Group: group, FPUReg: reg}, true, nil
+	case x86asm.FINCSTP, x86asm.FDECSTP:
+		group := fpuStackIncTop
+		if inst.Op == x86asm.FDECSTP {
+			group = fpuStackDecTop
+		}
+		return Instruction{Op: OpFPUStack, Len: uint32(inst.Len), Group: group}, true, nil
+	case x86asm.FADD, x86asm.FSUB, x86asm.FMUL, x86asm.FDIV,
+		x86asm.FADDP, x86asm.FSUBP, x86asm.FSUBRP, x86asm.FMULP, x86asm.FDIVP, x86asm.FDIVRP:
+		dst, ok := registerArg(0)
+		if !ok {
+			return unsupported("requires register operands")
+		}
+		src, ok := registerArg(1)
+		if !ok {
+			return unsupported("requires register operands")
+		}
+		group := fpuBinaryAdd
+		switch inst.Op {
+		case x86asm.FSUB, x86asm.FSUBP:
+			group = fpuBinarySub
+		case x86asm.FSUBRP:
+			group = fpuBinarySubReverse
+		case x86asm.FMUL, x86asm.FMULP:
+			group = fpuBinaryMul
+		case x86asm.FDIV, x86asm.FDIVP:
+			group = fpuBinaryDiv
+		case x86asm.FDIVRP:
+			group = fpuBinaryDivReverse
+		}
+		if inst.Op == x86asm.FADDP || inst.Op == x86asm.FSUBP || inst.Op == x86asm.FSUBRP || inst.Op == x86asm.FMULP || inst.Op == x86asm.FDIVP || inst.Op == x86asm.FDIVRP {
+			group |= 1 << 7
+		}
+		return Instruction{Op: OpFPUBinary, Len: uint32(inst.Len), Group: group, FPUReg: dst, FPUReg2: src}, true, nil
+	default:
+		return Instruction{}, false, nil
+	}
 }
 
 func decodeX86Stack(inst x86asm.Inst) (Instruction, bool, error) {

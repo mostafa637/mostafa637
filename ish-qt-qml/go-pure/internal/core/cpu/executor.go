@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/emu/fpu"
 )
 
 var (
@@ -25,6 +27,74 @@ type Executor struct {
 func NewExecutor(syscall SyscallHandler) *Executor {
 	return &Executor{Syscall: syscall}
 }
+
+func executeFPU(state *MachineState, instruction Instruction) {
+	switch instruction.Op {
+	case OpFPUConst:
+		if instruction.Group == 1 {
+			state.PushFP(fpu.FromFloat64(1))
+		} else {
+			state.PushFP(fpu.FromFloat64(0))
+		}
+	case OpFPUUnary:
+		value := state.FPAt(0)
+		if instruction.Group == 1 {
+			state.SetFPAt(0, value.Abs())
+		} else {
+			state.SetFPAt(0, value.Neg())
+		}
+	case OpFPUStack:
+		switch instruction.Group {
+		case fpuStackIncTop:
+			state.MoveFPUTop(1)
+		case fpuStackDecTop:
+			state.MoveFPUTop(-1)
+		case fpuStackXchg:
+			value := state.FPAt(0)
+			other := state.FPAt(instruction.FPUReg)
+			state.SetFPAt(0, other)
+			state.SetFPAt(instruction.FPUReg, value)
+		case fpuStackLoad:
+			state.PushFP(state.FPAt(instruction.FPUReg))
+		case fpuStackStore:
+			state.SetFPAt(instruction.FPUReg, state.FPAt(0))
+		case fpuStackStorePop:
+			state.SetFPAt(instruction.FPUReg, state.FPAt(0))
+			state.PopFP()
+		}
+	case OpFPUBinary:
+		dst := state.FPAt(instruction.FPUReg)
+		src := state.FPAt(instruction.FPUReg2)
+		var result fpu.Value
+		switch instruction.Group & 0x7f {
+		case fpuBinaryAdd:
+			result = dst.Add(src)
+		case fpuBinarySub:
+			result = dst.Sub(src)
+		case fpuBinarySubReverse:
+			result = src.Sub(dst)
+		case fpuBinaryMul:
+			result = dst.Mul(src)
+		case fpuBinaryDiv:
+			result = dst.Div(src)
+		case fpuBinaryDivReverse:
+			result = src.Div(dst)
+		}
+		state.SetFPAt(instruction.FPUReg, result)
+		if instruction.Group&0x80 != 0 {
+			state.PopFP()
+		}
+	}
+}
+
+const (
+	fpuStackIncTop uint8 = iota
+	fpuStackDecTop
+	fpuStackXchg
+	fpuStackLoad
+	fpuStackStore
+	fpuStackStorePop
+)
 
 func (e *Executor) Step(state *MachineState) (Instruction, error) {
 	if state == nil || state.Memory == nil {
@@ -59,6 +129,9 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		if err := storeOperand(state, instruction.Dst, bits.ReverseBytes32(value)); err != nil {
 			return instruction, err
 		}
+		state.EIP = next
+	case OpFPUConst, OpFPUUnary, OpFPUStack, OpFPUBinary:
+		executeFPU(state, instruction)
 		state.EIP = next
 	case OpMovRegReg:
 		state.Set(instruction.Reg, state.Get(instruction.Reg2))
