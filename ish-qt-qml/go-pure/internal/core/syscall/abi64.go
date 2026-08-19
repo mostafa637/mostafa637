@@ -19,32 +19,41 @@ import (
 type Number64 uint64
 
 const (
-	Sys64Read             Number64 = 0
-	Sys64Write            Number64 = 1
-	Sys64Open             Number64 = 2
-	Sys64Close            Number64 = 3
-	Sys64Stat             Number64 = 4
-	Sys64Fstat            Number64 = 5
-	Sys64Mmap             Number64 = 9
-	Sys64Mprotect         Number64 = 10
-	Sys64Munmap           Number64 = 11
-	Sys64Brk              Number64 = 12
-	Sys64Gettimeofday     Number64 = 96
-	Sys64Times            Number64 = 100
-	Sys64Lseek            Number64 = 8
-	Sys64Ioctl            Number64 = 16
-	Sys64RtSigaction      Number64 = 13
-	Sys64RtSigprocmask    Number64 = 14
-	Sys64RtSigreturn      Number64 = 15
-	Sys64Readv            Number64 = 19
-	Sys64Writev           Number64 = 20
-	Sys64SchedYield       Number64 = 24
-	Sys64Dup              Number64 = 32
-	Sys64Dup2             Number64 = 33
-	Sys64Nanosleep        Number64 = 35
-	Sys64GetPID           Number64 = 39
-	Sys64GetRlimit        Number64 = 97
-	Sys64Prctl            Number64 = 157
+	Sys64Read          Number64 = 0
+	Sys64Write         Number64 = 1
+	Sys64Open          Number64 = 2
+	Sys64Close         Number64 = 3
+	Sys64Stat          Number64 = 4
+	Sys64Fstat         Number64 = 5
+	Sys64Mmap          Number64 = 9
+	Sys64Mprotect      Number64 = 10
+	Sys64Munmap        Number64 = 11
+	Sys64Brk           Number64 = 12
+	Sys64Gettimeofday  Number64 = 96
+	Sys64Times         Number64 = 100
+	Sys64Lseek         Number64 = 8
+	Sys64Ioctl         Number64 = 16
+	Sys64RtSigaction   Number64 = 13
+	Sys64RtSigprocmask Number64 = 14
+	Sys64RtSigreturn   Number64 = 15
+	Sys64Readv         Number64 = 19
+	Sys64Writev        Number64 = 20
+	Sys64SchedYield    Number64 = 24
+	Sys64Dup           Number64 = 32
+	Sys64Dup2          Number64 = 33
+	Sys64Nanosleep     Number64 = 35
+	Sys64GetPID        Number64 = 39
+	Sys64Chown         Number64 = 92
+	Sys64Fchown        Number64 = 93
+	Sys64Lchown        Number64 = 94
+	Sys64Umask         Number64 = 95
+	Sys64Fchmod        Number64 = 91
+
+	Sys64GetRlimit Number64 = 97
+	Sys64Prctl     Number64 = 157
+	Sys64Fchownat  Number64 = 260
+	Sys64Fchmodat  Number64 = 268
+
 	Sys64GetRUsage        Number64 = 98
 	Sys64GetGroups        Number64 = 115
 	Sys64SetGroups        Number64 = 116
@@ -155,6 +164,7 @@ type Context64 struct {
 	NoNewPrivs     bool
 	ParentDeathSig uint64
 	AffinityMask   uint64
+	Umask          uint32
 
 	// Execve is provided by the guest session. It replaces the current ELF
 	// image while preserving process identity and the descriptor table.
@@ -171,7 +181,7 @@ type Dispatcher64 struct {
 }
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
-	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), SignalActions: make(map[uint64][32]byte), StartTime: time.Now(), CPUIDEnabled: true, Dumpable: true, AffinityMask: ^uint64(0), signalFDs: make(map[*signalFD64]struct{})}
+	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), SignalActions: make(map[uint64][32]byte), StartTime: time.Now(), CPUIDEnabled: true, Dumpable: true, AffinityMask: ^uint64(0), Umask: 0o022, signalFDs: make(map[*signalFD64]struct{})}
 }
 
 const maxFD64 = uint64(^uint32(0) >> 1)
@@ -241,6 +251,13 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 		return int64(ctx.ParentPID)
 	})
 	d.Register(Sys64GetTID, gettid64)
+	d.Register(Sys64Fchmod, fchmod64)
+	d.Register(Sys64Fchmodat, fchmodat64)
+	d.Register(Sys64Chown, chown64)
+	d.Register(Sys64Fchown, fchown64)
+	d.Register(Sys64Lchown, lchown64)
+	d.Register(Sys64Fchownat, fchownat64)
+	d.Register(Sys64Umask, umask64)
 	d.Register(Sys64SetTIDAddr, setTIDAddress64)
 	d.Register(Sys64Fcntl, fcntl64_64)
 	d.Register(Sys64ArchPrctl, archPrctl64)
@@ -461,6 +478,9 @@ func readGuestString64(ctx *Context64, address corecpu.Address64, limit int) (st
 const atFDCWD64 uint64 = ^uint64(99)
 
 func openResolvedPath64(ctx *Context64, name string, flags, mode uint64) int64 {
+	if ctx != nil && uint32(flags)&guestOpenCreat != 0 {
+		mode &= ^uint64(ctx.Umask)
+	}
 	if ctx == nil || ctx.FS == nil || ctx.FDs == nil {
 		return int64(ENOSYS)
 	}
