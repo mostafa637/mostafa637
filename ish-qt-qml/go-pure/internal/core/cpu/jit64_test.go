@@ -2783,3 +2783,128 @@ func TestJIT64PackedSSEFloatArithmetic(t *testing.T) {
 		t.Fatalf("addps memory=%v, want %v", got, want)
 	}
 }
+
+func TestJIT64PackedSSEFloatMinMaxAndDuplicate(t *testing.T) {
+	setFloat32Raw := func(state *MachineState64, xmm uint8, values ...uint32) {
+		t.Helper()
+		if len(values) != 4 {
+			t.Fatalf("float32 raw lane count=%d, want 4", len(values))
+		}
+		for lane, value := range values {
+			binary.LittleEndian.PutUint32(state.XMM[xmm][lane*4:], value)
+		}
+	}
+	setFloat64Raw := func(state *MachineState64, xmm uint8, values ...uint64) {
+		t.Helper()
+		if len(values) != 2 {
+			t.Fatalf("float64 raw lane count=%d, want 2", len(values))
+		}
+		for lane, value := range values {
+			binary.LittleEndian.PutUint64(state.XMM[xmm][lane*8:], value)
+		}
+	}
+	read32 := func(state *MachineState64, xmm uint8) [4]uint32 {
+		var values [4]uint32
+		for lane := range values {
+			values[lane] = binary.LittleEndian.Uint32(state.XMM[xmm][lane*4:])
+		}
+		return values
+	}
+	read64 := func(state *MachineState64, xmm uint8) [2]uint64 {
+		var values [2]uint64
+		for lane := range values {
+			values[lane] = binary.LittleEndian.Uint64(state.XMM[xmm][lane*8:])
+		}
+		return values
+	}
+	run := func(t *testing.T, state *MachineState64, code []byte, data []byte) {
+		t.Helper()
+		const codeAddress Address64 = 0x3e000
+		if len(data) != 0 {
+			const dataAddress Address64 = 0x3f000
+			if err := state.Memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+				t.Fatal(err)
+			}
+			if err := state.Memory.Write(dataAddress, data); err != nil {
+				t.Fatal(err)
+			}
+			state.Set(RDI, uint64(dataAddress))
+		}
+		if err := state.Memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.Memory.Write(codeAddress, code); err != nil {
+			t.Fatal(err)
+		}
+		state.RIP = uint64(codeAddress)
+		trap := NewJIT64(state.Memory).RunToInterrupt(state)
+		if trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+	}
+
+	const (
+		positiveZero32 = uint32(0x00000000)
+		negativeZero32 = uint32(0x80000000)
+		positiveZero64 = uint64(0x0000000000000000)
+		negativeZero64 = uint64(0x8000000000000000)
+		nan32          = uint32(0x7fc01234)
+		nan64          = uint64(0x7ff8000000001234)
+	)
+	state := NewMachineState64(NewMemory64())
+	setFloat32Raw(state, 0, math.Float32bits(1), math.Float32bits(-2), positiveZero32, nan32)
+	setFloat32Raw(state, 1, math.Float32bits(2), math.Float32bits(-3), negativeZero32, math.Float32bits(4))
+	setFloat32Raw(state, 2, math.Float32bits(1), math.Float32bits(-2), positiveZero32, nan32)
+	setFloat32Raw(state, 3, math.Float32bits(2), math.Float32bits(-3), negativeZero32, math.Float32bits(4))
+	setFloat64Raw(state, 4, nan64, negativeZero64)
+	setFloat64Raw(state, 5, math.Float64bits(3), positiveZero64)
+	setFloat64Raw(state, 6, nan64, negativeZero64)
+	setFloat64Raw(state, 7, math.Float64bits(3), positiveZero64)
+	setFloat32Raw(state, 8, math.Float32bits(10), math.Float32bits(20), math.Float32bits(30), math.Float32bits(40))
+	setFloat32Raw(state, 9, math.Float32bits(9), math.Float32bits(8), math.Float32bits(7), math.Float32bits(6))
+	setFloat32Raw(state, 13, math.Float32bits(10), math.Float32bits(20), math.Float32bits(30), math.Float32bits(40))
+	run(t, state, []byte{
+		0x0f, 0x5d, 0xc1, // minps xmm0, xmm1
+		0x0f, 0x5f, 0xd3, // maxps xmm2, xmm3
+		0x66, 0x0f, 0x5d, 0xe5, // minpd xmm4, xmm5
+		0x66, 0x0f, 0x5f, 0xf7, // maxpd xmm6, xmm7
+		0x44, 0x0f, 0x5d, 0x2f, // minps xmm13, [rdi]
+		0xf3, 0x45, 0x0f, 0x12, 0xc1, // movsldup xmm8, xmm9
+		0xf3, 0x45, 0x0f, 0x16, 0xd1, // movshdup xmm10, xmm9
+		0xf3, 0x44, 0x0f, 0x12, 0x1f, // movsldup xmm11, [rdi]
+		0xf3, 0x44, 0x0f, 0x16, 0x27, // movshdup xmm12, [rdi]
+		0xf4,
+	}, []byte{
+		0, 0, 16, 65, // 9
+		0, 0, 0, 65, // 8
+		0, 0, 224, 64, // 7
+		0, 0, 192, 64, // 6
+	})
+	if got, want := read32(state, 0), [4]uint32{math.Float32bits(1), math.Float32bits(-3), negativeZero32, math.Float32bits(4)}; got != want {
+		t.Fatalf("minps=%#v, want %#v", got, want)
+	}
+	if got, want := read32(state, 2), [4]uint32{math.Float32bits(2), math.Float32bits(-2), negativeZero32, math.Float32bits(4)}; got != want {
+		t.Fatalf("maxps=%#v, want %#v", got, want)
+	}
+	if got, want := read64(state, 4), [2]uint64{math.Float64bits(3), positiveZero64}; got != want {
+		t.Fatalf("minpd=%#v, want %#v", got, want)
+	}
+	if got, want := read64(state, 6), [2]uint64{math.Float64bits(3), positiveZero64}; got != want {
+		t.Fatalf("maxpd=%#v, want %#v", got, want)
+	}
+	if got, want := read32(state, 13), [4]uint32{math.Float32bits(9), math.Float32bits(8), math.Float32bits(7), math.Float32bits(6)}; got != want {
+		t.Fatalf("minps memory=%#v, want %#v", got, want)
+	}
+	if got, want := read32(state, 8), [4]uint32{math.Float32bits(9), math.Float32bits(9), math.Float32bits(7), math.Float32bits(7)}; got != want {
+		t.Fatalf("movsldup xmm8=%#v, want %#v", got, want)
+	}
+	if got, want := read32(state, 10), [4]uint32{math.Float32bits(8), math.Float32bits(8), math.Float32bits(6), math.Float32bits(6)}; got != want {
+		t.Fatalf("movshdup xmm10=%#v, want %#v", got, want)
+	}
+	if got, want := read32(state, 11), [4]uint32{math.Float32bits(9), math.Float32bits(9), math.Float32bits(7), math.Float32bits(7)}; got != want {
+		t.Fatalf("movsldup memory=%#v, want %#v", got, want)
+	}
+	if got, want := read32(state, 12), [4]uint32{math.Float32bits(8), math.Float32bits(8), math.Float32bits(6), math.Float32bits(6)}; got != want {
+		t.Fatalf("movshdup memory=%#v, want %#v", got, want)
+	}
+}

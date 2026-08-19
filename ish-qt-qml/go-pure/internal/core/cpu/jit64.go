@@ -775,7 +775,8 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		}
 		return makeSSEPackedConvert64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
 	case x86asm.ADDPS, x86asm.SUBPS, x86asm.MULPS, x86asm.DIVPS,
-		x86asm.ADDPD, x86asm.SUBPD, x86asm.MULPD, x86asm.DIVPD:
+		x86asm.ADDPD, x86asm.SUBPD, x86asm.MULPD, x86asm.DIVPD,
+		x86asm.MINPS, x86asm.MAXPS, x86asm.MINPD, x86asm.MAXPD:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
 			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
@@ -795,6 +796,16 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
 		}
 		return makeSSEPackedFloatUnary64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.MOVSLDUP, x86asm.MOVSHDUP:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeSSEPackedDuplicate64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
 	case x86asm.MOVDQA, x86asm.MOVDQU, x86asm.MOVAPS, x86asm.MOVUPS, x86asm.MOVAPD, x86asm.MOVUPD:
 
 		left, err := operand64FromArg(arg(0), 16)
@@ -1916,6 +1927,44 @@ func makeSSEPackedConvert64(address uint64, size uint8, op x86asm.Op, dst, src o
 	}}
 }
 
+func packedFloat32NaN(raw uint32) bool {
+	return raw&0x7f800000 == 0x7f800000 && raw&0x007fffff != 0
+}
+
+func packedFloat64NaN(raw uint64) bool {
+	return raw&0x7ff0000000000000 == 0x7ff0000000000000 && raw&0x000fffffffffffff != 0
+}
+
+func packedFloat32MinMax(op x86asm.Op, leftRaw, rightRaw uint32) uint32 {
+	if packedFloat32NaN(leftRaw) || packedFloat32NaN(rightRaw) {
+		return rightRaw
+	}
+	if leftRaw<<1 == 0 && rightRaw<<1 == 0 {
+		return rightRaw
+	}
+	left := math.Float32frombits(leftRaw)
+	right := math.Float32frombits(rightRaw)
+	if (op == x86asm.MINPS && left < right) || (op == x86asm.MAXPS && left > right) {
+		return leftRaw
+	}
+	return rightRaw
+}
+
+func packedFloat64MinMax(op x86asm.Op, leftRaw, rightRaw uint64) uint64 {
+	if packedFloat64NaN(leftRaw) || packedFloat64NaN(rightRaw) {
+		return rightRaw
+	}
+	if leftRaw<<1 == 0 && rightRaw<<1 == 0 {
+		return rightRaw
+	}
+	left := math.Float64frombits(leftRaw)
+	right := math.Float64frombits(rightRaw)
+	if (op == x86asm.MINPD && left < right) || (op == x86asm.MAXPD && left > right) {
+		return leftRaw
+	}
+	return rightRaw
+}
+
 func makeSSEPackedFloatBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
 	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
 		left, err := readVector64(state, dst, next)
@@ -1927,10 +1976,16 @@ func makeSSEPackedFloatBinary64(address uint64, size uint8, op x86asm.Op, dst, s
 			return Flow64Stop, err
 		}
 		var result [16]byte
-		if op == x86asm.ADDPS || op == x86asm.SUBPS || op == x86asm.MULPS || op == x86asm.DIVPS {
+		if op == x86asm.ADDPS || op == x86asm.SUBPS || op == x86asm.MULPS || op == x86asm.DIVPS || op == x86asm.MINPS || op == x86asm.MAXPS {
 			for offset := 0; offset < 16; offset += 4 {
-				l := math.Float32frombits(binary.LittleEndian.Uint32(left[offset:]))
-				r := math.Float32frombits(binary.LittleEndian.Uint32(right[offset:]))
+				leftRaw := binary.LittleEndian.Uint32(left[offset:])
+				rightRaw := binary.LittleEndian.Uint32(right[offset:])
+				if op == x86asm.MINPS || op == x86asm.MAXPS {
+					binary.LittleEndian.PutUint32(result[offset:], packedFloat32MinMax(op, leftRaw, rightRaw))
+					continue
+				}
+				l := math.Float32frombits(leftRaw)
+				r := math.Float32frombits(rightRaw)
 				var value float32
 				switch op {
 				case x86asm.ADDPS:
@@ -1946,8 +2001,14 @@ func makeSSEPackedFloatBinary64(address uint64, size uint8, op x86asm.Op, dst, s
 			}
 		} else {
 			for offset := 0; offset < 16; offset += 8 {
-				l := math.Float64frombits(binary.LittleEndian.Uint64(left[offset:]))
-				r := math.Float64frombits(binary.LittleEndian.Uint64(right[offset:]))
+				leftRaw := binary.LittleEndian.Uint64(left[offset:])
+				rightRaw := binary.LittleEndian.Uint64(right[offset:])
+				if op == x86asm.MINPD || op == x86asm.MAXPD {
+					binary.LittleEndian.PutUint64(result[offset:], packedFloat64MinMax(op, leftRaw, rightRaw))
+					continue
+				}
+				l := math.Float64frombits(leftRaw)
+				r := math.Float64frombits(rightRaw)
 				var value float64
 				switch op {
 				case x86asm.ADDPD:
@@ -1961,6 +2022,29 @@ func makeSSEPackedFloatBinary64(address uint64, size uint8, op x86asm.Op, dst, s
 				}
 				binary.LittleEndian.PutUint64(result[offset:], math.Float64bits(value))
 			}
+		}
+		if err := writeVector64(state, dst, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEPackedDuplicate64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		source, err := readVector64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var result [16]byte
+		for group := 0; group < 2; group++ {
+			sourceLane := group * 2
+			if op == x86asm.MOVSHDUP {
+				sourceLane++
+			}
+			copy(result[group*8:group*8+4], source[sourceLane*4:sourceLane*4+4])
+			copy(result[group*8+4:group*8+8], source[sourceLane*4:sourceLane*4+4])
 		}
 		if err := writeVector64(state, dst, next, result); err != nil {
 			return Flow64Stop, err
