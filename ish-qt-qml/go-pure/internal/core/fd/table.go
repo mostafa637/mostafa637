@@ -96,20 +96,34 @@ func (f *File) Seek(offset int64, whence int) (int64, error) {
 type Table struct {
 	mu      sync.RWMutex
 	entries map[int32]*File
+	cloexec map[int32]bool
 	next    int32
 }
 
 func New() *Table {
-	return &Table{entries: make(map[int32]*File), next: 3}
+	return &Table{entries: make(map[int32]*File), cloexec: make(map[int32]bool), next: 3}
 }
 
+// InstallAt installs a descriptor using the File's initial close-on-exec value.
+// Duplication paths should use InstallAtWithCloexec so the flag remains a
+// property of the descriptor rather than the shared open file description.
 func (t *Table) InstallAt(fd int32, file *File, replace bool) error {
+	if file == nil {
+		return ErrBadFD
+	}
+	return t.InstallAtWithCloexec(fd, file, replace, file.Cloexec)
+}
+
+func (t *Table) InstallAtWithCloexec(fd int32, file *File, replace, cloexec bool) error {
 	if t == nil || fd < 0 || file == nil {
 		return ErrBadFD
 	}
 	t.mu.Lock()
 	if t.entries == nil {
 		t.entries = make(map[int32]*File)
+	}
+	if t.cloexec == nil {
+		t.cloexec = make(map[int32]bool)
 	}
 	old := t.entries[fd]
 	if old != nil && !replace {
@@ -118,6 +132,7 @@ func (t *Table) InstallAt(fd int32, file *File, replace bool) error {
 	}
 	file.retain()
 	t.entries[fd] = file
+	t.cloexec[fd] = cloexec
 	if fd >= t.next {
 		t.next = fd + 1
 	}
@@ -129,6 +144,13 @@ func (t *Table) InstallAt(fd int32, file *File, replace bool) error {
 }
 
 func (t *Table) Open(file *File) (int32, error) {
+	if file == nil {
+		return -1, ErrBadFD
+	}
+	return t.OpenWithCloexec(file, file.Cloexec)
+}
+
+func (t *Table) OpenWithCloexec(file *File, cloexec bool) (int32, error) {
 	if t == nil || file == nil {
 		return -1, ErrBadFD
 	}
@@ -137,10 +159,14 @@ func (t *Table) Open(file *File) (int32, error) {
 	if t.entries == nil {
 		t.entries = make(map[int32]*File)
 	}
+	if t.cloexec == nil {
+		t.cloexec = make(map[int32]bool)
+	}
 	for {
 		if _, exists := t.entries[t.next]; !exists {
 			fd := t.next
 			t.entries[fd] = file
+			t.cloexec[fd] = cloexec
 			file.retain()
 			t.next++
 			return fd, nil
@@ -173,6 +199,9 @@ func (t *Table) Close(fd int32) error {
 		return ErrBadFD
 	}
 	delete(t.entries, fd)
+	if t.cloexec != nil {
+		delete(t.cloexec, fd)
+	}
 	t.mu.Unlock()
 	return file.Close()
 }
@@ -182,7 +211,7 @@ func (t *Table) Dup(fd int32) (int32, error) {
 	if err != nil {
 		return -1, err
 	}
-	return t.Open(file)
+	return t.OpenWithCloexec(file, false)
 }
 
 func (t *Table) Dup2(oldfd, newfd int32) (int32, error) {
@@ -193,10 +222,42 @@ func (t *Table) Dup2(oldfd, newfd int32) (int32, error) {
 	if oldfd == newfd {
 		return newfd, nil
 	}
-	if err := t.InstallAt(newfd, file, true); err != nil {
+	if err := t.InstallAtWithCloexec(newfd, file, true, false); err != nil {
 		return -1, err
 	}
 	return newfd, nil
+}
+
+func (t *Table) Cloexec(fd int32) (bool, error) {
+	if t == nil || fd < 0 {
+		return false, ErrBadFD
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	file := t.entries[fd]
+	if file == nil {
+		return false, ErrBadFD
+	}
+	if t.cloexec != nil {
+		return t.cloexec[fd], nil
+	}
+	return file.Cloexec, nil
+}
+
+func (t *Table) SetCloexec(fd int32, cloexec bool) error {
+	if t == nil || fd < 0 {
+		return ErrBadFD
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.entries[fd] == nil {
+		return ErrBadFD
+	}
+	if t.cloexec == nil {
+		t.cloexec = make(map[int32]bool)
+	}
+	t.cloexec[fd] = cloexec
+	return nil
 }
 
 // CloseOnExec removes and closes descriptors marked close-on-exec. It returns
@@ -209,10 +270,17 @@ func (t *Table) CloseOnExec() []int32 {
 	removed := make([]int32, 0)
 	files := make([]*File, 0)
 	for fd, file := range t.entries {
-		if file == nil || !file.Cloexec {
+		cloexec := file != nil && file.Cloexec
+		if t.cloexec != nil {
+			cloexec = t.cloexec[fd]
+		}
+		if file == nil || !cloexec {
 			continue
 		}
 		delete(t.entries, fd)
+		if t.cloexec != nil {
+			delete(t.cloexec, fd)
+		}
 		removed = append(removed, fd)
 		files = append(files, file)
 	}

@@ -42,17 +42,24 @@ func fcntl64_64(ctx *Context64, args [6]uint64) int64 {
 			if err := ctx.FDs.Close(fd); err != nil {
 				return int64(EBADF)
 			}
-			if err := ctx.FDs.InstallAt(int32(args[2]), file, false); err != nil {
+			if err := ctx.FDs.InstallAtWithCloexec(int32(args[2]), file, false, false); err != nil {
+
 				return int64(EMFILE)
 			}
 			fd = int32(args[2])
 		}
 		if uint32(args[1]) == fcntlDupFDClO {
-			file.Cloexec = true
+			if err := ctx.FDs.SetCloexec(fd, true); err != nil {
+				return int64(EBADF)
+			}
 		}
 		return int64(fd)
 	case fcntlGetFD:
-		if file.Cloexec {
+		cloexec, cloexecErr := ctx.FDs.Cloexec(int32(args[0]))
+		if cloexecErr != nil {
+			return int64(EBADF)
+		}
+		if cloexec {
 			return fdCloexec
 		}
 		return 0
@@ -60,8 +67,11 @@ func fcntl64_64(ctx *Context64, args [6]uint64) int64 {
 		if args[2]&^uint64(fdCloexec) != 0 {
 			return int64(EINVAL)
 		}
-		file.Cloexec = args[2]&fdCloexec != 0
+		if err := ctx.FDs.SetCloexec(int32(args[0]), args[2]&fdCloexec != 0); err != nil {
+			return int64(EBADF)
+		}
 		return 0
+
 	case fcntlGetFL:
 		return int64(file.StatusFlags)
 	case fcntlSetFL:

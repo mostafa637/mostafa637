@@ -38,24 +38,26 @@ const (
 	Sys64Shmat    Number64 = 30
 	Sys64Shmctl   Number64 = 31
 
-	Sys64Mlock          Number64 = 149
-	Sys64Munlock        Number64 = 150
-	Sys64Mlockall       Number64 = 151
-	Sys64Munlockall     Number64 = 152
-	Sys64Gettimeofday   Number64 = 96
-	Sys64Times          Number64 = 100
-	Sys64Lseek          Number64 = 8
-	Sys64Ioctl          Number64 = 16
-	Sys64RtSigaction    Number64 = 13
-	Sys64RtSigprocmask  Number64 = 14
-	Sys64RtSigreturn    Number64 = 15
-	Sys64Readv          Number64 = 19
-	Sys64Writev         Number64 = 20
-	Sys64SchedYield     Number64 = 24
-	Sys64Pselect6       Number64 = 270
-	Sys64Ppoll          Number64 = 271
-	Sys64Dup            Number64 = 32
-	Sys64Dup2           Number64 = 33
+	Sys64Mlock         Number64 = 149
+	Sys64Munlock       Number64 = 150
+	Sys64Mlockall      Number64 = 151
+	Sys64Munlockall    Number64 = 152
+	Sys64Gettimeofday  Number64 = 96
+	Sys64Times         Number64 = 100
+	Sys64Lseek         Number64 = 8
+	Sys64Ioctl         Number64 = 16
+	Sys64RtSigaction   Number64 = 13
+	Sys64RtSigprocmask Number64 = 14
+	Sys64RtSigreturn   Number64 = 15
+	Sys64Readv         Number64 = 19
+	Sys64Writev        Number64 = 20
+	Sys64SchedYield    Number64 = 24
+	Sys64Pselect6      Number64 = 270
+	Sys64Ppoll         Number64 = 271
+	Sys64Dup           Number64 = 32
+	Sys64Dup2          Number64 = 33
+	Sys64Dup3          Number64 = 292
+
 	Sys64Getitimer      Number64 = 36
 	Sys64Alarm          Number64 = 37
 	Sys64Setitimer      Number64 = 38
@@ -398,6 +400,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Close, close64)
 	d.Register(Sys64Dup, dup64)
 	d.Register(Sys64Dup2, dup264)
+	d.Register(Sys64Dup3, dup364)
+
 	d.Register(Sys64Open, open64)
 	d.Register(Sys64Openat, openat64)
 	d.Register(Sys64Stat, stat64Guest)
@@ -602,6 +606,26 @@ func dup264(ctx *Context64, args [6]uint64) int64 {
 		return int64(EBADF)
 	}
 	return int64(fd)
+}
+
+func dup364(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil || ctx.FDs == nil || args[0] > maxFD64 || args[1] > maxFD64 {
+		return int64(EBADF)
+	}
+	if args[0] == args[1] {
+		return int64(EINVAL)
+	}
+	if args[2]&^uint64(guestOpenCloexec) != 0 {
+		return int64(EINVAL)
+	}
+	file, err := ctx.GetFile(args[0])
+	if err != nil {
+		return int64(EBADF)
+	}
+	if err := ctx.FDs.InstallAtWithCloexec(int32(args[1]), file, true, args[2]&uint64(guestOpenCloexec) != 0); err != nil {
+		return int64(EBADF)
+	}
+	return int64(args[1])
 }
 
 func readGuestString64(ctx *Context64, address corecpu.Address64, limit int) (string, bool) {
