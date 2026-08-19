@@ -3645,3 +3645,111 @@ func TestJIT64CRC32(t *testing.T) {
 		}
 	}
 }
+
+func TestJIT64PCMPISTRIEqualEachAnyMemoryREXR(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x56000
+		dataAddress Address64 = 0x57000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	// PCMPISTRI xmm0,xmm1,0x08: equal-each, least-significant match.
+	// PCMPISTRI xmm8,[rdi],0x00: equal-any, with REX.R and a memory source.
+	code := []byte{
+		0x66, 0x0f, 0x3a, 0x63, 0xc1, 0x08,
+		0x66, 0x44, 0x0f, 0x3a, 0x63, 0x07, 0x00,
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(dataAddress, []byte{'x', 'a', 0}); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	for i := 0; i < 16; i++ {
+		state.XMM[0][i] = byte(i + 1)
+		state.XMM[1][i] = byte(i + 1)
+	}
+	state.XMM[1][0] = 9 // Equal-each first match is lane 1.
+	copy(state.XMM[8][:], []byte{'a', 'b', 0})
+
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if got := state.Get(RCX); got != 1 {
+		t.Fatalf("PCMPISTRI result=%d, want 1 from equal-any memory operation", got)
+	}
+}
+
+func TestJIT64PCMPESTRIOrderedAndMask(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x58000
+		dataAddress Address64 = 0x59000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	// First operation returns the ordered match index. The second operation
+	// uses the same inputs with bit 6 set and writes an expanded byte mask.
+	code := []byte{
+		0x66, 0x0f, 0x3a, 0x61, 0xc1, 0x0c, // pcmpestri xmm0,xmm1, equal-ordered
+		0x66, 0x0f, 0x3a, 0x60, 0xc1, 0x4c, // pcmpestrm xmm0,xmm1, expanded mask
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RAX, 2) // xmm0: needle "bc"
+	state.Set(RDX, 4) // xmm1: haystack "xabc"
+	copy(state.XMM[0][:], []byte{'b', 'c'})
+	copy(state.XMM[1][:], []byte{'x', 'a', 'b', 'c'})
+
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	// The final instruction is PCMPESTRM, so the index produced by the first
+	// instruction is checked by running the instruction in isolation below.
+	if state.XMM[0][2] != 0xff || state.XMM[0][0] != 0 || state.XMM[0][1] != 0 || state.XMM[0][3] != 0 {
+		t.Fatalf("expanded mask=%x, want only haystack lane 2 selected", state.XMM[0])
+	}
+	if !state.Flag(Flag64CF) || !state.Flag(Flag64ZF) || !state.Flag(Flag64SF) || state.Flag(Flag64OF) {
+		t.Fatalf("flags cf=%v zf=%v sf=%v of=%v, want 1 1 1 0", state.Flag(Flag64CF), state.Flag(Flag64ZF), state.Flag(Flag64SF), state.Flag(Flag64OF))
+	}
+
+	// Re-run only PCMPESTRI to verify ECX=2 before PCMPESTRM overwrites XMM0.
+	memory2 := NewMemory64()
+	if err := memory2.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory2.Write(codeAddress, []byte{0x66, 0x0f, 0x3a, 0x61, 0xc1, 0x0c, 0xf4}); err != nil {
+		t.Fatal(err)
+	}
+	state2 := NewMachineState64(memory2)
+	state2.RIP = uint64(codeAddress)
+	state2.Set(RAX, 2)
+	state2.Set(RDX, 4)
+	copy(state2.XMM[0][:], []byte{'b', 'c'})
+	copy(state2.XMM[1][:], []byte{'x', 'a', 'b', 'c'})
+	if trap := NewJIT64(memory2).RunToInterrupt(state2); trap != Trap64Timer || !state2.Halted {
+		t.Fatalf("isolated PCMPESTRI trap=%#x halted=%v", trap, state2.Halted)
+	}
+	if got := state2.Get(RCX); got != 2 {
+		t.Fatalf("PCMPESTRI index=%d, want 2", got)
+	}
+}

@@ -878,6 +878,20 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s requires an immediate mask", inst.Op)
 		}
 		return makeSSEDotProduct64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
+	case x86asm.PCMPESTRI, x86asm.PCMPESTRM, x86asm.PCMPISTRI, x86asm.PCMPISTRM:
+		left, err := operand64FromArg(arg(0), 16)
+		if err != nil || left.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s first string operand: %v", inst.Op, err)
+		}
+		right, err := operand64FromArg(arg(1), 16)
+		if err != nil || (right.Kind != operand64XMM && right.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s second string operand: %v", inst.Op, err)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("%s requires an immediate control byte", inst.Op)
+		}
+		return makeSSEStringCompare64(address, uint8(inst.Len), inst.Op, left, right, uint8(immediate), instructionDataWidth64(inst)), false, nil
 	case x86asm.PHMINPOSUW:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
@@ -4768,6 +4782,222 @@ func makeSSEShuffleBytes64(address uint64, size uint8, destination, source opera
 		if err := writeVector64(state, destination, next, output); err != nil {
 			return Flow64Stop, err
 		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func pcmpxstrLength64(raw uint64, lengthWidth uint8, max int) int {
+	var value int64
+	if lengthWidth == 4 {
+		value = int64(int32(uint32(raw)))
+	} else {
+		value = int64(raw)
+	}
+	if value < 0 {
+		// The absolute value of MinInt cannot be represented in the same
+		// signed width; it is necessarily saturated at the architectural max.
+		if value == -1<<63 {
+			return max
+		}
+		value = -value
+	}
+	if value > int64(max) {
+		return max
+	}
+	return int(value)
+}
+
+func pcmpxstrElement64(value [16]byte, index, elementWidth int, signed bool) int64 {
+	offset := index * elementWidth
+	if elementWidth == 1 {
+		lane := value[offset]
+		if signed {
+			return int64(int8(lane))
+		}
+		return int64(lane)
+	}
+	lane := int64(binary.LittleEndian.Uint16(value[offset : offset+2]))
+	if signed {
+		return int64(int16(lane))
+	}
+	return lane
+}
+
+func pcmpxstrBoolRes64(src1, src2 [16]byte, valid1, valid2 [16]bool, max, elementWidth int, signed bool, aggregation uint8) [16][16]bool {
+	var result [16][16]bool
+	for j := 0; j < max; j++ {
+		for i := 0; i < max; i++ {
+			if !valid1[i] || !valid2[j] {
+				// The SDM's invalid-data override is mode dependent. Equal
+				// Each and Equal Ordered treat two invalid elements as equal;
+				// all other invalid pairs are false.
+				result[j][i] = !valid1[i] && !valid2[j] && (aggregation == 2 || aggregation == 3)
+				continue
+			}
+			result[j][i] = pcmpxstrElement64(src2, j, elementWidth, signed) == pcmpxstrElement64(src1, i, elementWidth, signed)
+		}
+	}
+	return result
+}
+
+func makeSSEStringCompare64(address uint64, size uint8, op x86asm.Op, left, right operand64, immediate uint8, lengthWidth uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		src1, err := readVector64(state, left, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		src2, err := readVector64(state, right, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+
+		elementWidth := 1
+		maxElements := 16
+		if immediate&1 != 0 {
+			elementWidth = 2
+			maxElements = 8
+		}
+		signed := immediate&2 != 0
+		explicit := op == x86asm.PCMPESTRI || op == x86asm.PCMPESTRM
+		var valid1, valid2 [16]bool
+		invalid1, invalid2 := false, false
+		if explicit {
+			length1 := pcmpxstrLength64(state.Get(RAX), lengthWidth, maxElements)
+			length2 := pcmpxstrLength64(state.Get(RDX), lengthWidth, maxElements)
+			for i := 0; i < length1; i++ {
+				valid1[i] = true
+			}
+			for i := 0; i < length2; i++ {
+				valid2[i] = true
+			}
+			invalid1 = length1 < maxElements
+			invalid2 = length2 < maxElements
+		} else {
+			for i := 0; i < maxElements; i++ {
+				if pcmpxstrElement64(src1, i, elementWidth, false) == 0 {
+					invalid1 = true
+					break
+				}
+				valid1[i] = true
+			}
+			for i := 0; i < maxElements; i++ {
+				if pcmpxstrElement64(src2, i, elementWidth, false) == 0 {
+					invalid2 = true
+					break
+				}
+				valid2[i] = true
+			}
+		}
+
+		aggregation := (immediate >> 2) & 3
+		boolRes := pcmpxstrBoolRes64(src1, src2, valid1, valid2, maxElements, elementWidth, signed, aggregation)
+		var intRes1 uint16
+		switch aggregation {
+		case 0: // Equal Any.
+			for j := 0; j < maxElements; j++ {
+				for i := 0; i < maxElements; i++ {
+					if boolRes[j][i] {
+						intRes1 |= 1 << j
+						break
+					}
+				}
+			}
+		case 1: // Ranges: adjacent even/odd elements form each range.
+			for j := 0; j < maxElements; j++ {
+				for i := 0; i+1 < maxElements; i += 2 {
+					if boolRes[j][i] && boolRes[j][i+1] {
+						intRes1 |= 1 << j
+						break
+					}
+				}
+			}
+		case 2: // Equal Each.
+			for i := 0; i < maxElements; i++ {
+				if boolRes[i][i] {
+					intRes1 |= 1 << i
+				}
+			}
+		case 3: // Equal Ordered: each bit is a candidate in operand 2.
+			for j := 0; j < maxElements; j++ {
+				match := true
+				for i := 0; i < maxElements-j; i++ {
+					if !boolRes[j+i][i] {
+						match = false
+						break
+					}
+				}
+				if match {
+					intRes1 |= 1 << j
+				}
+			}
+		}
+
+		var intRes2 uint16
+		polarity := (immediate >> 4) & 3
+		for j := 0; j < maxElements; j++ {
+			bit := (intRes1>>j)&1 != 0
+			switch polarity {
+			case 0, 2: // Positive and masked-positive.
+				// Keep IntRes1 unchanged.
+			case 1: // Negative: complement every result bit.
+				bit = !bit
+			case 3: // Masked-negative: complement only valid operand-2 lanes.
+				if valid2[j] {
+					bit = !bit
+				}
+			}
+			if bit {
+				intRes2 |= 1 << j
+			}
+		}
+
+		if op == x86asm.PCMPESTRI || op == x86asm.PCMPISTRI {
+			index := maxElements
+			if intRes2 != 0 {
+				if immediate&0x40 == 0 {
+					index = bits.TrailingZeros16(intRes2)
+				} else {
+					index = 15 - bits.LeadingZeros16(intRes2)
+				}
+			}
+			state.Set(RCX, uint64(uint32(index)))
+		} else {
+			var output [16]byte
+			if immediate&0x40 == 0 {
+				binary.LittleEndian.PutUint16(output[:], intRes2)
+			} else {
+				for j := 0; j < maxElements; j++ {
+					if intRes2&(1<<j) == 0 {
+						continue
+					}
+					for k := 0; k < elementWidth; k++ {
+						output[j*elementWidth+k] = 0xff
+					}
+				}
+			}
+			copy(state.XMM[0][:], output[:])
+		}
+
+		const arithmeticFlags = Flag64CF | Flag64PF | Flag64AF | Flag64ZF | Flag64SF | Flag64OF
+		flags := uint64(0)
+		if intRes2 != 0 {
+			flags |= Flag64CF
+		}
+		if invalid2 {
+			flags |= Flag64ZF
+		}
+		if invalid1 {
+			flags |= Flag64SF
+		}
+		if intRes2&1 != 0 {
+			flags |= Flag64OF
+		}
+		state.RFLAGS = (state.RFLAGS &^ arithmeticFlags) | flags | Flag64IF
+		state.CF = boolByte64(flags&Flag64CF != 0)
+		state.OF = boolByte64(flags&Flag64OF != 0)
+		state.Lazy = 0
+		state.LazyWidth = 0
 		state.RIP = next
 		return Flow64Continue, nil
 	}}
