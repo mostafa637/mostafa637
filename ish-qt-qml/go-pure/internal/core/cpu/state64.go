@@ -115,6 +115,7 @@ type MachineState64 struct {
 	FSBase uint64
 	GSBase uint64
 	TLS    uint64
+	XCR0   uint64
 
 	TrapNo           uint64
 	FaultAt          Address64
@@ -125,7 +126,7 @@ type MachineState64 struct {
 }
 
 func NewMachineState64(memory *Memory64) *MachineState64 {
-	return &MachineState64{Memory: memory, RFLAGS: Flag64IF, FCW: 0x037f}
+	return &MachineState64{Memory: memory, RFLAGS: Flag64IF, FCW: 0x037f, XCR0: 0x3}
 }
 
 func (s *MachineState64) Get(reg Reg64) uint64 {

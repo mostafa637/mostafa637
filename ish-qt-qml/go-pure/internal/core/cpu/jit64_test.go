@@ -816,3 +816,61 @@ func TestJIT64LeaveFencesAndUD2(t *testing.T) {
 		t.Fatalf("ud2 trap=%#x trapNo=%#x, want %#x", trap, invalidState.TrapNo, Trap64InvalidOpcode)
 	}
 }
+
+func TestJIT64FSBaseGSBaseAndXCR(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x18000
+	code := []byte{
+		0xf3, 0x48, 0x0f, 0xae, 0xc0, // rdfsbase rax
+		0x49, 0x89, 0xc0, // mov r8, rax
+		0xf3, 0x48, 0x0f, 0xae, 0xc9, // rdgsbase rcx
+		0x49, 0x89, 0xc9, // mov r9, rcx
+		0x48, 0xc7, 0xc0, 0x00, 0x50, 0x34, 0x12, // mov rax, 0x12345000
+		0xf3, 0x48, 0x0f, 0xae, 0xd0, // wrfsbase rax
+		0x48, 0xc7, 0xc1, 0x00, 0x60, 0x45, 0x23, // mov rcx, 0x23456000
+		0xf3, 0x48, 0x0f, 0xae, 0xd9, // wrgsbase rcx
+		0x31, 0xc9, // xor ecx, ecx: select XCR0
+		0x0f, 0x01, 0xd0, // xgetbv
+		0x49, 0x89, 0xc2, // mov r10, rax
+		0x49, 0x89, 0xd3, // mov r11, rdx
+		0xb8, 0x03, 0x00, 0x00, 0x00, // mov eax, 3
+		0x31, 0xd2, // xor edx, edx
+		0x31, 0xc9, // xor ecx, ecx
+		0x0f, 0x01, 0xd1, // xsetbv
+		0xf3, 0x49, 0x0f, 0xae, 0xc4, // rdfsbase r12
+		0xf3, 0x49, 0x0f, 0xae, 0xcd, // rdgsbase r13
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.FSBase = 0x1000
+	state.GSBase = 0x2000
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("tls/xcr trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.Get(R8) != 0x1000 || state.Get(R9) != 0x2000 {
+		t.Fatalf("initial bases r8=%#x r9=%#x", state.Get(R8), state.Get(R9))
+	}
+	if state.Get(R10) != 3 || state.Get(R11) != 0 {
+		t.Fatalf("xgetbv r10=%#x r11=%#x, want 3 and 0", state.Get(R10), state.Get(R11))
+	}
+	if state.FSBase != 0x12345000 || state.GSBase != 0x23456000 || state.XCR0 != 3 {
+		t.Fatalf("final fs=%#x gs=%#x xcr0=%#x", state.FSBase, state.GSBase, state.XCR0)
+	}
+	if state.Get(R12) != state.FSBase || state.Get(R13) != state.GSBase {
+		t.Fatalf("final base reads r12=%#x r13=%#x", state.Get(R12), state.Get(R13))
+	}
+
+	invalidMemory := NewMemory64()
+	const invalidAddress Address64 = 0x19000
+	mapExecutable64(t, invalidMemory, invalidAddress, []byte{
+		0xb9, 0x01, 0x00, 0x00, 0x00, // mov ecx, 1
+		0x0f, 0x01, 0xd0, // xgetbv: unsupported XCR index
+	})
+	invalidState := NewMachineState64(invalidMemory)
+	invalidState.RIP = uint64(invalidAddress)
+	if trap := NewJIT64(invalidMemory).RunToInterrupt(invalidState); trap != Trap64GeneralFault || invalidState.TrapNo != Trap64GeneralFault {
+		t.Fatalf("invalid xgetbv trap=%#x trapNo=%#x, want %#x", trap, invalidState.TrapNo, Trap64GeneralFault)
+	}
+}

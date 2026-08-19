@@ -414,6 +414,14 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			state.RIP = next
 			return Flow64Continue, nil
 		}}, false, nil
+	case x86asm.RDFSBASE, x86asm.RDGSBASE, x86asm.WRFSBASE, x86asm.WRGSBASE:
+		baseOperand, err := operand64FromArg(arg(0), width)
+		if err != nil || baseOperand.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("%s operand: %v", inst.Op, err)
+		}
+		return makeFSBase64(address, uint8(inst.Len), inst.Op, baseOperand), false, nil
+	case x86asm.XGETBV, x86asm.XSETBV:
+		return makeXCR64(address, uint8(inst.Len), inst.Op), false, nil
 	case x86asm.FLD1, x86asm.FLDZ:
 		return makeFPUConst64(address, uint8(inst.Len), inst.Op), false, nil
 	case x86asm.FCHS, x86asm.FABS:
@@ -2634,6 +2642,58 @@ func makeFence64(address uint64, size uint8) microOp64 {
 	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
 		// Guest memory operations are sequenced by the interpreter/JIT loop. The
 		// fence has no additional observable effect in this single-guest model.
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeFSBase64(address uint64, size uint8, op x86asm.Op, operand operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if op == x86asm.RDFSBASE || op == x86asm.RDGSBASE {
+			value := state.FSBase
+			if op == x86asm.RDGSBASE {
+				value = state.GSBase
+			}
+			writeReg64(state, operand, value)
+		} else {
+			value, err := readOperand64(state, operand, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			if operand.Width == 4 {
+				value = uint64(uint32(value))
+			}
+			if op == x86asm.WRFSBASE {
+				state.FSBase = value
+			} else {
+				state.GSBase = value
+			}
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeXCR64(address uint64, size uint8, op x86asm.Op) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if state.Get(RCX) != 0 {
+			state.RIP = next
+			state.TrapNo = Trap64GeneralFault
+			return Flow64Interrupt, nil
+		}
+		if op == x86asm.XGETBV {
+			value := state.XCR0
+			state.Set(RAX, uint64(uint32(value)))
+			state.Set(RDX, uint64(uint32(value>>32)))
+		} else {
+			value := (state.Get(RDX) << 32) | (state.Get(RAX) & 0xffffffff)
+			if value&1 == 0 || value&^uint64(0x3) != 0 {
+				state.RIP = next
+				state.TrapNo = Trap64GeneralFault
+				return Flow64Interrupt, nil
+			}
+			state.XCR0 = value
+		}
 		state.RIP = next
 		return Flow64Continue, nil
 	}}
