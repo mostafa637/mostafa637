@@ -3,6 +3,7 @@ package kernel
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -39,6 +40,51 @@ func processELF() []byte {
 	binary.LittleEndian.PutUint32(ph[28:], 0x1000)
 	copy(data[payloadOffset:], []byte("guest-code"))
 	return data
+}
+
+func TestDynamicFixtureRunsAcrossNeededObject(t *testing.T) {
+	fixtureDir := filepath.Join("..", "..", "..", "testdata", "elf32-dynamic")
+	mainData, err := os.ReadFile(filepath.Join(fixtureDir, "main"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	libraryData, err := os.ReadFile(filepath.Join(fixtureDir, "libfoo.so"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	fake, err := corefs.New(filepath.Join(t.TempDir(), "root"), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fake.Close()
+	if err := fake.Mkdir("/bin", 0o755, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Mkdir("/lib", 0o755, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.WriteFile("/bin/main", mainData, 0o755, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.WriteFile("/lib/libfoo.so", libraryData, 0o755, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	process := NewProcess(303, fake)
+	defer process.Close()
+	if _, err := process.LoadELF(bytes.NewReader(mainData), int64(len(mainData)), "/bin/main", 0, coreloader.DefaultStackConfig()); err != nil {
+		t.Fatalf("LoadELF fixture: %v", err)
+	}
+	if err := process.Run(32); err != nil {
+		t.Fatalf("Run fixture: %v", err)
+	}
+	if code, exited := process.ExitCode(); !exited || code != 42 {
+		t.Fatalf("fixture exit: exited=%v code=%d", exited, code)
+	}
 }
 
 func TestProcessLoadELFInitialState(t *testing.T) {
