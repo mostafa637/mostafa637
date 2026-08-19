@@ -680,6 +680,38 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("scalar SSE move source: %v", err)
 		}
 		return makeSSEScalarMove64(address, uint8(inst.Len), width, left, right), false, nil
+	case x86asm.ADDSS, x86asm.ADDSD, x86asm.SUBSS, x86asm.SUBSD,
+		x86asm.MULSS, x86asm.MULSD, x86asm.DIVSS, x86asm.DIVSD,
+		x86asm.MINSS, x86asm.MINSD, x86asm.MAXSS, x86asm.MAXSD,
+		x86asm.SQRTSS, x86asm.SQRTSD:
+		width := scalarSSEWidth64(inst.Op)
+		destination, err := operand64ScalarSSEFromArg(arg(0), width)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("scalar SSE destination: %v", err)
+		}
+		if inst.Op == x86asm.SQRTSS || inst.Op == x86asm.SQRTSD {
+			source, sourceErr := operand64ScalarSSEFromArg(arg(0), width)
+			if sourceErr != nil {
+				return microOp64{}, false, fmt.Errorf("scalar SSE sqrt source: %v", sourceErr)
+			}
+			return makeSSEScalarUnary64(address, uint8(inst.Len), width, inst.Op, destination, source), false, nil
+		}
+		source, sourceErr := operand64ScalarSSEFromArg(arg(1), width)
+		if sourceErr != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("scalar SSE source: %v", sourceErr)
+		}
+		return makeSSEScalarBinary64(address, uint8(inst.Len), width, inst.Op, destination, source), false, nil
+	case x86asm.COMISS, x86asm.COMISD, x86asm.UCOMISS, x86asm.UCOMISD:
+		width := scalarSSEWidth64(inst.Op)
+		left, err := operand64ScalarSSEFromArg(arg(0), width)
+		if err != nil || (left.Kind != operand64XMM && left.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("scalar SSE compare left: %v", err)
+		}
+		right, rightErr := operand64ScalarSSEFromArg(arg(1), width)
+		if rightErr != nil || (right.Kind != operand64XMM && right.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("scalar SSE compare right: %v", rightErr)
+		}
+		return makeSSECompare64(address, uint8(inst.Len), width, left, right), false, nil
 	case x86asm.MOVDQA, x86asm.MOVDQU, x86asm.MOVAPS, x86asm.MOVUPS, x86asm.MOVAPD, x86asm.MOVUPD:
 
 		left, err := operand64FromArg(arg(0), 16)
@@ -1587,9 +1619,186 @@ func makeSSEScalarMove64(address uint64, size, width uint8, dst, src operand64) 
 			for i := uint8(0); i < width; i++ {
 				state.XMM[dst.XMM][i] = byte(value >> (8 * i))
 			}
+			if src.Kind == operand64Mem {
+				for i := width; i < 16; i++ {
+					state.XMM[dst.XMM][i] = 0
+				}
+			}
 		} else if err := writeOperand64(state, dst, next, value); err != nil {
 			return Flow64Stop, err
 		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func scalarSSEWidth64(op x86asm.Op) uint8 {
+	if op == x86asm.ADDSS || op == x86asm.SUBSS || op == x86asm.MULSS || op == x86asm.DIVSS ||
+		op == x86asm.MINSS || op == x86asm.MAXSS || op == x86asm.SQRTSS ||
+		op == x86asm.COMISS || op == x86asm.UCOMISS {
+		return 4
+	}
+	return 8
+}
+
+func readScalarSSE64(state *MachineState64, operand operand64, width uint8, next uint64) (float64, error) {
+	var raw uint64
+	if operand.Kind == operand64XMM {
+		for i := uint8(0); i < width; i++ {
+			raw |= uint64(state.XMM[operand.XMM][i]) << (8 * i)
+		}
+	} else {
+		var err error
+		raw, err = readOperand64(state, operand, next)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if width == 4 {
+		return float64(math.Float32frombits(uint32(raw))), nil
+	}
+	return math.Float64frombits(raw), nil
+}
+
+func writeScalarSSE64(state *MachineState64, operand operand64, width uint8, next uint64, value float64) error {
+	var raw uint64
+	if width == 4 {
+		raw = uint64(math.Float32bits(float32(value)))
+	} else {
+		raw = math.Float64bits(value)
+	}
+	if operand.Kind == operand64XMM {
+		for i := uint8(0); i < width; i++ {
+			state.XMM[operand.XMM][i] = byte(raw >> (8 * i))
+		}
+		return nil
+	}
+	return writeOperand64(state, operand, next, raw)
+}
+
+func scalarSSEBinaryValue64(op x86asm.Op, left, right float64, width uint8) float64 {
+	if width == 4 {
+		l, r := float32(left), float32(right)
+		switch op {
+		case x86asm.ADDSS:
+			return float64(l + r)
+		case x86asm.SUBSS:
+			return float64(l - r)
+		case x86asm.MULSS:
+			return float64(l * r)
+		case x86asm.DIVSS:
+			return float64(l / r)
+		case x86asm.MINSS:
+			return float64(scalarSSEMinMax32(l, r, false))
+		case x86asm.MAXSS:
+			return float64(scalarSSEMinMax32(l, r, true))
+		}
+	}
+	switch op {
+	case x86asm.ADDSD:
+		return left + right
+	case x86asm.SUBSD:
+		return left - right
+	case x86asm.MULSD:
+		return left * right
+	case x86asm.DIVSD:
+		return left / right
+	case x86asm.MINSD:
+		return scalarSSEMinMax64(left, right, false)
+	case x86asm.MAXSD:
+		return scalarSSEMinMax64(left, right, true)
+	}
+	return left
+}
+
+func scalarSSEMinMax32(left, right float32, maximum bool) float32 {
+	if math.IsNaN(float64(left)) || math.IsNaN(float64(right)) || left == right {
+		return right
+	}
+	if maximum {
+		if left > right {
+			return left
+		}
+		return right
+	}
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func scalarSSEMinMax64(left, right float64, maximum bool) float64 {
+	if math.IsNaN(left) || math.IsNaN(right) || left == right {
+		return right
+	}
+	if maximum {
+		if left > right {
+			return left
+		}
+		return right
+	}
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func makeSSEScalarBinary64(address uint64, size, width uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readScalarSSE64(state, dst, width, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readScalarSSE64(state, src, width, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		if err := writeScalarSSE64(state, dst, width, next, scalarSSEBinaryValue64(op, left, right, width)); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEScalarUnary64(address uint64, size, width uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readScalarSSE64(state, src, width, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		if err := writeScalarSSE64(state, dst, width, next, math.Sqrt(value)); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSECompare64(address uint64, size, width uint8, left, right operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		lv, err := readScalarSSE64(state, left, width, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		rv, err := readScalarSSE64(state, right, width, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		unordered := math.IsNaN(lv) || math.IsNaN(rv)
+		var flags uint64
+		if unordered {
+			flags = Flag64CF | Flag64PF | Flag64ZF
+		} else if lv == rv {
+			flags = Flag64ZF
+		} else if lv < rv {
+			flags = Flag64CF
+		}
+		state.RFLAGS = (state.RFLAGS &^ (Flag64CF | Flag64PF | Flag64AF | Flag64ZF | Flag64SF | Flag64OF)) | flags
+		state.CF = boolByte64(flags&Flag64CF != 0)
+		state.OF = 0
+		state.Lazy = 0
+		state.LazyWidth = 0
 		state.RIP = next
 		return Flow64Continue, nil
 	}}

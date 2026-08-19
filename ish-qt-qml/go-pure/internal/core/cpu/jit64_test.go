@@ -1230,3 +1230,85 @@ func TestJIT64ScalarAndFullSSEMoves(t *testing.T) {
 		t.Fatalf("SSE move memory=%x, want %x", got, wantMemory)
 	}
 }
+
+func TestJIT64ScalarSSEArithmeticAndCompare(t *testing.T) {
+	setFloat32 := func(state *MachineState64, xmm uint8, value float32) {
+		binary.LittleEndian.PutUint32(state.XMM[xmm][0:4], math.Float32bits(value))
+	}
+	setFloat64 := func(state *MachineState64, xmm uint8, value float64) {
+		binary.LittleEndian.PutUint64(state.XMM[xmm][0:8], math.Float64bits(value))
+	}
+	checkRun := func(t *testing.T, code []byte, state *MachineState64) {
+		t.Helper()
+		const codeAddress Address64 = 0x9000
+		if err := state.Memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.Memory.Write(codeAddress, code); err != nil {
+			t.Fatal(err)
+		}
+		state.RIP = uint64(codeAddress)
+		trap := NewJIT64(state.Memory).RunToInterrupt(state)
+		if trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		setFloat32(state, 0, 1.5)
+		setFloat32(state, 1, 2.5)
+		setFloat32(state, 2, 2)
+		setFloat32(state, 3, 3)
+		checkRun(t, []byte{
+			0xf3, 0x0f, 0x58, 0xc1, // addss xmm0, xmm1 = 4
+			0xf3, 0x0f, 0x59, 0xc2, // mulss xmm0, xmm2 = 8
+			0xf3, 0x0f, 0x5d, 0xc3, // minss xmm0, xmm3 = 3
+			0xf3, 0x0f, 0x51, 0xc0, // sqrtss xmm0, xmm0
+			0xf4,
+		}, state)
+		got := math.Float32frombits(binary.LittleEndian.Uint32(state.XMM[0][0:4]))
+		if math.Abs(float64(got-float32(math.Sqrt(3)))) > 1e-6 {
+			t.Fatalf("scalar float32 result=%v, want sqrt(3)", got)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		setFloat64(state, 0, 1.5)
+		setFloat64(state, 1, 2.5)
+		setFloat64(state, 2, 2)
+		setFloat64(state, 3, 9)
+		checkRun(t, []byte{
+			0xf2, 0x0f, 0x58, 0xc1, // addsd xmm0, xmm1 = 4
+			0xf2, 0x0f, 0x59, 0xc2, // mulsd xmm0, xmm2 = 8
+			0xf2, 0x0f, 0x5f, 0xc3, // maxsd xmm0, xmm3 = 9
+			0xf2, 0x0f, 0x51, 0xc0, // sqrtsd xmm0, xmm0
+			0xf4,
+		}, state)
+		got := math.Float64frombits(binary.LittleEndian.Uint64(state.XMM[0][0:8]))
+		if math.Abs(got-3) > 1e-12 {
+			t.Fatalf("scalar float64 result=%v, want 3", got)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		setFloat32(state, 0, 1)
+		setFloat32(state, 1, 2)
+		checkRun(t, []byte{0x0f, 0x2f, 0xc1, 0xf4}, state) // comiss xmm0, xmm1; hlt
+		if !state.Flag(Flag64CF) || state.Flag(Flag64ZF) || state.Flag(Flag64PF) {
+			t.Fatalf("COMISS flags cf=%v zf=%v pf=%v", state.Flag(Flag64CF), state.Flag(Flag64ZF), state.Flag(Flag64PF))
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		setFloat64(state, 0, math.NaN())
+		setFloat64(state, 1, 2)
+		checkRun(t, []byte{0x66, 0x0f, 0x2e, 0xc1, 0xf4}, state) // ucomisd xmm0, xmm1; hlt
+		if !state.Flag(Flag64CF) || !state.Flag(Flag64ZF) || !state.Flag(Flag64PF) {
+			t.Fatalf("UCOMISD unordered flags cf=%v zf=%v pf=%v", state.Flag(Flag64CF), state.Flag(Flag64ZF), state.Flag(Flag64PF))
+		}
+	}
+}
