@@ -90,6 +90,7 @@ const (
 	Sys64Prlimit64      Number64 = 302
 	Sys64Getrandom      Number64 = 318
 	Sys64Rseq           Number64 = 334
+	Sys64Getdents64     Number64 = 217
 	Sys64TimerfdCreate  Number64 = 283
 	Sys64TimerfdSettime Number64 = 286
 	Sys64TimerfdGettime Number64 = 287
@@ -189,6 +190,7 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64GetCWD, getcwd64)
 	d.Register(Sys64Chdir, chdir64)
 	d.Register(Sys64Readlink, readlink64)
+	d.Register(Sys64Getdents64, getdents64Guest)
 	d.Register(Sys64Brk, brk64)
 	d.Register(Sys64Socket, socket64)
 	d.Register(Sys64Socketpair, socketpair64)
