@@ -123,6 +123,7 @@ const (
 	Sys64ClockGetres      Number64 = 229
 	Sys64ExitGroup        Number64 = 231
 	Sys64EpollWait        Number64 = 232
+	Sys64EpollPwait       Number64 = 281
 	Sys64EpollCtl         Number64 = 233
 	Sys64InotifyAdd       Number64 = 254
 	Sys64InotifyRm        Number64 = 255
@@ -149,6 +150,7 @@ const (
 	Sys64GetCPU           Number64 = 309
 	Sys64Statx            Number64 = 332
 	Sys64Rseq             Number64 = 334
+	Sys64EpollPwait2      Number64 = 441
 	Sys64Getdents64       Number64 = 217
 	Sys64TimerfdCreate    Number64 = 283
 	Sys64TimerfdSettime   Number64 = 286
@@ -386,6 +388,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64EpollCreate1, epollCreate164)
 	d.Register(Sys64EpollCtl, epollCtl64)
 	d.Register(Sys64EpollWait, epollWait64)
+	d.Register(Sys64EpollPwait, epollPwait64)
+	d.Register(Sys64EpollPwait2, epollPwait264)
 	d.Register(Sys64InotifyInit1, inotifyInit164)
 	d.Register(Sys64InotifyAdd, inotifyAddWatch64)
 	d.Register(Sys64InotifyRm, inotifyRmWatch64)

@@ -44,6 +44,26 @@ func queueSignal64(ctx *Context64, signo uint64) {
 	ctx.SignalMu.Unlock()
 }
 
+func currentSignalMask64(ctx *Context64) uint64 {
+	if ctx == nil {
+		return 0
+	}
+	ctx.SignalMu.Lock()
+	mask := ctx.SignalMask
+	ctx.SignalMu.Unlock()
+	return mask
+}
+
+func hasUnblockedPending64(ctx *Context64, mask uint64) bool {
+	if ctx == nil {
+		return false
+	}
+	ctx.SignalMu.Lock()
+	pending := ctx.PendingSignals &^ mask
+	ctx.SignalMu.Unlock()
+	return pending != 0
+}
+
 func pendingSignal64Locked(ctx *Context64, set uint64) uint64 {
 	pending := ctx.PendingSignals & set
 	if pending == 0 {

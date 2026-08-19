@@ -411,6 +411,75 @@ func epollCtl64(ctx *Context64, args [6]uint64) int64 {
 }
 
 func epollWait64(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil {
+		return int64(EINVAL)
+	}
+	rawTimeout := int64(args[3])
+	mask := currentSignalMask64(ctx)
+	if rawTimeout < 0 {
+		return epollWaitCore64(ctx, args, 0, false, mask)
+	}
+	return epollWaitCore64(ctx, args, epollMillisDuration64(rawTimeout), true, mask)
+}
+
+func epollPwait64(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil {
+		return int64(EINVAL)
+	}
+	mask, result := temporarySignalMask64(ctx, args[4], args[5])
+	if result != 0 {
+		return result
+	}
+	return epollWaitCore64(ctx, args, epollMillisDuration64(int64(args[3])), int64(args[3]) >= 0, mask)
+}
+
+func epollPwait264(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil {
+		return int64(EINVAL)
+	}
+	var timeout time.Duration
+	timed := args[3] != 0
+	if timed {
+		var ok bool
+		timeout, ok = readTimespec64(ctx, corecpu.Address64(args[3]))
+		if !ok {
+			return int64(EINVAL)
+		}
+	}
+	mask, result := temporarySignalMask64(ctx, args[4], args[5])
+	if result != 0 {
+		return result
+	}
+	return epollWaitCore64(ctx, args, timeout, timed, mask)
+}
+
+func epollMillisDuration64(milliseconds int64) time.Duration {
+	if milliseconds <= 0 {
+		return 0
+	}
+	const maxMilliseconds = int64((1<<63 - 1) / int64(time.Millisecond))
+	if milliseconds >= maxMilliseconds {
+		return time.Duration(1<<63 - 1)
+	}
+	return time.Duration(milliseconds) * time.Millisecond
+}
+
+func temporarySignalMask64(ctx *Context64, address, size uint64) (uint64, int64) {
+	ctx.SignalMu.Lock()
+	current := ctx.SignalMask
+	ctx.SignalMu.Unlock()
+	if address == 0 {
+		return current, 0
+	}
+	mask, result := readSignalSet64(ctx, address, size)
+	if result != 0 {
+		return 0, result
+	}
+	mask &^= signalBit64(sigKill64) | signalBit64(sigStop64)
+	return mask, 0
+}
+
+func epollWaitCore64(ctx *Context64, args [6]uint64, timeout time.Duration, timed bool, signalMask uint64) int64 {
 	epollFile, err := ctx.GetFile(args[0])
 	if err != nil {
 		return int64(EBADF)
@@ -420,10 +489,13 @@ func epollWait64(ctx *Context64, args [6]uint64) int64 {
 		return int64(EINVAL)
 	}
 	deadline := time.Time{}
-	if int64(args[3]) >= 0 {
-		deadline = time.Now().Add(time.Duration(args[3]) * time.Millisecond)
+	if timed && timeout > 0 {
+		deadline = time.Now().Add(timeout)
 	}
 	for {
+		if hasUnblockedPending64(ctx, signalMask) {
+			return int64(EINTR)
+		}
 		ready := make([]epollWatch64, 0)
 		handle.mu.Lock()
 		watches := make([]epollWatch64, 0, len(handle.watches))
@@ -459,7 +531,14 @@ func epollWait64(ctx *Context64, args [6]uint64) int64 {
 			}
 			return int64(len(ready))
 		}
-		if int64(args[3]) == 0 || (!deadline.IsZero() && !time.Now().Before(deadline)) {
+		if !timed || timeout == 0 {
+			if !timed {
+				time.Sleep(time.Millisecond)
+				continue
+			}
+			return 0
+		}
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
 			return 0
 		}
 		time.Sleep(time.Millisecond)
