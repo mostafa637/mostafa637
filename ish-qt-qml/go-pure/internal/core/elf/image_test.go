@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -110,5 +111,83 @@ func TestParseRejectsInvalidSegment(t *testing.T) {
 	_, err := Parse(bytes.NewReader(data), int64(len(data)))
 	if !errors.Is(err, ErrInvalidSegment) {
 		t.Fatalf("error = %v, want ErrInvalidSegment", err)
+	}
+}
+
+func testDynamicELF() []byte {
+	const (
+		programOffset = 52
+		programSize   = 32
+		loadOffset    = 0x1000
+		dynamicOffset = 0x1100
+		stringOffset  = 0x1140
+		loadVaddr     = 0x08048000
+	)
+	strings := []byte("\x00libc.so.6\x00libm.so.6\x00")
+	data := make([]byte, stringOffset+len(strings)+1)
+	base := testELF(false)
+	copy(data, base)
+	binary.LittleEndian.PutUint16(data[44:], 2)
+	binary.LittleEndian.PutUint32(data[52+16:], uint32(stringOffset-loadOffset+0x20))
+	binary.LittleEndian.PutUint32(data[52+20:], 0x3000)
+	load := data[52 : 52+programSize]
+	binary.LittleEndian.PutUint32(load[16:], uint32(stringOffset+len(strings)-loadOffset))
+	binary.LittleEndian.PutUint32(load[20:], 0x3000)
+
+	dynamic := data[programOffset+programSize : programOffset+2*programSize]
+	binary.LittleEndian.PutUint32(dynamic[0:], 2)
+	binary.LittleEndian.PutUint32(dynamic[4:], dynamicOffset)
+	binary.LittleEndian.PutUint32(dynamic[8:], loadVaddr+(stringOffset-loadOffset))
+	binary.LittleEndian.PutUint32(dynamic[12:], loadVaddr+(stringOffset-loadOffset))
+	binary.LittleEndian.PutUint32(dynamic[16:], 9*8)
+	binary.LittleEndian.PutUint32(dynamic[20:], 9*8)
+	binary.LittleEndian.PutUint32(dynamic[24:], 4)
+	binary.LittleEndian.PutUint32(dynamic[28:], 4)
+
+	entries := data[dynamicOffset : dynamicOffset+9*8]
+	put := func(index int, tag, value uint32) {
+		binary.LittleEndian.PutUint32(entries[index*8:], tag)
+		binary.LittleEndian.PutUint32(entries[index*8+4:], value)
+	}
+	put(0, 5, loadVaddr+(stringOffset-loadOffset)) // DT_STRTAB
+	put(1, 10, uint32(len(strings)))               // DT_STRSZ
+	put(2, 1, 1)                                   // DT_NEEDED libc
+	put(3, 1, 11)                                  // DT_NEEDED libm
+	put(4, 14, 1)                                  // DT_SONAME libc
+	put(5, 17, loadVaddr+0x180)                    // DT_REL
+	put(6, 18, 8)                                  // DT_RELSZ
+	put(7, 19, 8)                                  // DT_RELENT
+	put(8, 0, 0)                                   // DT_NULL
+	copy(data[stringOffset:], strings)
+
+	dynamicHeader := data[programOffset+programSize : programOffset+2*programSize]
+	binary.LittleEndian.PutUint32(dynamicHeader[0:], 2)
+	binary.LittleEndian.PutUint32(dynamicHeader[4:], dynamicOffset)
+	binary.LittleEndian.PutUint32(dynamicHeader[8:], loadVaddr+(dynamicOffset-loadOffset))
+	binary.LittleEndian.PutUint32(dynamicHeader[12:], loadVaddr+(dynamicOffset-loadOffset))
+	binary.LittleEndian.PutUint32(dynamicHeader[16:], 9*8)
+	binary.LittleEndian.PutUint32(dynamicHeader[20:], 9*8)
+	binary.LittleEndian.PutUint32(dynamicHeader[24:], 4)
+	binary.LittleEndian.PutUint32(dynamicHeader[28:], 4)
+	return data
+}
+
+func TestParseDynamicInfo(t *testing.T) {
+	data := testDynamicELF()
+	image, err := Parse(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("Parse dynamic: %v", err)
+	}
+	if image.Dynamic == nil {
+		t.Fatal("Dynamic is nil")
+	}
+	if got, want := image.Dynamic.Needed, []string{"libc.so.6", "libm.so.6"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("DT_NEEDED = %#v, want %#v", got, want)
+	}
+	if image.Dynamic.SONAME != "libc.so.6" {
+		t.Fatalf("DT_SONAME = %q", image.Dynamic.SONAME)
+	}
+	if image.Dynamic.Rel == 0 || image.Dynamic.RelSz != 8 || image.Dynamic.RelEnt != 8 {
+		t.Fatalf("REL metadata = %#v", image.Dynamic)
 	}
 }

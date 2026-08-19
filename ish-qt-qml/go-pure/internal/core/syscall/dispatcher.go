@@ -63,6 +63,10 @@ const (
 	SysRtSigaction   Number = 174
 	SysRtSigprocmask Number = 175
 	SysSetTIDAddress Number = 258
+	SysSetThreadArea Number = 243
+	SysGetThreadArea Number = 244
+	SysSetRobustList Number = 311
+	SysGetRobustList Number = 312
 )
 
 var errFault = errors.New("syscall: bad guest address")
@@ -99,15 +103,18 @@ const (
 )
 
 type Context struct {
-	Memory     *corecpu.Memory
-	FS         *corefs.FS
-	PID        uint32
-	ParentPID  uint32
-	CWD        string
-	TIDAddress uint32
-	Children   *ChildRegistry
-	WinCols    uint16
-	WinRows    uint16
+	Memory         *corecpu.Memory
+	FS             *corefs.FS
+	PID            uint32
+	ParentPID      uint32
+	CWD            string
+	TIDAddress     uint32
+	Children       *ChildRegistry
+	WinCols        uint16
+	WinRows        uint16
+	TLSBase        uint32
+	RobustListHead uint32
+	RobustListLen  uint32
 
 	StartBrk uint32
 	Brk      uint32
@@ -166,6 +173,10 @@ func NewDispatcher(context *Context) *Dispatcher {
 	d.Register(SysRtSigaction, signalStub)
 	d.Register(SysRtSigprocmask, signalStub)
 	d.Register(SysSetTIDAddress, setTIDAddress)
+	d.Register(SysSetThreadArea, setThreadArea)
+	d.Register(SysGetThreadArea, getThreadArea)
+	d.Register(SysSetRobustList, setRobustList)
+	d.Register(SysGetRobustList, getRobustList)
 	d.Register(SysGetTID, gettid)
 	d.Register(SysOpen, open)
 	d.Register(SysAccess, access)

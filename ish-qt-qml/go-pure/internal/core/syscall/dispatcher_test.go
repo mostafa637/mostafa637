@@ -504,3 +504,58 @@ func TestDispatcherPipePollAndReadWrite(t *testing.T) {
 		t.Fatalf("poll EOF = %d", got)
 	}
 }
+
+func TestDispatcherTLSAndRobustList(t *testing.T) {
+	memory := cpu.NewMemory()
+	if err := memory.Map(2, 2, cpu.PRead|cpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	context := NewContext(memory)
+	context.PID = 7
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+
+	var desc [16]byte
+	binary.LittleEndian.PutUint32(desc[0:4], ^uint32(0))
+	binary.LittleEndian.PutUint32(desc[4:8], 0x70000000)
+	binary.LittleEndian.PutUint32(desc[8:12], 0xfffff)
+	if err := memory.Write(0x2000, desc[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatcher.Dispatch(state, SysSetThreadArea, 0x2000); got != 0 {
+		t.Fatalf("set_thread_area = %d", got)
+	}
+	if state.TLS != 0x70000000 || context.TLSBase != 0x70000000 {
+		t.Fatalf("TLS base = %#x/%#x", state.TLS, context.TLSBase)
+	}
+	var updated [16]byte
+	if err := memory.Read(0x2000, updated[:]); err != nil {
+		t.Fatal(err)
+	}
+	if entry := binary.LittleEndian.Uint32(updated[0:4]); entry != 6 {
+		t.Fatalf("allocated TLS entry = %d, want 6", entry)
+	}
+	if got := dispatcher.Dispatch(state, SysGetThreadArea, 6, 0x2100); got != 0 {
+		t.Fatalf("get_thread_area = %d", got)
+	}
+	var returned [16]byte
+	if err := memory.Read(0x2100, returned[:]); err != nil {
+		t.Fatal(err)
+	}
+	if base := binary.LittleEndian.Uint32(returned[4:8]); base != 0x70000000 {
+		t.Fatalf("returned TLS base = %#x", base)
+	}
+	if got := dispatcher.Dispatch(state, SysSetRobustList, 0x3000, 24); got != 0 {
+		t.Fatalf("set_robust_list = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysGetRobustList, 0, 0x2200, 0x2204); got != 0 {
+		t.Fatalf("get_robust_list = %d", got)
+	}
+	var value [8]byte
+	if err := memory.Read(0x2200, value[:]); err != nil {
+		t.Fatal(err)
+	}
+	if head, length := binary.LittleEndian.Uint32(value[0:4]), binary.LittleEndian.Uint32(value[4:8]); head != 0x3000 || length != 24 {
+		t.Fatalf("robust list = %#x/%d", head, length)
+	}
+}

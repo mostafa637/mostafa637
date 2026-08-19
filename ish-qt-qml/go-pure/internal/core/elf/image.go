@@ -79,6 +79,7 @@ type Image struct {
 	Header   Header
 	Segments []Segment
 	Interp   string
+	Dynamic  *DynamicInfo
 }
 
 func (i *Image) LoadSegments() []Segment {
@@ -234,6 +235,11 @@ func Parse(r io.ReaderAt, size int64) (*Image, error) {
 			}
 			image.Interp = string(data)
 		}
+	}
+	if dynamic, dynamicErr := parseDynamic(r, size, file.Progs); dynamicErr != nil {
+		return nil, fmt.Errorf("%w: dynamic: %v", ErrInvalidImage, dynamicErr)
+	} else {
+		image.Dynamic = dynamic
 	}
 	if len(image.LoadSegments()) == 0 {
 		return nil, fmt.Errorf("%w: no PT_LOAD", ErrInvalidImage)

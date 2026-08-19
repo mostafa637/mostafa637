@@ -21,6 +21,7 @@ type LoadedImage struct {
 	Stack            coreloader.StackLayout
 	Interpreter      *coreelf.Image
 	InterpreterSpace *coreloader.AddressSpace
+	TLS              *coreloader.TLSBlock
 }
 
 // LoadELF maps an i386 ELF image into the process address space and constructs
@@ -51,6 +52,13 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 	if err != nil {
 		return nil, err
 	}
+	if err := coreloader.ApplyRelocations(p.Memory, space); err != nil {
+		return nil, fmt.Errorf("kernel: relocate main image: %w", err)
+	}
+	tls, err := coreloader.LoadTLS(r, size, image, p.Memory, mainBias, coreloader.DefaultTLSBase())
+	if err != nil {
+		return nil, fmt.Errorf("kernel: load TLS: %w", err)
+	}
 	entry := space.Entry
 	var interpreterImage *coreelf.Image
 	var interpreterSpace *coreloader.AddressSpace
@@ -80,6 +88,9 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 		interpreterSpace, err = coreloader.Load(bytes.NewReader(interpreterData), int64(len(interpreterData)), interpreterImage, p.Memory, interpreterBias)
 		if err != nil {
 			return nil, fmt.Errorf("kernel: load interpreter %q: %w", image.Interp, err)
+		}
+		if err := coreloader.ApplyRelocations(p.Memory, interpreterSpace); err != nil {
+			return nil, fmt.Errorf("kernel: relocate interpreter %q: %w", image.Interp, err)
 		}
 		stack.Auxv = dynamicAuxv(space, interpreterSpace)
 		entry = interpreterSpace.Entry
@@ -115,6 +126,11 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 	p.CPU.FaultWrite = false
 	p.CPU.TrapNo = 0
 	p.CPU.FCW = 0x037f
+	if tls != nil {
+		p.CPU.TLS = uint32(tls.Start)
+	} else {
+		p.CPU.TLS = 0
+	}
 	p.Executor.Halted = false
 	return &LoadedImage{
 		Image:            image,
@@ -122,6 +138,7 @@ func (p *Process) loadELF(r io.ReaderAt, size int64, filename string, bias uint3
 		Stack:            layout,
 		Interpreter:      interpreterImage,
 		InterpreterSpace: interpreterSpace,
+		TLS:              tls,
 	}, nil
 }
 
