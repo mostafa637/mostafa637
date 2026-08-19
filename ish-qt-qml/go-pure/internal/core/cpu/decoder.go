@@ -38,6 +38,7 @@ const (
 	OpTestOperands
 	OpTestImm
 	OpShift
+	OpUnary
 	OpIncReg
 	OpDecReg
 	OpPushReg
@@ -259,6 +260,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return shift, nil
+	}
+	if unary, handled, err := decodeX86Unary(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return unary, nil
 	}
 	reader := newCodeReader(memory, eip)
 	opcode, err := reader.byte()
@@ -783,4 +790,24 @@ func decodeX86Shift(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{}, true, fmt.Errorf("%w: shift count %T", ErrUnsupportedAddressing, inst.Args[1])
 	}
 	return instruction, true, nil
+}
+
+func decodeX86Unary(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.DataSize != 32 || len(inst.Args) < 1 || inst.Args[0] == nil {
+		return Instruction{}, false, nil
+	}
+	var group uint8
+	switch inst.Op {
+	case x86asm.NOT:
+		group = 0
+	case x86asm.NEG:
+		group = 1
+	default:
+		return Instruction{}, false, nil
+	}
+	dst, ok, err := x86Operand32(inst.Args[0])
+	if err != nil || !ok {
+		return Instruction{}, true, err
+	}
+	return Instruction{Op: OpUnary, Len: uint32(inst.Len), Dst: dst, Group: group}, true, nil
 }

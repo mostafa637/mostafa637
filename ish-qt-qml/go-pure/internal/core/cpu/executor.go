@@ -192,6 +192,21 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			state.SetLazyArithmetic(value, count, result, carry, overflow, false)
 		}
 		state.EIP = next
+	case OpUnary:
+		value, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		result := value
+		if instruction.Group == 0 { // NOT: flags are unaffected.
+			result = ^value
+		} else { // NEG: 0 - value updates arithmetic flags.
+			result = e.sub(state, 0, value)
+		}
+		if err := storeOperand(state, instruction.Dst, result); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
 	case OpIncReg:
 		carry := state.Flag(FlagCF)
 		reg := state.Get(instruction.Reg)

@@ -427,3 +427,53 @@ func TestExecutorShiftCountZeroPreservesFlags(t *testing.T) {
 		t.Fatal("count-zero shift changed CF")
 	}
 }
+
+func TestExecutorUnaryInstructionsDecodedByX86ASM(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xB8, 0x0F, 0x00, 0x00, 0x00, // mov eax, 0xf
+		0xF7, 0xD0, // not eax
+		0xF4,
+	})
+	unary, err := Decode(memory, PageSize+5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unary.Op != OpUnary || unary.Group != 0 || unary.Dst.Reg != EAX {
+		t.Fatalf("NOT decode = %+v", unary)
+	}
+	state.EFlags |= FlagCF
+	state.ExpandFlags()
+	if err := NewExecutor(nil).Run(state, 3); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 0xfffffff0 {
+		t.Fatalf("not eax = %#x, want %#x", got, uint32(0xfffffff0))
+	}
+	if !state.Flag(FlagCF) {
+		t.Fatal("NOT changed CF")
+	}
+}
+
+func TestExecutorNegFlagsDecodedByX86ASM(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+		0xF7, 0xD8, // neg eax
+		0xF4,
+	})
+	unary, err := Decode(memory, PageSize+5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unary.Op != OpUnary || unary.Group != 1 || unary.Dst.Reg != EAX {
+		t.Fatalf("NEG decode = %+v", unary)
+	}
+	if err := NewExecutor(nil).Run(state, 3); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 0xffffffff {
+		t.Fatalf("neg eax = %#x, want %#x", got, uint32(0xffffffff))
+	}
+	if !state.Flag(FlagCF) || state.Flag(FlagOF) || state.Flag(FlagZF) {
+		t.Fatalf("NEG flags: cf=%v of=%v zf=%v", state.Flag(FlagCF), state.Flag(FlagOF), state.Flag(FlagZF))
+	}
+}
