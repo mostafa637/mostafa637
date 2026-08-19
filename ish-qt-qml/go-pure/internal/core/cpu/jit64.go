@@ -892,6 +892,34 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s requires an immediate control byte", inst.Op)
 		}
 		return makeSSEStringCompare64(address, uint8(inst.Len), inst.Op, left, right, uint8(immediate), instructionDataWidth64(inst)), false, nil
+	case x86asm.MPSADBW:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("%s requires an immediate control byte", inst.Op)
+		}
+		return makeMPSADBW64(address, uint8(inst.Len), destination, source, uint8(immediate)), false, nil
+	case x86asm.PCLMULQDQ:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("%s requires an immediate control byte", inst.Op)
+		}
+		return makePCLMULQDQ64(address, uint8(inst.Len), destination, source, uint8(immediate)), false, nil
 	case x86asm.PHMINPOSUW:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
@@ -4998,6 +5026,90 @@ func makeSSEStringCompare64(address uint64, size uint8, op x86asm.Op, left, righ
 		state.OF = boolByte64(flags&Flag64OF != 0)
 		state.Lazy = 0
 		state.LazyWidth = 0
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeMPSADBW64(address uint64, size uint8, destination, source operand64, immediate uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		first, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		second, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+
+		fixedOffset := int(immediate&3) * 4
+		slideOffset := int((immediate>>2)&1) * 4
+		var result [16]byte
+		for lane := 0; lane < 8; lane++ {
+			sum := 0
+			for byteInWord := 0; byteInWord < 4; byteInWord++ {
+				left := first[slideOffset+lane+byteInWord]
+				right := second[fixedOffset+byteInWord]
+				if left >= right {
+					sum += int(left - right)
+				} else {
+					sum += int(right - left)
+				}
+			}
+			binary.LittleEndian.PutUint16(result[lane*2:], uint16(sum))
+		}
+		if destination.Kind != operand64XMM || destination.XMM >= uint8(len(state.XMM)) {
+			return Flow64Stop, ErrUnsupported64
+		}
+		state.XMM[destination.XMM] = result
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func carrylessMultiply64(left, right uint64) (low, high uint64) {
+	for bit := uint(0); bit < 64; bit++ {
+		if right&(uint64(1)<<bit) == 0 {
+			continue
+		}
+		if bit == 0 {
+			low ^= left
+			continue
+		}
+		low ^= left << bit
+		high ^= left >> (64 - bit)
+	}
+	return low, high
+}
+
+func makePCLMULQDQ64(address uint64, size uint8, destination, source operand64, immediate uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		first, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		second, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		firstOffset := 0
+		if immediate&1 != 0 {
+			firstOffset = 8
+		}
+		secondOffset := 0
+		if immediate&0x10 != 0 {
+			secondOffset = 8
+		}
+		left := binary.LittleEndian.Uint64(first[firstOffset : firstOffset+8])
+		right := binary.LittleEndian.Uint64(second[secondOffset : secondOffset+8])
+		low, high := carrylessMultiply64(left, right)
+		var result [16]byte
+		binary.LittleEndian.PutUint64(result[0:], low)
+		binary.LittleEndian.PutUint64(result[8:], high)
+		if destination.Kind != operand64XMM || destination.XMM >= uint8(len(state.XMM)) {
+			return Flow64Stop, ErrUnsupported64
+		}
+		state.XMM[destination.XMM] = result
 		state.RIP = next
 		return Flow64Continue, nil
 	}}

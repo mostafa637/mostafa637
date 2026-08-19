@@ -3753,3 +3753,74 @@ func TestJIT64PCMPESTRIOrderedAndMask(t *testing.T) {
 		t.Fatalf("PCMPESTRI index=%d, want 2", got)
 	}
 }
+
+func TestJIT64MPSADBWAndPCLMULQDQ(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x5a000
+		dataAddress Address64 = 0x5b000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	// MPSADBW xmm0,xmm1,6; MPSADBW xmm8,[rdi],1;
+	// PCLMULQDQ xmm2,xmm3,11h; PCLMULQDQ xmm9,[rdi],0.
+	code := []byte{
+		0x66, 0x0f, 0x3a, 0x42, 0xc1, 0x06,
+		0x66, 0x44, 0x0f, 0x3a, 0x42, 0x07, 0x01,
+		0x66, 0x0f, 0x3a, 0x44, 0xd3, 0x11,
+		0x66, 0x44, 0x0f, 0x3a, 0x44, 0x0f, 0x00,
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	var memorySource [16]byte
+	for i := range memorySource {
+		memorySource[i] = byte(30 + i)
+	}
+	if err := memory.Write(dataAddress, memorySource[:]); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	for i := range state.XMM[0] {
+		state.XMM[0][i] = byte(i)
+		state.XMM[8][i] = byte(20 + i)
+	}
+	state.XMM[1] = [16]byte{}
+	for i := range state.XMM[1] {
+		state.XMM[1][i] = byte(10 + i)
+	}
+	state.XMM[2] = [16]byte{}
+	binary.LittleEndian.PutUint64(state.XMM[2][8:], 0x8000000000000001)
+	state.XMM[3] = [16]byte{}
+	binary.LittleEndian.PutUint64(state.XMM[3][8:], 0x3)
+	state.XMM[9] = [16]byte{}
+	binary.LittleEndian.PutUint64(state.XMM[9][0:], 1)
+
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	for lane, want := range []uint16{56, 52, 48, 44, 40, 36, 32, 28} {
+		if got := binary.LittleEndian.Uint16(state.XMM[0][lane*2:]); got != want {
+			t.Fatalf("MPSADBW register lane %d=%d, want %d", lane, got, want)
+		}
+	}
+	for lane, want := range []uint16{56, 52, 48, 44, 40, 36, 32, 28} {
+		if got := binary.LittleEndian.Uint16(state.XMM[8][lane*2:]); got != want {
+			t.Fatalf("MPSADBW memory/REX.R lane %d=%d, want %d", lane, got, want)
+		}
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[2][0:]); got != 0x8000000000000003 || binary.LittleEndian.Uint64(state.XMM[2][8:]) != 1 {
+		t.Fatalf("PCLMULQDQ high/high=%x, want high=1 low=8000000000000003", state.XMM[2])
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[9][0:]); got != 0x2524232221201f1e || binary.LittleEndian.Uint64(state.XMM[9][8:]) != 0 {
+		t.Fatalf("PCLMULQDQ memory low/low=%x, want high=0 low=2524232221201f1e", state.XMM[9])
+	}
+}
