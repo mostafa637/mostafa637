@@ -28,6 +28,7 @@ const (
 	Sys64Mprotect       Number64 = 10
 	Sys64Munmap         Number64 = 11
 	Sys64Brk            Number64 = 12
+	Sys64Lseek          Number64 = 8
 	Sys64Ioctl          Number64 = 16
 	Sys64Readv          Number64 = 19
 	Sys64Writev         Number64 = 20
@@ -116,6 +117,7 @@ type Context64 struct {
 	RseqLength    uint64
 	RseqSignature uint64
 	FDs           *corefd.Table
+	Mappings      []GuestMapping64
 	signalFDs     map[*signalFD64]struct{}
 }
 
@@ -194,6 +196,10 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Readlink, readlink64)
 	d.Register(Sys64Getdents64, getdents64Guest)
 	d.Register(Sys64Brk, brk64)
+	d.Register(Sys64Mmap, mmap64)
+	d.Register(Sys64Mprotect, mprotect64)
+	d.Register(Sys64Munmap, munmap64)
+	d.Register(Sys64Lseek, lseek64)
 	d.Register(Sys64Socket, socket64)
 	d.Register(Sys64Socketpair, socketpair64)
 	d.Register(Sys64Bind, bind64)
