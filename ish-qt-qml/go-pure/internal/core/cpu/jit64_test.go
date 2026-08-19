@@ -3266,3 +3266,81 @@ func TestJIT64PackedRounding(t *testing.T) {
 	assertFloat32(5, -2, 2, 4, -4)
 	assertFloat64(14, 1, -3)
 }
+
+func TestJIT64PackedBlend(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x4c000
+		dataAddress Address64 = 0x4d000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	memorySource := make([]byte, 16)
+	for lane, value := range []float32{100, 200, 300, 400} {
+		binary.LittleEndian.PutUint32(memorySource[lane*4:], math.Float32bits(value))
+	}
+	if err := memory.Write(dataAddress, memorySource); err != nil {
+		t.Fatal(err)
+	}
+	code := []byte{
+		0x66, 0x0f, 0x3a, 0x0c, 0xca, 0x0a, // blendps xmm1, xmm2, 0b1010
+		0x66, 0x0f, 0x3a, 0x0d, 0xdc, 0x01, // blendpd xmm3, xmm4, 0b01
+		0x66, 0x0f, 0x38, 0x14, 0x2f, // blendvps xmm5, [rdi], xmm0
+		0x66, 0x44, 0x0f, 0x38, 0x15, 0xf6, // blendvpd xmm14, xmm6, xmm0
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	putFloat32 := func(destination *[16]byte, values ...float32) {
+		for lane, value := range values {
+			binary.LittleEndian.PutUint32(destination[lane*4:], math.Float32bits(value))
+		}
+	}
+	putFloat64 := func(destination *[16]byte, values ...float64) {
+		for lane, value := range values {
+			binary.LittleEndian.PutUint64(destination[lane*8:], math.Float64bits(value))
+		}
+	}
+	putFloat32(&state.XMM[0], 0, math.Float32frombits(0x80000000), 0, math.Float32frombits(0x80000000))
+	putFloat32(&state.XMM[1], 10, 20, 30, 40)
+	putFloat32(&state.XMM[2], 1, 2, 3, 4)
+	putFloat64(&state.XMM[3], 10, 20)
+	putFloat64(&state.XMM[4], 1, 2)
+	putFloat32(&state.XMM[5], 5, 6, 7, 8)
+	putFloat64(&state.XMM[6], 60, 70)
+	for lane := range state.XMM[14] {
+		state.XMM[14][lane] = 0xa5
+	}
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	assertFloat32 := func(xmm uint8, values ...float32) {
+		t.Helper()
+		var expected [16]byte
+		putFloat32(&expected, values...)
+		if state.XMM[xmm] != expected {
+			t.Fatalf("xmm%d=%x, want %x", xmm, state.XMM[xmm], expected)
+		}
+	}
+	assertFloat64 := func(xmm uint8, values ...float64) {
+		t.Helper()
+		var expected [16]byte
+		putFloat64(&expected, values...)
+		if state.XMM[xmm] != expected {
+			t.Fatalf("xmm%d=%x, want %x", xmm, state.XMM[xmm], expected)
+		}
+	}
+	assertFloat32(1, 10, 2, 30, 4)
+	assertFloat64(3, 1, 20)
+	assertFloat32(5, 5, 200, 7, 400)
+	assertFloat64(14, 60, 70)
+}
