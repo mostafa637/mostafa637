@@ -705,3 +705,125 @@ func TestFakeFSStatfsAndFileBackedMmap(t *testing.T) {
 		t.Fatalf("O_DIRECTORY regular file = %d", got)
 	}
 }
+
+func TestAtFamilyAndVectorSyscalls(t *testing.T) {
+	db, err := storage.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	fake, err := corefs.New(filepath.Join(t.TempDir(), "root"), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Mkdir("/etc", 0o755, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.WriteFile("/etc/name", []byte("pure-go"), 0o644, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Symlink("name", "/etc/link", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	memory := cpu.NewMemory()
+	for page := cpu.Page(1); page <= 6; page++ {
+		if err := memory.Map(page, 1, cpu.PRead|cpu.PWrite); err != nil {
+			t.Fatal(err)
+		}
+	}
+	context := NewContext(memory)
+	context.FS = fake
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+	writeString := func(address uint32, value string) {
+		t.Helper()
+		if err := memory.Write(cpu.Address(address), append([]byte(value), 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeString(0x1000, "/etc")
+	dirFD := dispatcher.Dispatch(state, SysOpen, 0x1000, guestOpenDirectory, 0)
+	if dirFD < 0 {
+		t.Fatalf("open directory = %d", dirFD)
+	}
+	writeString(0x1100, "name")
+	fileFD := dispatcher.Dispatch(state, SysOpenat, uint32(dirFD), 0x1100, 0, 0)
+	if fileFD < 0 {
+		t.Fatalf("openat = %d", fileFD)
+	}
+	if got := dispatcher.Dispatch(state, SysFstatat64, uint32(dirFD), 0x1100, 0x2000, 0); got != 0 {
+		t.Fatalf("fstatat64 = %d", got)
+	}
+	var stat [stat64Size]byte
+	if err := memory.Read(0x2000, stat[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(stat[16:20]) & corefs.ModeTypeMask; got != corefs.ModeRegular {
+		t.Fatalf("fstatat64 mode type = %#x", got)
+	}
+	writeString(0x1200, "link")
+	if got := dispatcher.Dispatch(state, SysFstatat64, uint32(dirFD), 0x1200, 0x2100, atSymlinkNoFollow); got != 0 {
+		t.Fatalf("fstatat64 nofollow = %d", got)
+	}
+	if err := memory.Read(0x2100, stat[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(stat[16:20]) & corefs.ModeTypeMask; got != corefs.ModeSymlink {
+		t.Fatalf("nofollow mode type = %#x", got)
+	}
+	if got := dispatcher.Dispatch(state, SysRead, uint32(fileFD), 0x3000, 7); got != 7 {
+		t.Fatalf("openat read = %d", got)
+	}
+	var readBack [7]byte
+	if err := memory.Read(0x3000, readBack[:]); err != nil {
+		t.Fatal(err)
+	}
+	if string(readBack[:]) != "pure-go" {
+		t.Fatalf("openat data = %q", readBack[:])
+	}
+
+	input := bytes.NewBufferString("hello world")
+	var output bytes.Buffer
+	if err := context.InstallFile(7, &File{Reader: input, Writer: &output}); err != nil {
+		t.Fatal(err)
+	}
+	var iov [16]byte
+	binary.LittleEndian.PutUint32(iov[0:4], 0x4000)
+	binary.LittleEndian.PutUint32(iov[4:8], 5)
+	binary.LittleEndian.PutUint32(iov[8:12], 0x5000)
+	binary.LittleEndian.PutUint32(iov[12:16], 6)
+	if err := memory.Write(0x6000, iov[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatcher.Dispatch(state, SysReadv, 7, 0x6000, 2); got != 11 {
+		t.Fatalf("readv = %d", got)
+	}
+	var first, second [6]byte
+	if err := memory.Read(0x4000, first[:5]); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Read(0x5000, second[:]); err != nil {
+		t.Fatal(err)
+	}
+	if string(first[:5]) != "hello" || string(second[:]) != " world" {
+		t.Fatalf("readv buffers = %q %q", first[:5], second[:])
+	}
+	if err := memory.Write(0x4000, []byte("pure")); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(0x5000, []byte(" go")); err != nil {
+		t.Fatal(err)
+	}
+	iov[4] = 4
+	binary.LittleEndian.PutUint32(iov[12:16], 3)
+	if err := memory.Write(0x6000, iov[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatcher.Dispatch(state, SysWritev, 7, 0x6000, 2); got != 7 {
+		t.Fatalf("writev = %d", got)
+	}
+	if output.String() != "pure go" {
+		t.Fatalf("writev output = %q", output.String())
+	}
+}

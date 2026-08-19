@@ -6,6 +6,7 @@ import (
 	"os"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
+	corefd "github.com/mostafa637/mostafa637/go-pure/internal/core/fd"
 	corefs "github.com/mostafa637/mostafa637/go-pure/internal/core/fs"
 )
 
@@ -87,4 +88,38 @@ func errnoForOpen(err error) int32 {
 	default:
 		return EIO
 	}
+}
+
+func openResolvedPath(context *Context, path string, guestFlags, mode uint32) int32 {
+	if context == nil || context.FS == nil || context.FDs == nil {
+		return ENOSYS
+	}
+	hostFlags, ok := hostOpenFlags(guestFlags)
+	if !ok {
+		return EINVAL
+	}
+	file, err := context.FS.OpenFile(path, hostFlags, os.FileMode(mode&0o7777), corefs.IshStat{Mode: corefs.ModeRegular | (mode & 0o7777), UID: 0, GID: 0})
+	if err != nil {
+		return errnoForOpen(err)
+	}
+	info, statErr := context.FS.Stat(path)
+	if statErr != nil {
+		_ = file.Close()
+		return errnoForOpen(statErr)
+	}
+	if guestFlags&guestOpenDirectory != 0 && !info.IsDir() {
+		_ = file.Close()
+		return ENOTDIR
+	}
+	guestFile := &corefd.File{Reader: file, Writer: file, Closer: file, Seeker: file, Path: path, Cloexec: guestFlags&guestOpenCloexec != 0}
+	fd, err := context.FDs.Open(guestFile)
+	if err != nil {
+		_ = file.Close()
+		return ENOMEM
+	}
+	if context.Files == nil {
+		context.Files = make(map[uint32]*File)
+	}
+	context.Files[uint32(fd)] = guestFile
+	return fd
 }

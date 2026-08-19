@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"os"
 	"runtime"
 	"time"
 
@@ -25,6 +24,8 @@ const (
 	SysRead          Number = 3
 	SysOpen          Number = 5
 	SysWrite         Number = 4
+	SysReadv         Number = 145
+	SysWritev        Number = 146
 	SysPipe          Number = 42
 	SysPoll          Number = 168
 	SysPipe2         Number = 331
@@ -55,6 +56,8 @@ const (
 	SysMunmap        Number = 91
 	SysMprotect      Number = 125
 	SysMmap2         Number = 192
+	SysOpenat        Number = 295
+	SysFstatat64     Number = 300
 	SysExitGroup     Number = 252
 	SysMadvise       Number = 219
 	SysGetdents64    Number = 220
@@ -218,6 +221,7 @@ func NewDispatcher(context *Context) *Dispatcher {
 	d.Register(SysFstatfs64, fstatfs64)
 	d.Register(SysGetTID, gettid)
 	d.Register(SysOpen, open)
+	d.Register(SysOpenat, openat)
 	d.Register(SysAccess, access)
 	d.Register(SysIoctl, ioctl)
 	d.Register(SysReadlink, readlink)
@@ -227,9 +231,12 @@ func NewDispatcher(context *Context) *Dispatcher {
 	d.Register(SysGetCWD, getcwd)
 	d.Register(SysStat64, stat64)
 	d.Register(SysFstat64, fstat64)
+	d.Register(SysFstatat64, fstatat64)
 	d.Register(SysGetdents64, getdents64)
 	d.Register(SysRead, read)
 	d.Register(SysWrite, write)
+	d.Register(SysReadv, readv)
+	d.Register(SysWritev, writev)
 	d.Register(SysPipe, pipe)
 	d.Register(SysPoll, poll)
 	d.Register(SysPipe2, pipe2)
@@ -306,31 +313,7 @@ func open(context *Context, state *corecpu.MachineState, args [6]uint32) int32 {
 	if !ok {
 		return ENOENT
 	}
-	flags, ok := hostOpenFlags(args[1])
-	if !ok {
-		return EINVAL
-	}
-	file, err := context.FS.OpenFile(path, flags, os.FileMode(args[2]&0o7777), corefs.IshStat{Mode: corefs.ModeRegular | (args[2] & 0o7777), UID: 0, GID: 0})
-	if err != nil {
-		return errnoForOpen(err)
-	}
-	info, statErr := context.FS.Stat(path)
-	if statErr != nil {
-		_ = file.Close()
-		return errnoForOpen(statErr)
-	}
-	if args[1]&guestOpenDirectory != 0 && !info.IsDir() {
-		_ = file.Close()
-		return ENOTDIR
-	}
-	guestFile := &corefd.File{Reader: file, Writer: file, Closer: file, Seeker: file, Path: path, Cloexec: args[1]&guestOpenCloexec != 0}
-	fd, err := context.FDs.Open(guestFile)
-	if err != nil {
-		_ = file.Close()
-		return ENOMEM
-	}
-	context.Files[uint32(fd)] = guestFile
-	return fd
+	return openResolvedPath(context, path, args[1], args[2])
 }
 
 func read(context *Context, state *corecpu.MachineState, args [6]uint32) int32 {
