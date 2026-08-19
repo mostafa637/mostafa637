@@ -516,6 +516,20 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("MOVQ2DQ source: %v", err)
 		}
 		return makeMOVQ2DQ64(address, uint8(inst.Len), destination, source), false, nil
+	case x86asm.PSHUFW:
+		destination, err := operand64FromArg(arg(0), 8)
+		if err != nil || destination.Kind != operand64MMX {
+			return microOp64{}, false, fmt.Errorf("PSHUFW destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 8)
+		if err != nil || (source.Kind != operand64MMX && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("PSHUFW source: %v", err)
+		}
+		order, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("PSHUFW immediate: %v", arg(2))
+		}
+		return makePSHUFW64(address, uint8(inst.Len), uint8(order), destination, source), false, nil
 	case x86asm.MOVD, x86asm.MOVQ:
 		scalarWidth := uint8(4)
 		if inst.Op == x86asm.MOVQ {
@@ -4185,6 +4199,37 @@ func makeUnary64(address uint64, size uint8, op x86asm.Op, dst operand64) microO
 		if err := writeOperand64(state, dst, next, result); err != nil {
 			return Flow64Stop, err
 		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makePSHUFW64(address uint64, size, order uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if destination.MMX >= uint8(len(state.MMX)) {
+			return Flow64Stop, ErrUnsupported64
+		}
+		var value uint64
+		if source.Kind == operand64MMX {
+			if source.MMX >= uint8(len(state.MMX)) {
+				return Flow64Stop, ErrUnsupported64
+			}
+			value = state.MMX[source.MMX]
+		} else {
+			var err error
+			value, err = readOperand64(state, source, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+		}
+		var result uint64
+		for output := uint8(0); output < 4; output++ {
+			selected := (order >> (2 * output)) & 3
+			word := (value >> (16 * selected)) & 0xffff
+			result |= word << (16 * output)
+		}
+		state.MMX[destination.MMX] = result
+		state.EnterMMX()
 		state.RIP = next
 		return Flow64Continue, nil
 	}}

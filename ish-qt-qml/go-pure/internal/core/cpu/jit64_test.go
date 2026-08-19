@@ -4941,3 +4941,56 @@ func TestJIT64MOVDQ2QAndMOVQ2DQ(t *testing.T) {
 		t.Fatalf("FPU TOP=%d after MMX transition, want 0", got)
 	}
 }
+
+func TestJIT64PSHUFW(t *testing.T) {
+	const codeAddress Address64 = 0x68000
+	const dataAddress Address64 = 0x6a000
+	memory := NewMemory64()
+	code := []byte{
+		0x0f, 0x70, 0xc1, 0x1b, // pshufw mm0,mm1,0x1b: reverse words
+		0x0f, 0x70, 0xc9, 0x1b, // pshufw mm1,mm1,0x1b: aliasing source/destination
+		0x49, 0xbf, 0, 0, 0, 0, 0, 0, 0, 0, // mov r15,dataAddress
+		0x41, 0x0f, 0x70, 0x17, 0xb1, // pshufw mm2,[r15],0xb1
+		0xf4, // hlt
+	}
+	binary.LittleEndian.PutUint64(code[10:], uint64(dataAddress))
+	mapExecutable64(t, memory, codeAddress, code)
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	var raw [8]byte
+	binary.LittleEndian.PutUint16(raw[0:2], 0x1101)
+	binary.LittleEndian.PutUint16(raw[2:4], 0x2202)
+	binary.LittleEndian.PutUint16(raw[4:6], 0x3303)
+	binary.LittleEndian.PutUint16(raw[6:8], 0x4404)
+	if err := memory.Write(dataAddress, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.MMX[1] = 0x4404330322021101
+	state.MMX[0] = 0xaaaaaaaaaaaaaaaa
+	state.MMX[2] = 0xbbbbbbbbbbbbbbbb
+	state.SetFPUTop(6)
+	state.RFLAGS = Flag64OF | Flag64AF | Flag64PF | Flag64CF
+	flagsBefore := state.RFLAGS
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("PSHUFW changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	if got, want := state.MMX[0], uint64(0x1101220233034404); got != want {
+		t.Fatalf("MMX0=%#x, want %#x", got, want)
+	}
+	if got, want := state.MMX[1], uint64(0x1101220233034404); got != want {
+		t.Fatalf("MMX1 alias result=%#x, want %#x", got, want)
+	}
+	if got, want := state.MMX[2], uint64(0x3303440411012202); got != want {
+		t.Fatalf("MMX2 memory result=%#x, want %#x", got, want)
+	}
+	if got := state.FPUTop(); got != 0 {
+		t.Fatalf("FPU TOP=%d after PSHUFW, want 0", got)
+	}
+}
