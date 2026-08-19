@@ -30,6 +30,7 @@ func NewProcess(pid uint32, fake *corefs.FS) *Process {
 	memory := corecpu.NewMemory()
 	state := corecpu.NewMachineState(memory)
 	context := coresyscall.NewContext(memory)
+	context.FS = fake
 	context.PID = pid
 	dispatcher := coresyscall.NewDispatcher(context)
 	var executor *corecpu.Executor
@@ -57,8 +58,7 @@ func (p *Process) AttachFile(fd uint32, reader io.Reader, writer io.Writer) erro
 	if p.closed {
 		return ErrClosed
 	}
-	p.Context.Files[fd] = &coresyscall.File{Reader: reader, Writer: writer}
-	return nil
+	return p.Context.InstallFile(fd, &coresyscall.File{Reader: reader, Writer: writer})
 }
 
 func (p *Process) Syscall(number coresyscall.Number, args ...uint32) int32 {

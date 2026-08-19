@@ -3,6 +3,7 @@ package syscall
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"testing"
 
 	"github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
@@ -108,5 +109,32 @@ func TestDispatcherBrkLegacyMmapAndExit(t *testing.T) {
 	}
 	if got := dispatcher.Dispatch(state, SysExit, 7); got != 0 || !context.Exited || context.ExitCode != 7 {
 		t.Fatalf("exit state: result=%d exited=%v code=%d", got, context.Exited, context.ExitCode)
+	}
+}
+
+func TestDescriptorSyscalls(t *testing.T) {
+	memory := cpu.NewMemory()
+	context := NewContext(memory)
+	input := bytes.NewReader([]byte("hello"))
+	if err := context.InstallFile(3, &File{Reader: input, Seeker: input}); err != nil {
+		t.Fatal(err)
+	}
+	state := cpu.NewMachineState(memory)
+	dispatcher := NewDispatcher(context)
+	if got := dispatcher.Dispatch(state, SysDup, 3); got < 0 {
+		t.Fatalf("dup = %d", got)
+	}
+	dupfd := uint32(state.EAXValue())
+	if got := dispatcher.Dispatch(state, SysLseek, dupfd, 2, uint32(io.SeekStart)); got != 2 {
+		t.Fatalf("lseek = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysDup2, dupfd, 9); got != 9 {
+		t.Fatalf("dup2 = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysClose, 9); got != 0 {
+		t.Fatalf("close = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysClose, 9); got != EBADF {
+		t.Fatalf("second close = %d", got)
 	}
 }

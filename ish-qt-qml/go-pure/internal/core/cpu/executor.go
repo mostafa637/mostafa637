@@ -79,9 +79,34 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		reg := state.Get(instruction.Reg)
 		state.Set(instruction.Reg, e.add(state, reg, uint32(instruction.Imm)))
 		state.EIP = next
+	case OpAddOperandImm:
+		left, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		if err := storeOperand(state, instruction.Dst, e.add(state, left, uint32(instruction.Imm))); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
 	case OpSubRegImm:
 		reg := state.Get(instruction.Reg)
 		state.Set(instruction.Reg, e.sub(state, reg, uint32(instruction.Imm)))
+		state.EIP = next
+	case OpSubOperandImm:
+		left, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		if err := storeOperand(state, instruction.Dst, e.sub(state, left, uint32(instruction.Imm))); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
+	case OpCmpOperandImm:
+		left, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		e.sub(state, left, uint32(instruction.Imm))
 		state.EIP = next
 	case OpXorRegReg:
 		left, right := state.Get(instruction.Reg), state.Get(instruction.Reg2)
@@ -116,6 +141,52 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		reg := state.Get(instruction.Reg)
 		state.Set(instruction.Reg, e.sub(state, reg, 1))
 		state.CF = boolByte(carry)
+		state.EIP = next
+	case OpIncOperand:
+		carry := state.Flag(FlagCF)
+		value, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		if err := storeOperand(state, instruction.Dst, e.add(state, value, 1)); err != nil {
+			return instruction, err
+		}
+		state.CF = boolByte(carry)
+		state.EIP = next
+	case OpDecOperand:
+		carry := state.Flag(FlagCF)
+		value, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		if err := storeOperand(state, instruction.Dst, e.sub(state, value, 1)); err != nil {
+			return instruction, err
+		}
+		state.CF = boolByte(carry)
+		state.EIP = next
+	case OpImulRegOperand:
+		left := state.Get(instruction.Dst.Reg)
+		right, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		wide := int64(int32(left)) * int64(int32(right))
+		result := uint32(wide)
+		overflow := wide != int64(int32(result))
+		state.Set(instruction.Dst.Reg, result)
+		state.SetLazyArithmetic(left, right, result, overflow, overflow, false)
+		state.EIP = next
+	case OpMovzxRegOperand:
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		if instruction.Src.Width == 1 {
+			value &= 0xff
+		} else if instruction.Src.Width == 2 {
+			value &= 0xffff
+		}
+		state.Set(instruction.Dst.Reg, value)
 		state.EIP = next
 	case OpPushReg:
 		if err := push(state, state.Get(instruction.Reg)); err != nil {
@@ -206,6 +277,66 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		}
 		state.SetEFlags(value)
 		state.EIP = next
+	case OpPushAll:
+		oldESP := state.Get(ESP)
+		for _, reg := range []Reg32{EAX, ECX, EDX, EBX} {
+			if err := push(state, state.Get(reg)); err != nil {
+				return instruction, err
+			}
+		}
+		if err := push(state, oldESP); err != nil {
+			return instruction, err
+		}
+		for _, reg := range []Reg32{EBP, ESI, EDI} {
+			if err := push(state, state.Get(reg)); err != nil {
+				return instruction, err
+			}
+		}
+		state.EIP = next
+	case OpPopAll:
+		for _, reg := range []Reg32{EDI, ESI, EBP} {
+			value, err := pop(state)
+			if err != nil {
+				return instruction, err
+			}
+			state.Set(reg, value)
+		}
+		if _, err := pop(state); err != nil { // saved ESP is discarded
+			return instruction, err
+		}
+		for _, reg := range []Reg32{EBX, EDX, ECX, EAX} {
+			value, err := pop(state)
+			if err != nil {
+				return instruction, err
+			}
+			state.Set(reg, value)
+		}
+		state.EIP = next
+	case OpLeave:
+		state.Set(ESP, state.Get(EBP))
+		value, err := pop(state)
+		if err != nil {
+			return instruction, err
+		}
+		state.Set(EBP, value)
+		state.EIP = next
+	case OpRetImm:
+		value, err := pop(state)
+		if err != nil {
+			return instruction, err
+		}
+		state.Set(ESP, state.Get(ESP)+uint32(uint16(instruction.Imm)))
+		state.EIP = value
+	case OpCWDE:
+		state.SetEAX(uint32(int32(int16(state.EAXValue() & 0xffff))))
+		state.EIP = next
+	case OpCDQ:
+		if int32(state.EAXValue()) < 0 {
+			state.Set(EDX, ^uint32(0))
+		} else {
+			state.Set(EDX, 0)
+		}
+		state.EIP = next
 	case OpCLD:
 		state.EFlags &^= FlagDF
 		state.DFOffset = 0
@@ -262,11 +393,24 @@ func loadOperand(state *MachineState, operand Operand) (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
+	width := operand.Width
+	if width == 0 {
+		width = 4
+	}
 	var raw [4]byte
-	if err := state.Memory.Read(address, raw[:]); err != nil {
+	if err := state.Memory.Read(address, raw[:width]); err != nil {
 		return 0, err
 	}
-	return binary.LittleEndian.Uint32(raw[:]), nil
+	switch width {
+	case 1:
+		return uint32(raw[0]), nil
+	case 2:
+		return uint32(binary.LittleEndian.Uint16(raw[:2])), nil
+	case 4:
+		return binary.LittleEndian.Uint32(raw[:]), nil
+	default:
+		return 0, ErrUnsupportedAddressing
+	}
 }
 
 func storeOperand(state *MachineState, operand Operand, value uint32) error {
@@ -278,7 +422,22 @@ func storeOperand(state *MachineState, operand Operand, value uint32) error {
 	if err != nil {
 		return err
 	}
-	return state.Memory.Write(address, uint32Bytes(value))
+	width := operand.Width
+	if width == 0 {
+		width = 4
+	}
+	switch width {
+	case 1:
+		return state.Memory.Write(address, []byte{byte(value)})
+	case 2:
+		var raw [2]byte
+		binary.LittleEndian.PutUint16(raw[:], uint16(value))
+		return state.Memory.Write(address, raw[:])
+	case 4:
+		return state.Memory.Write(address, uint32Bytes(value))
+	default:
+		return ErrUnsupportedAddressing
+	}
 }
 
 func (e *Executor) add(state *MachineState, left, right uint32) uint32 {

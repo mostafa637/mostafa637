@@ -50,6 +50,19 @@ const (
 	OpPopFlags
 	OpCLD
 	OpSTD
+	OpAddOperandImm
+	OpSubOperandImm
+	OpCmpOperandImm
+	OpIncOperand
+	OpDecOperand
+	OpImulRegOperand
+	OpMovzxRegOperand
+	OpPushAll
+	OpPopAll
+	OpLeave
+	OpRetImm
+	OpCWDE
+	OpCDQ
 )
 
 type MemoryOperand struct {
@@ -65,6 +78,7 @@ type Operand struct {
 	Reg    Reg32
 	Memory MemoryOperand
 	IsMem  bool
+	Width  uint8 // operand width in bytes; the current core supports 1, 2, and 4
 }
 
 type Instruction struct {
@@ -116,7 +130,7 @@ func (r *codeReader) u32() (uint32, error) {
 
 func (r *codeReader) length() uint32 { return uint32(r.at - r.start) }
 
-func regOperand(reg Reg32) Operand { return Operand{Reg: reg} }
+func regOperand(reg Reg32) Operand { return Operand{Reg: reg, Width: 4} }
 
 func (o Operand) isRegister() bool { return !o.IsMem }
 
@@ -183,7 +197,7 @@ func parseModRM(reader *codeReader, modrm byte) (Reg32, Operand, error) {
 		}
 		memory.Disp += int32(value)
 	}
-	return reg, Operand{Memory: memory, IsMem: true}, nil
+	return reg, Operand{Memory: memory, IsMem: true, Width: 4}, nil
 }
 
 func Decode(memory *Memory, eip Address) (Instruction, error) {
@@ -365,17 +379,27 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			}
 			instruction.Imm = int32(imm)
 		}
-		if operand.IsMem {
-			return Instruction{}, fmt.Errorf("%w: group=%d", ErrUnsupportedAddressing, reg)
-		}
+		instruction.Dst = operand
 		instruction.Reg = operand.Reg
 		switch reg {
 		case 0:
-			instruction.Op = OpAddRegImm
+			if operand.IsMem {
+				instruction.Op = OpAddOperandImm
+			} else {
+				instruction.Op = OpAddRegImm
+			}
 		case 5:
-			instruction.Op = OpSubRegImm
+			if operand.IsMem {
+				instruction.Op = OpSubOperandImm
+			} else {
+				instruction.Op = OpSubRegImm
+			}
 		case 7:
-			instruction.Op = OpCmpRegImm
+			if operand.IsMem {
+				instruction.Op = OpCmpOperandImm
+			} else {
+				instruction.Op = OpCmpRegImm
+			}
 		default:
 			return Instruction{}, fmt.Errorf("%w: group=%d", ErrUnsupportedInstruction, reg)
 		}
@@ -390,6 +414,20 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 		}
 		instruction.Group = uint8(reg)
 		switch reg {
+		case 0:
+			if operand.IsMem {
+				instruction.Op = OpIncOperand
+				instruction.Dst = operand
+			} else {
+				return Instruction{}, fmt.Errorf("%w: ff /0 register", ErrUnsupportedInstruction)
+			}
+		case 1:
+			if operand.IsMem {
+				instruction.Op = OpDecOperand
+				instruction.Dst = operand
+			} else {
+				return Instruction{}, fmt.Errorf("%w: ff /1 register", ErrUnsupportedInstruction)
+			}
 		case 2:
 			instruction.Op = OpCallOperand
 			instruction.Src = operand
@@ -441,18 +479,52 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 		if err != nil {
 			return Instruction{}, err
 		}
-		if extension != 0x84 && extension != 0x85 {
+		switch extension {
+		case 0x84, 0x85:
+			rel, err := reader.u32()
+			if err != nil {
+				return Instruction{}, err
+			}
+			instruction.Rel = int32(rel)
+			if extension == 0x84 {
+				instruction.Op = OpJzRel
+			} else {
+				instruction.Op = OpJnzRel
+			}
+		case 0xAF:
+			modrm, err := reader.byte()
+			if err != nil {
+				return Instruction{}, err
+			}
+			reg, operand, err := parseModRM(reader, modrm)
+			if err != nil {
+				return Instruction{}, err
+			}
+			instruction.Op = OpImulRegOperand
+			instruction.Dst = regOperand(reg)
+			instruction.Src = operand
+		case 0xB6, 0xB7:
+			modrm, err := reader.byte()
+			if err != nil {
+				return Instruction{}, err
+			}
+			reg, operand, err := parseModRM(reader, modrm)
+			if err != nil {
+				return Instruction{}, err
+			}
+			if !operand.IsMem {
+				return Instruction{}, fmt.Errorf("%w: movzx register source", ErrUnsupportedAddressing)
+			}
+			if extension == 0xB6 {
+				operand.Width = 1
+			} else {
+				operand.Width = 2
+			}
+			instruction.Op = OpMovzxRegOperand
+			instruction.Dst = regOperand(reg)
+			instruction.Src = operand
+		default:
 			return Instruction{}, fmt.Errorf("%w: 0f %#x", ErrUnsupportedInstruction, extension)
-		}
-		rel, err := reader.u32()
-		if err != nil {
-			return Instruction{}, err
-		}
-		instruction.Rel = int32(rel)
-		if extension == 0x84 {
-			instruction.Op = OpJzRel
-		} else {
-			instruction.Op = OpJnzRel
 		}
 	case opcode == 0xCD:
 		vector, err := reader.byte()
@@ -461,6 +533,27 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 		}
 		instruction.Op = OpInt
 		instruction.Vector = vector
+	case opcode == 0x60:
+		instruction.Op = OpPushAll
+	case opcode == 0x61:
+		instruction.Op = OpPopAll
+	case opcode == 0xC9:
+		instruction.Op = OpLeave
+	case opcode == 0xC2:
+		lo, err := reader.byte()
+		if err != nil {
+			return Instruction{}, err
+		}
+		hi, err := reader.byte()
+		if err != nil {
+			return Instruction{}, err
+		}
+		instruction.Op = OpRetImm
+		instruction.Imm = int32(uint16(lo) | uint16(hi)<<8)
+	case opcode == 0x98:
+		instruction.Op = OpCWDE
+	case opcode == 0x99:
+		instruction.Op = OpCDQ
 	case opcode == 0xF4:
 		instruction.Op = OpHalt
 	case opcode == 0x9C:

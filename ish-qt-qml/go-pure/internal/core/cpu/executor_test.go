@@ -170,3 +170,83 @@ func TestExecutorSIBAddressing(t *testing.T) {
 		t.Fatalf("SIB stored value = %#x", got)
 	}
 }
+
+func TestExecutorExtendedMemoryAndFrameInstructions(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+		0xC7, 0x03, 0x05, 0x00, 0x00, 0x00, // mov [ebx], 5
+		0x83, 0x03, 0x03, // add dword [ebx], 3
+		0x0F, 0xB6, 0x03, // movzx eax, byte [ebx]
+		0xB9, 0x04, 0x00, 0x00, 0x00, // mov ecx, 4
+		0x0F, 0xAF, 0xC1, // imul eax, ecx
+		0xF4,
+	})
+	executor := NewExecutor(nil)
+	if err := executor.Run(state, 32); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(EAX) != 32 {
+		t.Fatalf("eax = %#x, want 32", state.Get(EAX))
+	}
+	var raw [4]byte
+	if err := state.Memory.Read(0x2000, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 8 {
+		t.Fatalf("memory = %#x, want 8", got)
+	}
+}
+
+func TestExecutorPushPopAll(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xB8, 0x11, 0x00, 0x00, 0x00, // eax = 0x11
+		0xBB, 0x22, 0x00, 0x00, 0x00, // ebx = 0x22
+		0x60,       // pushad
+		0x31, 0xC0, // xor eax, eax
+		0x61, // popad
+		0xF4,
+	})
+	executor := NewExecutor(nil)
+	if err := executor.Run(state, 32); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(EAX) != 0x11 || state.Get(EBX) != 0x22 {
+		t.Fatalf("popad registers eax=%#x ebx=%#x", state.Get(EAX), state.Get(EBX))
+	}
+}
+
+func TestExecutorRetImm(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xC2, 0x04, 0x00, // ret 4
+		0xF4, // return target
+	})
+	returnAddress := state.EIP + 3
+	if err := state.Memory.Write(Address(state.Get(ESP)-4), uint32Bytes(returnAddress)); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(ESP, state.Get(ESP)-4)
+	before := state.Get(ESP)
+	executor := NewExecutor(nil)
+	if err := executor.Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(ESP) != before+8 {
+		t.Fatalf("ret imm esp=%#x, want %#x", state.Get(ESP), before+8)
+	}
+}
+
+func TestExecutorCWDEAndCDQ(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xB8, 0x00, 0x80, 0x00, 0x00, // eax = 0x8000
+		0x98, // cwde => 0xffff8000
+		0x99, // cdq => edx = 0xffffffff
+		0xF4,
+	})
+	executor := NewExecutor(nil)
+	if err := executor.Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(EAX) != 0xffff8000 || state.Get(EDX) != 0xffffffff {
+		t.Fatalf("cwde/cdq eax=%#x edx=%#x", state.Get(EAX), state.Get(EDX))
+	}
+}
