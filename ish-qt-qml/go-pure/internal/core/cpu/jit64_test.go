@@ -3170,3 +3170,99 @@ func TestJIT64PackedWideningMoves(t *testing.T) {
 	assertXMM(14, putQwords(0x0000000000007f80, 0x000000000000ff01))
 	assertXMM(15, putQwords(0x00000000ff017f80, 0x000000007ffe1234))
 }
+
+func TestJIT64PackedRounding(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x4a000
+		dataAddress Address64 = 0x4b000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	memorySource := make([]byte, 16)
+	for lane, value := range []float32{-1.5, 2.5, 3.5, -3.5} {
+		binary.LittleEndian.PutUint32(memorySource[lane*4:], math.Float32bits(value))
+	}
+	if err := memory.Write(dataAddress, memorySource); err != nil {
+		t.Fatal(err)
+	}
+	code := []byte{
+		0x66, 0x0f, 0x3a, 0x08, 0xc1, 0x00, // roundps xmm0, xmm1, 0 (nearest-even)
+		0x66, 0x0f, 0x3a, 0x09, 0xca, 0x01, // roundpd xmm1, xmm2, 1 (floor)
+		0x66, 0x0f, 0x3a, 0x0a, 0xdb, 0x02, // roundss xmm3, xmm3, 2 (ceil)
+		0x66, 0x0f, 0x3a, 0x0b, 0xe4, 0x03, // roundsd xmm4, xmm4, 3 (truncate)
+		0x66, 0x0f, 0x3a, 0x08, 0x2f, 0x00, // roundps xmm5, [rdi], 0
+		0x66, 0x44, 0x0f, 0x3a, 0x09, 0xf6, 0x01, // roundpd xmm14, xmm6, 1
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	putFloat32 := func(destination *[16]byte, values ...float32) {
+		for lane, value := range values {
+			binary.LittleEndian.PutUint32(destination[lane*4:], math.Float32bits(value))
+		}
+	}
+	putFloat64 := func(destination *[16]byte, values ...float64) {
+		for lane, value := range values {
+			binary.LittleEndian.PutUint64(destination[lane*8:], math.Float64bits(value))
+		}
+	}
+	putFloat32(&state.XMM[1], 1.5, -1.5, 2.5, -2.5)
+	putFloat64(&state.XMM[2], 1.5, -1.5)
+	putFloat32(&state.XMM[3], 1.5, 101.25, -202.5, 303.75)
+	putFloat64(&state.XMM[4], -1.5, 404.5)
+	putFloat64(&state.XMM[6], 1.5, -2.5)
+	for lane := range state.XMM[14] {
+		state.XMM[14][lane] = 0xa5
+	}
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	assertFloat32 := func(xmm uint8, values ...float32) {
+		t.Helper()
+		var expected [16]byte
+		putFloat32(&expected, values...)
+		if state.XMM[xmm] != expected {
+			t.Fatalf("xmm%d=%x, want %x", xmm, state.XMM[xmm], expected)
+		}
+	}
+	assertFloat64 := func(xmm uint8, values ...float64) {
+		t.Helper()
+		var expected [16]byte
+		putFloat64(&expected, values...)
+		if state.XMM[xmm] != expected {
+			t.Fatalf("xmm%d=%x, want %x", xmm, state.XMM[xmm], expected)
+		}
+	}
+	assertFloat32(0, 2, -2, 2, -2)
+	assertFloat64(1, 1, -2)
+	if got := math.Float32frombits(binary.LittleEndian.Uint32(state.XMM[3][:4])); got != 2 {
+		t.Fatalf("roundss low=%v, want 2", got)
+	}
+	if got := math.Float32frombits(binary.LittleEndian.Uint32(state.XMM[3][4:])); got != 101.25 {
+		t.Fatalf("roundss upper lane1=%v, want 101.25", got)
+	}
+	if got := math.Float32frombits(binary.LittleEndian.Uint32(state.XMM[3][8:])); got != -202.5 {
+		t.Fatalf("roundss upper lane2=%v, want -202.5", got)
+	}
+	if got := math.Float32frombits(binary.LittleEndian.Uint32(state.XMM[3][12:])); got != 303.75 {
+		t.Fatalf("roundss upper lane3=%v, want 303.75", got)
+	}
+	if got := math.Float64frombits(binary.LittleEndian.Uint64(state.XMM[4][:8])); got != -1 {
+		t.Fatalf("roundsd low=%v, want -1", got)
+	}
+	if got := math.Float64frombits(binary.LittleEndian.Uint64(state.XMM[4][8:])); got != 404.5 {
+		t.Fatalf("roundsd upper lane=%v, want 404.5", got)
+	}
+	assertFloat32(5, -2, 2, 4, -4)
+	assertFloat64(14, 1, -3)
+}

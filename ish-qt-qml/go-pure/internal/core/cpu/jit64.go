@@ -796,6 +796,20 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
 		}
 		return makeSSEPackedFloatUnary64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.ROUNDSS, x86asm.ROUNDSD, x86asm.ROUNDPS, x86asm.ROUNDPD:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("%s requires an immediate control byte", inst.Op)
+		}
+		return makeSSERound64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
 	case x86asm.PMOVSXBW, x86asm.PMOVSXBD, x86asm.PMOVSXBQ, x86asm.PMOVSXWD, x86asm.PMOVSXWQ, x86asm.PMOVSXDQ,
 		x86asm.PMOVZXBW, x86asm.PMOVZXBD, x86asm.PMOVZXBQ, x86asm.PMOVZXWD, x86asm.PMOVZXWQ, x86asm.PMOVZXDQ:
 		sourceWidth, _, _, _, ok := packedWidenSpec64(inst.Op)
@@ -2003,6 +2017,85 @@ func packedFloat64MinMax(op x86asm.Op, leftRaw, rightRaw uint64) uint64 {
 		return leftRaw
 	}
 	return rightRaw
+}
+
+func roundMode64(immediate uint8) uint8 {
+	if immediate&0x4 != 0 {
+		// MachineState64 does not currently expose MXCSR.RC. Use the architectural
+		// reset value (round-to-nearest, ties-to-even) for the MXCSR-selected form.
+		return 0
+	}
+	return immediate & 0x3
+}
+
+func roundFloat64(value float64, mode uint8) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value == 0 {
+		return value
+	}
+	switch mode & 0x3 {
+	case 0:
+		return math.RoundToEven(value)
+	case 1:
+		return math.Floor(value)
+	case 2:
+		return math.Ceil(value)
+	case 3:
+		return math.Trunc(value)
+	default:
+		return value
+	}
+}
+
+func makeSSERound64(address uint64, size uint8, op x86asm.Op, destination, source operand64, immediate uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		mode := roundMode64(immediate)
+		width := uint8(8)
+		if op == x86asm.ROUNDSS || op == x86asm.ROUNDPS {
+			width = 4
+		}
+		if op == x86asm.ROUNDSS || op == x86asm.ROUNDSD {
+			result, err := readVector64(state, destination, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			sourceBytes, err := readVectorWidth64(state, source, next, width)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			if width == 4 {
+				value := math.Float32frombits(binary.LittleEndian.Uint32(sourceBytes[:4]))
+				binary.LittleEndian.PutUint32(result[:4], math.Float32bits(float32(roundFloat64(float64(value), mode))))
+			} else {
+				value := math.Float64frombits(binary.LittleEndian.Uint64(sourceBytes[:8]))
+				binary.LittleEndian.PutUint64(result[:8], math.Float64bits(roundFloat64(value, mode)))
+			}
+			if err := writeVector64(state, destination, next, result); err != nil {
+				return Flow64Stop, err
+			}
+		} else {
+			sourceBytes, err := readVectorWidth64(state, source, next, 16)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			var result [16]byte
+			if width == 4 {
+				for lane := 0; lane < 4; lane++ {
+					value := math.Float32frombits(binary.LittleEndian.Uint32(sourceBytes[lane*4:]))
+					binary.LittleEndian.PutUint32(result[lane*4:], math.Float32bits(float32(roundFloat64(float64(value), mode))))
+				}
+			} else {
+				for lane := 0; lane < 2; lane++ {
+					value := math.Float64frombits(binary.LittleEndian.Uint64(sourceBytes[lane*8:]))
+					binary.LittleEndian.PutUint64(result[lane*8:], math.Float64bits(roundFloat64(value, mode)))
+				}
+			}
+			if err := writeVector64(state, destination, next, result); err != nil {
+				return Flow64Stop, err
+			}
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
 }
 
 func makeSSEPackedFloatBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
