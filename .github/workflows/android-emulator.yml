@@ -34,7 +34,7 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
           disable-animations: true
           script: |
-            set -o pipefail
+            set -e
             adb wait-for-device
             adb install -r gtk-hello-android/gtk-hello-android-release.apk
             adb shell pm clear com.example.gtkhelloworld || true
