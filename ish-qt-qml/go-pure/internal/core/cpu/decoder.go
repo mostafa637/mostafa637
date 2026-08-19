@@ -1803,31 +1803,42 @@ func decodeX86MulDiv(inst x86asm.Inst) (Instruction, bool, error) {
 func decodeX86String(inst x86asm.Inst) (Instruction, bool, error) {
 	var op Op
 	var width uint8
+	dataSize := 32
 	switch inst.Op {
 	case x86asm.MOVSB:
 		op, width = OpMovs, 1
+	case x86asm.MOVSW:
+		op, width, dataSize = OpMovs, 2, 16
 	case x86asm.MOVSD:
 		op, width = OpMovs, 4
 	case x86asm.STOSB:
 		op, width = OpStos, 1
+	case x86asm.STOSW:
+		op, width, dataSize = OpStos, 2, 16
 	case x86asm.STOSD:
 		op, width = OpStos, 4
 	case x86asm.LODSB:
 		op, width = OpLods, 1
+	case x86asm.LODSW:
+		op, width, dataSize = OpLods, 2, 16
 	case x86asm.LODSD:
 		op, width = OpLods, 4
 	case x86asm.SCASB:
 		op, width = OpScas, 1
+	case x86asm.SCASW:
+		op, width, dataSize = OpScas, 2, 16
 	case x86asm.SCASD:
 		op, width = OpScas, 4
 	case x86asm.CMPSB:
 		op, width = OpCmps, 1
+	case x86asm.CMPSW:
+		op, width, dataSize = OpCmps, 2, 16
 	case x86asm.CMPSD:
 		op, width = OpCmps, 4
 	default:
 		return Instruction{}, false, nil
 	}
-	if inst.DataSize != 32 || inst.AddrSize != 32 {
+	if inst.DataSize != dataSize || inst.AddrSize != 32 {
 		return Instruction{}, true, fmt.Errorf("%w: %v data/address size %d/%d", ErrUnsupportedAddressing, inst.Op, inst.DataSize, inst.AddrSize)
 	}
 
@@ -1837,6 +1848,10 @@ func decodeX86String(inst x86asm.Inst) (Instruction, bool, error) {
 			break
 		}
 		switch prefix & 0xff {
+		case x86asm.PrefixDataSize & 0xff:
+			// The operand-size override is represented as DATA16 by x86asm.
+			// The selected string opcode and inst.DataSize determine width.
+			continue
 		case x86asm.PrefixREP & 0xff:
 			if repeat != 0 {
 				return Instruction{}, true, fmt.Errorf("%w: %v has multiple repeat prefixes", ErrUnsupportedInstruction, inst.Op)

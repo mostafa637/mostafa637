@@ -847,6 +847,132 @@ func TestExecutorStringInstructions(t *testing.T) {
 	}
 }
 
+func TestExecutorStringWordInstructions(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0x66, 0xA5, // movsw
+		0x66, 0xAB, // stosw
+		0x66, 0xAD, // lodsw
+		0xF4,
+	})
+	if err := memory.Write(0x2100, []byte{0x34, 0x12}); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(ESI, 0x2100)
+	state.Set(EDI, 0x2200)
+	if _, err := NewExecutor(nil).Step(state); err != nil {
+		t.Fatal(err)
+	}
+	var moved [2]byte
+	if err := memory.Read(0x2200, moved[:]); err != nil {
+		t.Fatal(err)
+	}
+	if moved != [2]byte{0x34, 0x12} || state.Get(ESI) != 0x2102 || state.Get(EDI) != 0x2202 {
+		t.Fatalf("MOVSW result=%v esi=%#x edi=%#x", moved, state.Get(ESI), state.Get(EDI))
+	}
+
+	state.Set(EAX, 0xAABBCCDD)
+	state.Set(EDI, 0x2204)
+	if _, err := NewExecutor(nil).Step(state); err != nil {
+		t.Fatal(err)
+	}
+	var stored [2]byte
+	if err := memory.Read(0x2204, stored[:]); err != nil {
+		t.Fatal(err)
+	}
+	if stored != [2]byte{0xDD, 0xCC} || state.Get(EDI) != 0x2206 {
+		t.Fatalf("STOSW result=%v edi=%#x", stored, state.Get(EDI))
+	}
+
+	state.Set(EAX, 0xABCD0000)
+	state.Set(ESI, 0x2100)
+	if _, err := NewExecutor(nil).Step(state); err != nil {
+		t.Fatal(err)
+	}
+	if state.EAXValue() != 0xABCD1234 || state.Get(ESI) != 0x2102 {
+		t.Fatalf("LODSW eax=%#x esi=%#x", state.EAXValue(), state.Get(ESI))
+	}
+
+	_, state = mappedCode(t, []byte{0xF3, 0x66, 0xA5, 0xF4})
+	if err := state.Memory.Write(0x2100, []byte{0x34, 0x12, 0x78, 0x56}); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(ESI, 0x2100)
+	state.Set(EDI, 0x2200)
+	state.Set(ECX, 2)
+	if _, err := NewExecutor(nil).Step(state); err != nil {
+		t.Fatal(err)
+	}
+	var repeated [4]byte
+	if err := state.Memory.Read(0x2200, repeated[:]); err != nil {
+		t.Fatal(err)
+	}
+	if repeated != [4]byte{0x34, 0x12, 0x78, 0x56} || state.Get(ECX) != 0 || state.Get(ESI) != 0x2104 || state.Get(EDI) != 0x2204 {
+		t.Fatalf("REP MOVSW result=%v ecx=%#x esi=%#x edi=%#x", repeated, state.Get(ECX), state.Get(ESI), state.Get(EDI))
+	}
+
+	_, state = mappedCode(t, []byte{0xF3, 0x66, 0xAB, 0xF4})
+	state.Set(EAX, 0xAABBCCDD)
+	state.Set(EDI, 0x2200)
+	state.Set(ECX, 2)
+	if err := NewExecutor(nil).Run(state, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Memory.Read(0x2200, repeated[:]); err != nil {
+		t.Fatal(err)
+	}
+	if repeated != [4]byte{0xDD, 0xCC, 0xDD, 0xCC} || state.Get(ECX) != 0 || state.Get(EDI) != 0x2204 {
+		t.Fatalf("REP STOSW result=%v ecx=%#x edi=%#x", repeated, state.Get(ECX), state.Get(EDI))
+	}
+
+	_, state = mappedCode(t, []byte{0xF2, 0x66, 0xAF, 0xF4})
+	if err := state.Memory.Write(0x2200, []byte{0x11, 0x11, 0x34, 0x12, 0x77, 0x77}); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(EAX, 0xABCD1234)
+	state.Set(EDI, 0x2200)
+	state.Set(ECX, 3)
+	if err := NewExecutor(nil).Run(state, 2); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(ECX) != 1 || state.Get(EDI) != 0x2204 || !state.Flag(FlagZF) {
+		t.Fatalf("REPNE SCASW ecx=%#x edi=%#x zf=%v", state.Get(ECX), state.Get(EDI), state.Flag(FlagZF))
+	}
+
+	_, state = mappedCode(t, []byte{0xF3, 0x66, 0xA7, 0xF4})
+	if err := state.Memory.Write(0x2100, []byte{1, 0, 2, 0, 3, 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Memory.Write(0x2200, []byte{1, 0, 4, 0, 3, 0}); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(ESI, 0x2100)
+	state.Set(EDI, 0x2200)
+	state.Set(ECX, 3)
+	if err := NewExecutor(nil).Run(state, 2); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(ECX) != 1 || state.Get(ESI) != 0x2104 || state.Get(EDI) != 0x2204 || state.Flag(FlagZF) {
+		t.Fatalf("REPE CMPSW ecx=%#x esi=%#x edi=%#x zf=%v", state.Get(ECX), state.Get(ESI), state.Get(EDI), state.Flag(FlagZF))
+	}
+
+	_, state = mappedCode(t, []byte{0xFD, 0xF3, 0x66, 0xA5, 0xF4})
+	if err := state.Memory.Write(0x2200, []byte{0x11, 0x22, 0x33, 0x44}); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(ESI, 0x2202)
+	state.Set(EDI, 0x2302)
+	state.Set(ECX, 2)
+	if err := NewExecutor(nil).Run(state, 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Memory.Read(0x2300, repeated[:]); err != nil {
+		t.Fatal(err)
+	}
+	if repeated != [4]byte{0x11, 0x22, 0x33, 0x44} || state.Get(ESI) != 0x21FE || state.Get(EDI) != 0x22FE {
+		t.Fatalf("DF REP MOVSW result=%v esi=%#x edi=%#x", repeated, state.Get(ESI), state.Get(EDI))
+	}
+}
+
 func TestExecutorRepneScasStopsOnMatch(t *testing.T) {
 	_, state := mappedCode(t, []byte{
 		0xF2, 0xAE, // repne scasb

@@ -896,8 +896,11 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		if err := executeString(state, instruction, func() (bool, error) {
 			width := uint32(instruction.Imm)
 			value := state.EAXValue()
-			if width == 1 {
+			switch width {
+			case 1:
 				value &= 0xff
+			case 2:
+				value &= 0xffff
 			}
 			if err := writeStringValue(state, Address(state.Get(EDI)), width, value); err != nil {
 				return false, err
@@ -915,9 +918,12 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			if err != nil {
 				return false, err
 			}
-			if width == 1 {
+			switch width {
+			case 1:
 				state.Set(EAX, (state.EAXValue()&^0xff)|(value&0xff))
-			} else {
+			case 2:
+				state.Set(EAX, (state.EAXValue()&^0xffff)|(value&0xffff))
+			default:
 				state.SetEAX(value)
 			}
 			advanceStringIndex(state, ESI, width)
@@ -937,7 +943,12 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			if width == 1 {
 				accumulator &= 0xff
 			}
-			e.sub(state, accumulator, value)
+			if width == 1 || width == 2 {
+				comparison := subWidth(accumulator, value, uint8(width))
+				setLazyArithmeticWidth(state, accumulator, value, comparison.result, uint8(width), true)
+			} else {
+				e.sub(state, accumulator, value)
+			}
 			advanceStringIndex(state, EDI, width)
 			return stringRepeatContinue(state, instruction.Group), nil
 		}); err != nil {
@@ -955,7 +966,12 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			if err != nil {
 				return false, err
 			}
-			e.sub(state, left, right)
+			if width == 1 || width == 2 {
+				comparison := subWidth(left, right, uint8(width))
+				setLazyArithmeticWidth(state, left, right, comparison.result, uint8(width), true)
+			} else {
+				e.sub(state, left, right)
+			}
 			advanceStringIndex(state, ESI, width)
 			advanceStringIndex(state, EDI, width)
 			return stringRepeatContinue(state, instruction.Group), nil
@@ -1479,6 +1495,12 @@ func readStringValue(state *MachineState, address Address, width uint32) (uint32
 			return 0, err
 		}
 		return uint32(raw[0]), nil
+	case 2:
+		var raw [2]byte
+		if err := state.Memory.Read(address, raw[:]); err != nil {
+			return 0, err
+		}
+		return uint32(binary.LittleEndian.Uint16(raw[:])), nil
 	case 4:
 		var raw [4]byte
 		if err := state.Memory.Read(address, raw[:]); err != nil {
@@ -1494,6 +1516,10 @@ func writeStringValue(state *MachineState, address Address, width, value uint32)
 	switch width {
 	case 1:
 		return state.Memory.Write(address, []byte{byte(value)})
+	case 2:
+		var raw [2]byte
+		binary.LittleEndian.PutUint16(raw[:], uint16(value))
+		return state.Memory.Write(address, raw[:])
 	case 4:
 		return state.Memory.Write(address, uint32Bytes(value))
 	default:

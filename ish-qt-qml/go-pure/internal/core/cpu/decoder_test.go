@@ -222,10 +222,16 @@ func TestDecodeX86StringInstructions(t *testing.T) {
 		rep   uint8
 	}{
 		{name: "movsb", code: []byte{0xA4}, op: OpMovs, width: 1},
+		{name: "movsw", code: []byte{0x66, 0xA5}, op: OpMovs, width: 2},
+		{name: "rep movsw", code: []byte{0xF3, 0x66, 0xA5}, op: OpMovs, width: 2, rep: 1},
 		{name: "rep movsd", code: []byte{0xF3, 0xA5}, op: OpMovs, width: 4, rep: 1},
 		{name: "stosb", code: []byte{0xAA}, op: OpStos, width: 1},
+		{name: "stosw", code: []byte{0x66, 0xAB}, op: OpStos, width: 2},
+		{name: "lodsw", code: []byte{0x66, 0xAD}, op: OpLods, width: 2},
 		{name: "lodsd", code: []byte{0xAD}, op: OpLods, width: 4},
+		{name: "repne scasw", code: []byte{0xF2, 0x66, 0xAF}, op: OpScas, width: 2, rep: 2},
 		{name: "repne scasb", code: []byte{0xF2, 0xAE}, op: OpScas, width: 1, rep: 2},
+		{name: "repe cmpsw", code: []byte{0xF3, 0x66, 0xA7}, op: OpCmps, width: 2, rep: 1},
 		{name: "repe cmpsd", code: []byte{0xF3, 0xA7}, op: OpCmps, width: 4, rep: 1},
 	}
 	for _, test := range tests {
