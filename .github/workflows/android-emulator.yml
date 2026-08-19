@@ -44,12 +44,7 @@ jobs:
             sleep 10
             adb logcat -d -v threadtime > gtk-hello-android/logcat.txt || true
             adb exec-out screencap -p > gtk-hello-android/emulator-screen.png || true
-            pid="$(adb shell pidof com.example.gtkhelloworld | tr -d '\r')"
-            if [ -z "$pid" ]; then
-              echo 'GTK application is not running; recent logcat follows:'
-              tail -200 gtk-hello-android/logcat.txt
-              exit 1
-            fi
+            adb shell pidof com.example.gtkhelloworld | grep -q '[0-9]'
             adb shell dumpsys activity activities | grep -q 'com.example.gtkhelloworld'
 
       - name: Upload APK and emulator screenshot
