@@ -92,27 +92,38 @@ const (
 	Sys64Getsockopt  Number64 = 55
 	Sys64Socketpair  Number64 = 53
 
-	Sys64Clone            Number64 = 56
-	Sys64Fork             Number64 = 57
-	Sys64Vfork            Number64 = 58
-	Sys64Execve           Number64 = 59
-	Sys64Exit             Number64 = 60
-	Sys64Wait4            Number64 = 61
-	Sys64Kill             Number64 = 62
-	Sys64Uname            Number64 = 63
-	Sys64Fcntl            Number64 = 72
-	Sys64GetCWD           Number64 = 79
-	Sys64Chdir            Number64 = 80
-	Sys64Rename           Number64 = 82
-	Sys64Mkdir            Number64 = 83
-	Sys64Rmdir            Number64 = 84
-	Sys64Unlink           Number64 = 87
-	Sys64Readlink         Number64 = 89
-	Sys64GetUID           Number64 = 102
-	Sys64GetGID           Number64 = 104
-	Sys64GetEUID          Number64 = 107
-	Sys64GetEGID          Number64 = 108
-	Sys64GetPPID          Number64 = 110
+	Sys64Clone     Number64 = 56
+	Sys64Fork      Number64 = 57
+	Sys64Vfork     Number64 = 58
+	Sys64Execve    Number64 = 59
+	Sys64Exit      Number64 = 60
+	Sys64Wait4     Number64 = 61
+	Sys64Kill      Number64 = 62
+	Sys64Uname     Number64 = 63
+	Sys64Fcntl     Number64 = 72
+	Sys64GetCWD    Number64 = 79
+	Sys64Chdir     Number64 = 80
+	Sys64Rename    Number64 = 82
+	Sys64Mkdir     Number64 = 83
+	Sys64Rmdir     Number64 = 84
+	Sys64Unlink    Number64 = 87
+	Sys64Readlink  Number64 = 89
+	Sys64GetUID    Number64 = 102
+	Sys64SetUID    Number64 = 105
+	Sys64GetGID    Number64 = 104
+	Sys64SetGID    Number64 = 106
+	Sys64GetEUID   Number64 = 107
+	Sys64GetEGID   Number64 = 108
+	Sys64SetPGID   Number64 = 109
+	Sys64SetSID    Number64 = 112
+	Sys64SetResUID Number64 = 117
+	Sys64GetResUID Number64 = 118
+	Sys64SetResGID Number64 = 119
+	Sys64GetResGID Number64 = 120
+	Sys64GetPGID   Number64 = 121
+	Sys64GetSID    Number64 = 124
+	Sys64GetPPID   Number64 = 110
+
 	Sys64GetTID           Number64 = 186
 	Sys64Tkill            Number64 = 200
 	Sys64SchedSetAffinity Number64 = 203
@@ -171,6 +182,14 @@ type Context64 struct {
 	PID            uint64
 	ParentPID      uint64
 	TID            uint64
+	PGID           uint64
+	SID            uint64
+	RealUID        uint32
+	EffectiveUID   uint32
+	SavedUID       uint32
+	RealGID        uint32
+	EffectiveGID   uint32
+	SavedGID       uint32
 	TIDAddress     uint64
 	Children       *ChildRegistry
 	RobustListHead uint64
@@ -280,10 +299,20 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64RtSigreturn, signalStub64)
 	d.Register(Sys64Tkill, tkill64)
 	d.Register(Sys64Tgkill, tgkill64)
-	d.Register(Sys64GetUID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
-	d.Register(Sys64GetGID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
-	d.Register(Sys64GetEUID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
-	d.Register(Sys64GetEGID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
+	d.Register(Sys64GetUID, getuid64)
+	d.Register(Sys64SetUID, setuid64)
+	d.Register(Sys64GetGID, getgid64)
+	d.Register(Sys64SetGID, setgid64)
+	d.Register(Sys64GetEUID, geteuid64)
+	d.Register(Sys64GetEGID, getegid64)
+	d.Register(Sys64SetPGID, setpgid64)
+	d.Register(Sys64SetSID, setsid64)
+	d.Register(Sys64SetResUID, setresuid64)
+	d.Register(Sys64GetResUID, getresuid64)
+	d.Register(Sys64SetResGID, setresgid64)
+	d.Register(Sys64GetResGID, getresgid64)
+	d.Register(Sys64GetPGID, getpgid64)
+	d.Register(Sys64GetSID, getsid64)
 	d.Register(Sys64GetPPID, func(ctx *Context64, args [6]uint64) int64 {
 		if ctx == nil {
 			return int64(ESRCH)
