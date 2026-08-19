@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"math/bits"
 
 	"github.com/mostafa637/mostafa637/go-pure/internal/core/emu/fpu"
@@ -28,7 +29,7 @@ func NewExecutor(syscall SyscallHandler) *Executor {
 	return &Executor{Syscall: syscall}
 }
 
-func executeFPU(state *MachineState, instruction Instruction) {
+func executeFPU(state *MachineState, instruction Instruction) error {
 	switch instruction.Op {
 	case OpFPUConst:
 		if instruction.Group == 1 {
@@ -55,10 +56,19 @@ func executeFPU(state *MachineState, instruction Instruction) {
 			state.SetFPAt(0, other)
 			state.SetFPAt(instruction.FPUReg, value)
 		case fpuStackLoad:
+			if instruction.FPUMemWidth != 0 {
+				return executeFPUMemory(state, instruction)
+			}
 			state.PushFP(state.FPAt(instruction.FPUReg))
 		case fpuStackStore:
+			if instruction.FPUMemWidth != 0 {
+				return executeFPUMemory(state, instruction)
+			}
 			state.SetFPAt(instruction.FPUReg, state.FPAt(0))
 		case fpuStackStorePop:
+			if instruction.FPUMemWidth != 0 {
+				return executeFPUMemory(state, instruction)
+			}
 			state.SetFPAt(instruction.FPUReg, state.FPAt(0))
 			state.PopFP()
 		}
@@ -84,6 +94,55 @@ func executeFPU(state *MachineState, instruction Instruction) {
 		if instruction.Group&0x80 != 0 {
 			state.PopFP()
 		}
+	}
+	return nil
+}
+
+func executeFPUMemory(state *MachineState, instruction Instruction) error {
+	address, err := effectiveAddress(state, instruction.Dst)
+	if err != nil {
+		return err
+	}
+	value := state.FPAt(0).ToFloat64()
+	switch instruction.Group {
+	case fpuStackLoad:
+		var raw [8]byte
+		if instruction.FPUMemWidth == 4 {
+			if err := state.Memory.Read(address, raw[:4]); err != nil {
+				return err
+			}
+			state.PushFP(fpu.FromFloat64(float64(math.Float32frombits(binary.LittleEndian.Uint32(raw[:4])))))
+			return nil
+		}
+		if instruction.FPUMemWidth != 8 {
+			return ErrUnsupportedAddressing
+		}
+		if err := state.Memory.Read(address, raw[:]); err != nil {
+			return err
+		}
+		state.PushFP(fpu.FromFloat64(math.Float64frombits(binary.LittleEndian.Uint64(raw[:]))))
+		return nil
+	case fpuStackStore, fpuStackStorePop:
+		var raw [8]byte
+		if instruction.FPUMemWidth == 4 {
+			binary.LittleEndian.PutUint32(raw[:4], math.Float32bits(float32(value)))
+			if err := state.Memory.Write(address, raw[:4]); err != nil {
+				return err
+			}
+		} else if instruction.FPUMemWidth == 8 {
+			binary.LittleEndian.PutUint64(raw[:], math.Float64bits(value))
+			if err := state.Memory.Write(address, raw[:]); err != nil {
+				return err
+			}
+		} else {
+			return ErrUnsupportedAddressing
+		}
+		if instruction.Group == fpuStackStorePop {
+			state.PopFP()
+		}
+		return nil
+	default:
+		return ErrUnsupportedInstruction
 	}
 }
 
@@ -131,7 +190,9 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		}
 		state.EIP = next
 	case OpFPUConst, OpFPUUnary, OpFPUStack, OpFPUBinary:
-		executeFPU(state, instruction)
+		if err := executeFPU(state, instruction); err != nil {
+			return instruction, err
+		}
 		state.EIP = next
 	case OpMovRegReg:
 		state.Set(instruction.Reg, state.Get(instruction.Reg2))

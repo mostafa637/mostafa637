@@ -1991,3 +1991,71 @@ func TestExecutorFPUStorePopAndTopRotation(t *testing.T) {
 		t.Fatalf("x87 store/top changed EFLAGS: before %#x after %#x", beforeFlags, state.EFlags)
 	}
 }
+
+func TestExecutorFPUMemoryFloat32AndFloat64(t *testing.T) {
+	code := []byte{
+		0xDD, 0x05, 0x00, 0x20, 0x00, 0x00, // fld qword ptr [0x2000]
+		0xD9, 0x15, 0x08, 0x20, 0x00, 0x00, // fst dword ptr [0x2008]
+		0xDD, 0x1D, 0x10, 0x20, 0x00, 0x00, // fstp qword ptr [0x2010]
+		0xF4,
+	}
+	memory, state := mappedCode(t, code)
+	var input [8]byte
+	binary.LittleEndian.PutUint64(input[:], math.Float64bits(3.5))
+	if err := memory.Write(0x2000, input[:]); err != nil {
+		t.Fatal(err)
+	}
+	beforeFlags := state.EFlags
+	if err := NewExecutor(nil).Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	var output32 [4]byte
+	if err := memory.Read(0x2008, output32[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := math.Float32frombits(binary.LittleEndian.Uint32(output32[:])); got != float32(3.5) {
+		t.Fatalf("m32 store = %v, want 3.5", got)
+	}
+	var output64 [8]byte
+	if err := memory.Read(0x2010, output64[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := math.Float64frombits(binary.LittleEndian.Uint64(output64[:])); got != 3.5 {
+		t.Fatalf("m64 store = %v, want 3.5", got)
+	}
+	if state.FPUTop() != 0 {
+		t.Fatalf("FPU TOP = %d, want 0 after FLD/FST/FSTP", state.FPUTop())
+	}
+	if state.EFlags != beforeFlags {
+		t.Fatalf("x87 memory changed EFLAGS: before %#x after %#x", beforeFlags, state.EFlags)
+	}
+}
+
+func TestExecutorFPUMemorySIB(t *testing.T) {
+	code := []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+		0xBE, 0x10, 0x00, 0x00, 0x00, // mov esi, 0x10
+		0xD9, 0x44, 0xB3, 0x04, // fld dword ptr [ebx+esi*4+4]
+		0xD9, 0x5C, 0xB3, 0x08, // fstp dword ptr [ebx+esi*4+8]
+		0xF4,
+	}
+	memory, state := mappedCode(t, code)
+	var input [4]byte
+	binary.LittleEndian.PutUint32(input[:], math.Float32bits(1.25))
+	if err := memory.Write(0x2044, input[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewExecutor(nil).Run(state, 12); err != nil {
+		t.Fatal(err)
+	}
+	var output [4]byte
+	if err := memory.Read(0x2048, output[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := math.Float32frombits(binary.LittleEndian.Uint32(output[:])); got != float32(1.25) {
+		t.Fatalf("SIB m32 store = %v, want 1.25", got)
+	}
+	if state.FPUTop() != 0 {
+		t.Fatalf("FPU TOP = %d, want 0 after SIB FLD/FSTP", state.FPUTop())
+	}
+}

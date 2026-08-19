@@ -140,18 +140,19 @@ type Operand struct {
 }
 
 type Instruction struct {
-	Op      Op
-	Len     uint32
-	Reg     Reg32
-	Reg2    Reg32
-	Imm     int32
-	Rel     int32
-	Vector  uint8
-	Group   uint8
-	FPUReg  uint8
-	FPUReg2 uint8
-	Dst     Operand
-	Src     Operand
+	Op          Op
+	Len         uint32
+	Reg         Reg32
+	Reg2        Reg32
+	Imm         int32
+	Rel         int32
+	Vector      uint8
+	Group       uint8
+	FPUReg      uint8
+	FPUReg2     uint8
+	FPUMemWidth uint8
+	Dst         Operand
+	Src         Operand
 }
 
 type codeReader struct {
@@ -1941,21 +1942,47 @@ func decodeX86FPU(inst x86asm.Inst) (Instruction, bool, error) {
 			group = 1
 		}
 		return Instruction{Op: OpFPUUnary, Len: uint32(inst.Len), Group: group}, true, nil
-	case x86asm.FXCH, x86asm.FLD, x86asm.FST, x86asm.FSTP:
+	case x86asm.FLD, x86asm.FST, x86asm.FSTP:
+		if len(inst.Args) == 0 || inst.Args[0] == nil {
+			return unsupported("requires ST(i) register or m32/m64 memory")
+		}
+		if _, isMemory := inst.Args[0].(x86asm.Mem); isMemory {
+			operand, ok, err := x86Operand32(inst.Args[0])
+			if err != nil {
+				return Instruction{}, true, err
+			}
+			if !ok || !operand.IsMem {
+				return unsupported("requires m32/m64 memory")
+			}
+			if inst.MemBytes != 4 && inst.MemBytes != 8 {
+				return unsupported(fmt.Sprintf("unsupported memory width %d", inst.MemBytes))
+			}
+			group := fpuStackLoad
+			if inst.Op == x86asm.FST {
+				group = fpuStackStore
+			} else if inst.Op == x86asm.FSTP {
+				group = fpuStackStorePop
+			}
+			operand.Width = uint8(inst.MemBytes)
+			return Instruction{Op: OpFPUStack, Len: uint32(inst.Len), Group: group, Dst: operand, FPUMemWidth: uint8(inst.MemBytes)}, true, nil
+		}
+		reg, ok := registerArg(0)
+		if !ok {
+			return unsupported("requires ST(i) register or m32/m64 memory")
+		}
+		group := fpuStackLoad
+		if inst.Op == x86asm.FST {
+			group = fpuStackStore
+		} else if inst.Op == x86asm.FSTP {
+			group = fpuStackStorePop
+		}
+		return Instruction{Op: OpFPUStack, Len: uint32(inst.Len), Group: group, FPUReg: reg}, true, nil
+	case x86asm.FXCH:
 		reg, ok := registerArg(0)
 		if !ok {
 			return unsupported("requires ST(i) register")
 		}
-		group := fpuStackXchg
-		switch inst.Op {
-		case x86asm.FLD:
-			group = fpuStackLoad
-		case x86asm.FST:
-			group = fpuStackStore
-		case x86asm.FSTP:
-			group = fpuStackStorePop
-		}
-		return Instruction{Op: OpFPUStack, Len: uint32(inst.Len), Group: group, FPUReg: reg}, true, nil
+		return Instruction{Op: OpFPUStack, Len: uint32(inst.Len), Group: fpuStackXchg, FPUReg: reg}, true, nil
 	case x86asm.FINCSTP, x86asm.FDECSTP:
 		group := fpuStackIncTop
 		if inst.Op == x86asm.FDECSTP {
