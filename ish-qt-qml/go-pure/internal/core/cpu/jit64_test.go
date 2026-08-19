@@ -2627,3 +2627,159 @@ func TestJIT64SSSE3AbsoluteAndSignPacked(t *testing.T) {
 		t.Fatalf("psignb memory=%x, want %x", got, want)
 	}
 }
+
+func TestJIT64PackedSSEFloatArithmetic(t *testing.T) {
+	setFloat32 := func(state *MachineState64, xmm uint8, values ...float32) {
+		t.Helper()
+		if len(values) != 4 {
+			t.Fatalf("float32 lane count=%d, want 4", len(values))
+		}
+		for lane, value := range values {
+			binary.LittleEndian.PutUint32(state.XMM[xmm][lane*4:], math.Float32bits(value))
+		}
+	}
+	setFloat64 := func(state *MachineState64, xmm uint8, values ...float64) {
+		t.Helper()
+		if len(values) != 2 {
+			t.Fatalf("float64 lane count=%d, want 2", len(values))
+		}
+		for lane, value := range values {
+			binary.LittleEndian.PutUint64(state.XMM[xmm][lane*8:], math.Float64bits(value))
+		}
+	}
+	getFloat32 := func(state *MachineState64, xmm uint8) [4]float32 {
+		var values [4]float32
+		for lane := range values {
+			values[lane] = math.Float32frombits(binary.LittleEndian.Uint32(state.XMM[xmm][lane*4:]))
+		}
+		return values
+	}
+	getFloat64 := func(state *MachineState64, xmm uint8) [2]float64 {
+		var values [2]float64
+		for lane := range values {
+			values[lane] = math.Float64frombits(binary.LittleEndian.Uint64(state.XMM[xmm][lane*8:]))
+		}
+		return values
+	}
+	run := func(t *testing.T, state *MachineState64, code []byte, data []byte) {
+		t.Helper()
+		const codeAddress Address64 = 0x3a000
+		if len(data) != 0 {
+			const dataAddress Address64 = 0x3b000
+			if err := state.Memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+				t.Fatal(err)
+			}
+			if err := state.Memory.Write(dataAddress, data); err != nil {
+				t.Fatal(err)
+			}
+			state.Set(RDI, uint64(dataAddress))
+		}
+		if err := state.Memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.Memory.Write(codeAddress, code); err != nil {
+			t.Fatal(err)
+		}
+		state.RIP = uint64(codeAddress)
+		trap := NewJIT64(state.Memory).RunToInterrupt(state)
+		if trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+	}
+
+	state := NewMachineState64(NewMemory64())
+	setFloat32(state, 0, 1, 2, 3, 4)
+	setFloat32(state, 1, 10, 20, 30, 40)
+	setFloat32(state, 2, 20, 18, 16, 14)
+	setFloat32(state, 3, 1, 2, 3, 4)
+	setFloat32(state, 4, 2, 3, 4, 5)
+	setFloat32(state, 5, 10, 20, 30, 40)
+	setFloat32(state, 6, 20, 60, 120, 200)
+	setFloat32(state, 7, 2, 3, 4, 5)
+	setFloat32(state, 10, 1, 4, 9, 16)
+	setFloat64(state, 11, 1.5, -2.5)
+	setFloat64(state, 12, 2.5, 0.5)
+	setFloat64(state, 13, 20, 18)
+	setFloat64(state, 14, 2, 3)
+	setFloat64(state, 15, 2, 3)
+	setFloat64(state, 8, 20, 60)
+	setFloat64(state, 9, 2, 3)
+	run(t, state, []byte{
+		0x0f, 0x58, 0xc1, // addps xmm0, xmm1
+		0x0f, 0x5c, 0xd3, // subps xmm2, xmm3
+		0x0f, 0x59, 0xe5, // mulps xmm4, xmm5
+		0x0f, 0x5e, 0xf7, // divps xmm6, xmm7
+		0x45, 0x0f, 0x51, 0xd2, // sqrtps xmm10, xmm10
+		0x66, 0x45, 0x0f, 0x5e, 0xc1, // divpd xmm8, xmm9
+		0x66, 0x44, 0x0f, 0x51, 0x0f, // sqrtpd xmm9, [rdi]
+		0xf4,
+	}, []byte{
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22, 0x40, // 0, 9
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x40, // 0, 16
+	})
+	if got, want := getFloat32(state, 0), [4]float32{11, 22, 33, 44}; got != want {
+		t.Fatalf("addps=%v, want %v", got, want)
+	}
+	if got, want := getFloat32(state, 2), [4]float32{19, 16, 13, 10}; got != want {
+		t.Fatalf("subps=%v, want %v", got, want)
+	}
+	if got, want := getFloat32(state, 4), [4]float32{20, 60, 120, 200}; got != want {
+		t.Fatalf("mulps=%v, want %v", got, want)
+	}
+	if got, want := getFloat32(state, 6), [4]float32{10, 20, 30, 40}; got != want {
+		t.Fatalf("divps=%v, want %v", got, want)
+	}
+	if got, want := getFloat32(state, 10), [4]float32{1, 2, 3, 4}; got != want {
+		t.Fatalf("sqrtps=%v, want %v", got, want)
+	}
+	if got := getFloat64(state, 8); got != [2]float64{10, 20} {
+		t.Fatalf("divpd=%v, want [10 20]", got)
+	}
+	if got := getFloat64(state, 9); got != [2]float64{3, 4} {
+		t.Fatalf("sqrtpd memory=%v, want [3 4]", got)
+	}
+
+	state = NewMachineState64(NewMemory64())
+	setFloat64(state, 2, 1.5, -2.5)
+	setFloat64(state, 3, 2.5, 0.5)
+	setFloat64(state, 4, 20, 18)
+	setFloat64(state, 5, 2, 3)
+	setFloat64(state, 6, 2, 3)
+	setFloat64(state, 7, 2, 3)
+	run(t, state, []byte{
+		0x66, 0x0f, 0x58, 0xd3, // addpd xmm2, xmm3
+		0x66, 0x0f, 0x5c, 0xe7, // subpd xmm4, xmm7
+		0x66, 0x0f, 0x59, 0xee, // mulpd xmm5, xmm6
+		0xf4,
+	}, nil)
+	if got, want := getFloat64(state, 2), [2]float64{4, -2}; got != want {
+		t.Fatalf("addpd=%v, want %v", got, want)
+	}
+	if got, want := getFloat64(state, 4), [2]float64{18, 15}; got != want {
+		t.Fatalf("subpd=%v, want %v", got, want)
+	}
+	if got, want := getFloat64(state, 5), [2]float64{4, 9}; got != want {
+		t.Fatalf("mulpd=%v, want %v", got, want)
+	}
+
+	state = NewMachineState64(NewMemory64())
+	setFloat32(state, 0, float32(math.Inf(1)), float32(math.Inf(-1)), float32(math.NaN()), 1)
+	setFloat32(state, 1, 2, 2, 2, 0)
+	run(t, state, []byte{0x0f, 0x5e, 0xc1, 0xf4}, nil) // divps xmm0, xmm1
+	got := getFloat32(state, 0)
+	if !math.IsInf(float64(got[0]), 1) || !math.IsInf(float64(got[1]), -1) || !math.IsNaN(float64(got[2])) || !math.IsInf(float64(got[3]), 1) {
+		t.Fatalf("divps special values=%v, want [+Inf -Inf NaN +Inf]", got)
+	}
+
+	state = NewMachineState64(NewMemory64())
+	setFloat32(state, 0, 10, 20, 30, 40)
+	run(t, state, []byte{0x0f, 0x58, 0x07, 0xf4}, []byte{
+		0, 0, 128, 63, // 1
+		0, 0, 0, 64, // 2
+		0, 0, 64, 64, // 3
+		0, 0, 128, 64, // 4
+	}) // addps xmm0, [rdi]
+	if got, want := getFloat32(state, 0), [4]float32{11, 22, 33, 44}; got != want {
+		t.Fatalf("addps memory=%v, want %v", got, want)
+	}
+}

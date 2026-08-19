@@ -774,6 +774,27 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
 		}
 		return makeSSEPackedConvert64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.ADDPS, x86asm.SUBPS, x86asm.MULPS, x86asm.DIVPS,
+		x86asm.ADDPD, x86asm.SUBPD, x86asm.MULPD, x86asm.DIVPD:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeSSEPackedFloatBinary64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.SQRTPS, x86asm.SQRTPD:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeSSEPackedFloatUnary64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
 	case x86asm.MOVDQA, x86asm.MOVDQU, x86asm.MOVAPS, x86asm.MOVUPS, x86asm.MOVAPD, x86asm.MOVUPD:
 
 		left, err := operand64FromArg(arg(0), 16)
@@ -1886,6 +1907,86 @@ func makeSSEPackedConvert64(address uint64, size uint8, op x86asm.Op, dst, src o
 			}
 		default:
 			return Flow64Stop, ErrUnsupported64
+		}
+		if err := writeVector64(state, dst, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEPackedFloatBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readVector64(state, dst, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readVector64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var result [16]byte
+		if op == x86asm.ADDPS || op == x86asm.SUBPS || op == x86asm.MULPS || op == x86asm.DIVPS {
+			for offset := 0; offset < 16; offset += 4 {
+				l := math.Float32frombits(binary.LittleEndian.Uint32(left[offset:]))
+				r := math.Float32frombits(binary.LittleEndian.Uint32(right[offset:]))
+				var value float32
+				switch op {
+				case x86asm.ADDPS:
+					value = l + r
+				case x86asm.SUBPS:
+					value = l - r
+				case x86asm.MULPS:
+					value = l * r
+				case x86asm.DIVPS:
+					value = l / r
+				}
+				binary.LittleEndian.PutUint32(result[offset:], math.Float32bits(value))
+			}
+		} else {
+			for offset := 0; offset < 16; offset += 8 {
+				l := math.Float64frombits(binary.LittleEndian.Uint64(left[offset:]))
+				r := math.Float64frombits(binary.LittleEndian.Uint64(right[offset:]))
+				var value float64
+				switch op {
+				case x86asm.ADDPD:
+					value = l + r
+				case x86asm.SUBPD:
+					value = l - r
+				case x86asm.MULPD:
+					value = l * r
+				case x86asm.DIVPD:
+					value = l / r
+				}
+				binary.LittleEndian.PutUint64(result[offset:], math.Float64bits(value))
+			}
+		}
+		if err := writeVector64(state, dst, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEPackedFloatUnary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		source, err := readVector64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var result [16]byte
+		if op == x86asm.SQRTPS {
+			for offset := 0; offset < 16; offset += 4 {
+				value := math.Float32frombits(binary.LittleEndian.Uint32(source[offset:]))
+				binary.LittleEndian.PutUint32(result[offset:], math.Float32bits(float32(math.Sqrt(float64(value)))))
+			}
+		} else {
+			for offset := 0; offset < 16; offset += 8 {
+				value := math.Float64frombits(binary.LittleEndian.Uint64(source[offset:]))
+				binary.LittleEndian.PutUint64(result[offset:], math.Float64bits(math.Sqrt(value)))
+			}
 		}
 		if err := writeVector64(state, dst, next, result); err != nil {
 			return Flow64Stop, err
