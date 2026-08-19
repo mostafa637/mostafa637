@@ -1249,3 +1249,84 @@ func TestExecutorXaddByteFlags(t *testing.T) {
 		t.Fatalf("xadd byte flags eax=%#x ecx=%#x cf=%v of=%v zf=%v", state.Get(EAX), state.Get(ECX), state.Flag(FlagCF), state.Flag(FlagOF), state.Flag(FlagZF))
 	}
 }
+
+func TestExecutorADCAndSBB(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xB8, 0x05, 0x00, 0x00, 0x00, // mov eax, 5
+		0xBB, 0x02, 0x00, 0x00, 0x00, // mov ebx, 2
+		0x11, 0xD8, // adc eax, ebx => 8 with initial CF
+		0x83, 0xD8, 0x01, // sbb eax, 1 => 7
+		0xF4,
+	})
+	state.EFlags |= FlagCF
+	state.ExpandFlags()
+	if err := NewExecutor(nil).Run(state, 16); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 7 {
+		t.Fatalf("eax = %d, want 7", got)
+	}
+	if state.Flag(FlagCF) || state.Flag(FlagOF) {
+		t.Fatalf("unexpected carry/overflow after ADC/SBB: cf=%v of=%v", state.Flag(FlagCF), state.Flag(FlagOF))
+	}
+}
+
+func TestExecutorADCByteAndMemory(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0x14, 0x01, // adc al, 1
+		0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+		0x89, 0x03, // mov [ebx], eax
+		0x11, 0x03, // adc [ebx], eax
+		0xF4,
+	})
+	state.Set(EAX, 0x0000000f)
+	state.EFlags |= FlagCF
+	state.ExpandFlags()
+	executor := NewExecutor(nil)
+	if _, err := executor.Step(state); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX) & 0xff; got != 0x11 {
+		t.Fatalf("al = %#x, want 0x11", got)
+	}
+	if !state.Flag(FlagAF) {
+		t.Fatal("ADC byte did not set AF across nibble carry")
+	}
+	if err := executor.Run(state, 16); err != nil {
+		t.Fatal(err)
+	}
+	var raw [4]byte
+	if err := memory.Read(0x2000, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 0x22 {
+		t.Fatalf("memory = %#x, want 0x22", got)
+	}
+}
+
+func TestExecutorLAHFSAHF(t *testing.T) {
+	_, lahfState := mappedCode(t, []byte{
+		0x31, 0xC0, // xor eax, eax => PF=ZF=1
+		0x9F, // lahf
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(lahfState, 8); err != nil {
+		t.Fatal(err)
+	}
+	if got := (lahfState.Get(EAX) >> 8) & 0xff; got != 0x46 {
+		t.Fatalf("AH after LAHF = %#x, want 0x46", got)
+	}
+
+	_, sahfState := mappedCode(t, []byte{0x9E, 0xF4}) // sahf; hlt
+	sahfState.Set(EAX, 0x0000d700)
+	sahfState.EFlags |= FlagOF
+	sahfState.ExpandFlags()
+	if err := NewExecutor(nil).Run(sahfState, 4); err != nil {
+		t.Fatal(err)
+	}
+	for _, flag := range []uint32{FlagCF, FlagPF, FlagAF, FlagZF, FlagSF, FlagOF} {
+		if !sahfState.Flag(flag) {
+			t.Fatalf("SAHF did not set flag %#x", flag)
+		}
+	}
+}

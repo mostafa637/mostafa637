@@ -491,3 +491,48 @@ func TestDecodeX86AtomicInstructions(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX86CarryAndFlagTransfer(t *testing.T) {
+	tests := []struct {
+		name  string
+		code  []byte
+		op    Op
+		width uint8
+	}{
+		{name: "adc register", code: []byte{0x11, 0xD8}, op: OpAdcOperands, width: 4},         // adc eax, ebx
+		{name: "sbb memory", code: []byte{0x19, 0x03}, op: OpSbbOperands, width: 4},           // sbb [ebx], eax
+		{name: "adc byte immediate", code: []byte{0x14, 0x01}, op: OpAdcImm, width: 1},        // adc al, 1
+		{name: "sbb dword immediate", code: []byte{0x83, 0xD8, 0x01}, op: OpSbbImm, width: 4}, // sbb eax, 1
+		{name: "lahf", code: []byte{0x9F}, op: OpLahf},
+		{name: "sahf", code: []byte{0x9E}, op: OpSahf},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Len != uint32(len(test.code)) {
+				t.Fatalf("instruction = %#v, want op %v len %d", instruction, test.op, len(test.code))
+			}
+			if test.width != 0 && instruction.Dst.Width != test.width {
+				t.Fatalf("destination width = %d, want %d", instruction.Dst.Width, test.width)
+			}
+		})
+	}
+}
+
+func TestDecodeX86CarryMemorySource(t *testing.T) {
+	memory, _ := mappedCode(t, []byte{0x13, 0x03}) // adc eax, dword ptr [ebx]
+	instruction, err := Decode(memory, PageSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instruction.Op != OpAdcOperands || !instruction.Dst.IsMem && instruction.Dst.Reg != EAX {
+		t.Fatalf("instruction = %#v, want ADC register destination", instruction)
+	}
+	if !instruction.Src.IsMem || instruction.Src.Memory.Base != EBX || instruction.Src.Width != 4 {
+		t.Fatalf("source = %#v, want dword ptr [ebx]", instruction.Src)
+	}
+}

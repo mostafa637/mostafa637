@@ -92,6 +92,12 @@ const (
 	OpCDQ
 	OpCmpxchg
 	OpXadd
+	OpAdcOperands
+	OpAdcImm
+	OpSbbOperands
+	OpSbbImm
+	OpLahf
+	OpSahf
 )
 
 type Segment uint8
@@ -307,6 +313,13 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 		}
 		return atomicInstruction, nil
 	}
+	if carryInstruction, handled, err := decodeX86Carry(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return carryInstruction, nil
+	}
+
 	if shift, handled, err := decodeX86Shift(disassembled); handled {
 		if err != nil {
 			return Instruction{}, err
@@ -976,6 +989,76 @@ func x86Operand16(arg x86asm.Arg) (Operand, bool, error) {
 		base = EDI
 	}
 	return Operand{Reg: base, Width: 2}, true, nil
+}
+
+func decodeX86Carry(inst x86asm.Inst) (Instruction, bool, error) {
+	switch inst.Op {
+	case x86asm.LAHF:
+		if inst.DataSize != 32 || inst.Args[0] != nil {
+			return Instruction{}, true, fmt.Errorf("%w: LAHF data size %d or operands", ErrUnsupportedAddressing, inst.DataSize)
+		}
+		return Instruction{Op: OpLahf, Len: uint32(inst.Len)}, true, nil
+	case x86asm.SAHF:
+		if inst.DataSize != 32 || inst.Args[0] != nil {
+			return Instruction{}, true, fmt.Errorf("%w: SAHF data size %d or operands", ErrUnsupportedAddressing, inst.DataSize)
+		}
+		return Instruction{Op: OpSahf, Len: uint32(inst.Len)}, true, nil
+	case x86asm.ADC, x86asm.SBB:
+		if inst.DataSize != 32 || len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+			return Instruction{}, true, fmt.Errorf("%w: %v data size %d or operands", ErrUnsupportedAddressing, inst.Op, inst.DataSize)
+		}
+		width := uint8(4)
+		if inst.MemBytes == 1 {
+			width = 1
+		} else if inst.MemBytes != 0 && inst.MemBytes != 4 {
+			return Instruction{}, true, fmt.Errorf("%w: %v memory width %d", ErrUnsupportedAddressing, inst.Op, inst.MemBytes)
+		}
+		if reg, ok := inst.Args[0].(x86asm.Reg); ok && isX86ByteReg(reg) {
+			width = 1
+		}
+		var dst Operand
+		var ok bool
+		var err error
+		if width == 1 {
+			dst, ok, err = x86Operand8(inst.Args[0])
+		} else {
+			dst, ok, err = x86Operand32(inst.Args[0])
+		}
+		if err != nil || !ok || dst.Width != width {
+			if err == nil {
+				err = fmt.Errorf("%w: %v destination width", ErrUnsupportedAddressing, inst.Op)
+			}
+			return Instruction{}, true, err
+		}
+		switch source := inst.Args[1].(type) {
+		case x86asm.Imm:
+			op := OpAdcImm
+			if inst.Op == x86asm.SBB {
+				op = OpSbbImm
+			}
+			return Instruction{Op: op, Len: uint32(inst.Len), Dst: dst, Imm: int32(source)}, true, nil
+		default:
+			var src Operand
+			if width == 1 {
+				src, ok, err = x86Operand8(inst.Args[1])
+			} else {
+				src, ok, err = x86Operand32(inst.Args[1])
+			}
+			if err != nil || !ok || src.Width != width {
+				if err == nil {
+					err = fmt.Errorf("%w: %v source width", ErrUnsupportedAddressing, inst.Op)
+				}
+				return Instruction{}, true, err
+			}
+			op := OpAdcOperands
+			if inst.Op == x86asm.SBB {
+				op = OpSbbOperands
+			}
+			return Instruction{Op: op, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
+		}
+	default:
+		return Instruction{}, false, nil
+	}
 }
 
 func decodeX86Atomic(inst x86asm.Inst) (Instruction, bool, error) {

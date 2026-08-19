@@ -387,6 +387,77 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		}
 		setLazyArithmeticWidth(state, dstValue, srcValue, sum.result, instruction.Dst.Width, false)
 		state.EIP = next
+	case OpAdcOperands, OpSbbOperands, OpAdcImm, OpSbbImm:
+		left, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		right := uint32(instruction.Imm)
+		if instruction.Op == OpAdcOperands || instruction.Op == OpSbbOperands {
+			right, err = loadOperand(state, instruction.Src)
+			if err != nil {
+				return instruction, err
+			}
+		}
+		carryIn := uint32(0)
+		if state.Flag(FlagCF) {
+			carryIn = 1
+		}
+		var result uint32
+		if instruction.Op == OpAdcOperands || instruction.Op == OpAdcImm {
+			result = e.adc(state, left, right, instruction.Dst.Width, carryIn)
+		} else {
+			result = e.sbb(state, left, right, instruction.Dst.Width, carryIn)
+		}
+		if err := storeOperand(state, instruction.Dst, result); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
+	case OpLahf:
+		state.CollapseFlags()
+		var ah uint32
+		for _, flag := range []uint32{FlagCF, FlagPF, FlagAF, FlagZF, FlagSF} {
+			if state.EFlags&flag != 0 {
+				switch flag {
+				case FlagCF:
+					ah |= 1 << 0
+				case FlagPF:
+					ah |= 1 << 2
+				case FlagAF:
+					ah |= 1 << 4
+				case FlagZF:
+					ah |= 1 << 6
+				case FlagSF:
+					ah |= 1 << 7
+				}
+			}
+		}
+		ah |= 1 << 1 // LAHF always reports the reserved bit 1 as set.
+		state.Set(EAX, (state.EAXValue()&^uint32(0xff00))|(ah<<8))
+		state.EIP = next
+	case OpSahf:
+		state.CollapseFlags()
+		ah := (state.EAXValue() >> 8) & 0xff
+		var flags uint32
+		if ah&(1<<0) != 0 {
+			flags |= FlagCF
+		}
+		if ah&(1<<2) != 0 {
+			flags |= FlagPF
+		}
+		if ah&(1<<4) != 0 {
+			flags |= FlagAF
+		}
+		if ah&(1<<6) != 0 {
+			flags |= FlagZF
+		}
+		if ah&(1<<7) != 0 {
+			flags |= FlagSF
+		}
+		state.EFlags = (state.EFlags &^ (FlagCF | FlagPF | FlagAF | FlagZF | FlagSF)) | flags | FlagIF
+		state.ExpandFlags()
+		state.EIP = next
+
 	case OpIncReg:
 		carry := state.Flag(FlagCF)
 		reg := state.Get(instruction.Reg)
@@ -897,6 +968,57 @@ func widthMask(width uint8) (mask, sign uint32) {
 	default:
 		return 0xffffffff, 0x80000000
 	}
+}
+
+func (e *Executor) adc(state *MachineState, left, right uint32, width uint8, carryIn uint32) uint32 {
+	mask, sign := widthMask(width)
+	left &= mask
+	right &= mask
+	var result uint32
+	var carry bool
+	if width == 4 {
+		var carryOut uint32
+		result, carryOut = bits.Add32(left, right, carryIn)
+		carry = carryOut != 0
+	} else {
+		sum := uint64(left) + uint64(right) + uint64(carryIn)
+		result = uint32(sum) & mask
+		carry = sum > uint64(mask)
+	}
+	overflow := ((^(left ^ right)) & (left ^ result) & sign) != 0
+	setLazyArithmeticWidthWithCarry(state, left, right, result, width, carry, overflow)
+	return result
+}
+
+func (e *Executor) sbb(state *MachineState, left, right uint32, width uint8, borrowIn uint32) uint32 {
+	mask, sign := widthMask(width)
+	left &= mask
+	right &= mask
+	var result uint32
+	var borrow bool
+	if width == 4 {
+		var borrowOut uint32
+		result, borrowOut = bits.Sub32(left, right, borrowIn)
+		borrow = borrowOut != 0
+	} else {
+		subtrahend := uint64(right) + uint64(borrowIn)
+		result = uint32(uint64(left)-subtrahend) & mask
+		borrow = uint64(left) < subtrahend
+	}
+	overflow := ((left ^ right) & (left ^ result) & sign) != 0
+	setLazyArithmeticWidthWithCarry(state, left, right, result, width, borrow, overflow)
+	return result
+}
+
+func setLazyArithmeticWidthWithCarry(state *MachineState, left, right, result uint32, width uint8, carry, overflow bool) {
+	mask, sign := widthMask(width)
+	left &= mask
+	right &= mask
+	result &= mask
+	if result&sign != 0 {
+		result |= ^mask
+	}
+	state.SetLazyArithmetic(left, right, result, carry, overflow, true)
 }
 
 func addWidth(left, right uint32, width uint8) widthArithmetic {
