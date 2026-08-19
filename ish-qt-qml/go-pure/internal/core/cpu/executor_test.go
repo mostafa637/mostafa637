@@ -1549,3 +1549,44 @@ func TestExecutorRotate(t *testing.T) {
 		}
 	})
 }
+
+func TestExecutorMovByteImmediate(t *testing.T) {
+	tests := []struct {
+		name string
+		code []byte
+		reg  Reg32
+		want uint32
+	}{
+		{name: "al", code: []byte{0xB0, 0x12, 0xF4}, reg: EAX, want: 0xA1B2C312},
+		{name: "cl", code: []byte{0xB1, 0x34, 0xF4}, reg: ECX, want: 0x11223334},
+		{name: "dl", code: []byte{0xB2, 0x56, 0xF4}, reg: EDX, want: 0x55667756},
+		{name: "bl", code: []byte{0xB3, 0x78, 0xF4}, reg: EBX, want: 0x99AABB78},
+		{name: "ah", code: []byte{0xB4, 0x9A, 0xF4}, reg: EAX, want: 0xA1B29AD4},
+		{name: "ch", code: []byte{0xB5, 0xBC, 0xF4}, reg: ECX, want: 0x1122BC44},
+		{name: "dh", code: []byte{0xB6, 0xDE, 0xF4}, reg: EDX, want: 0x5566DE88},
+		{name: "bh", code: []byte{0xB7, 0xF0, 0xF4}, reg: EBX, want: 0x99AAF0CC},
+	}
+	initial := []uint32{0xA1B2C3D4, 0x11223344, 0x55667788, 0x99AABBCC}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, state := mappedCode(t, test.code)
+			state.Set(EAX, initial[0])
+			state.Set(ECX, initial[1])
+			state.Set(EDX, initial[2])
+			state.Set(EBX, initial[3])
+			state.EFlags |= FlagCF | FlagPF | FlagAF | FlagZF | FlagSF | FlagOF
+			state.ExpandFlags()
+			if err := NewExecutor(nil).Run(state, 4); err != nil {
+				t.Fatal(err)
+			}
+			if got := state.Get(test.reg); got != test.want {
+				t.Fatalf("%s result=%#x want=%#x", test.name, got, test.want)
+			}
+			for _, flag := range []uint32{FlagCF, FlagPF, FlagAF, FlagZF, FlagSF, FlagOF} {
+				if !state.Flag(flag) {
+					t.Fatalf("MOV byte changed flag %#x", flag)
+				}
+			}
+		})
+	}
+}

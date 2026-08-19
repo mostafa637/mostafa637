@@ -45,6 +45,11 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 	case OpMovRegImm:
 		state.Set(instruction.Reg, uint32(instruction.Imm))
 		state.EIP = next
+	case OpMovByteImm:
+		if err := storeOperand(state, instruction.Dst, uint32(instruction.Imm)); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
 	case OpMovRegReg:
 		state.Set(instruction.Reg, state.Get(instruction.Reg2))
 		state.EIP = next

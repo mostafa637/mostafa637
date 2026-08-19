@@ -603,3 +603,34 @@ func TestDecodeX86RotateInstructions(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX86MovByteImmediate(t *testing.T) {
+	tests := []struct {
+		name       string
+		code       []byte
+		reg        Reg32
+		byteOffset uint8
+		imm        int32
+	}{
+		{name: "al", code: []byte{0xB0, 0x12}, reg: EAX, imm: 0x12},
+		{name: "cl", code: []byte{0xB1, 0x34}, reg: ECX, imm: 0x34},
+		{name: "dl", code: []byte{0xB2, 0x56}, reg: EDX, imm: 0x56},
+		{name: "bl", code: []byte{0xB3, 0x78}, reg: EBX, imm: 0x78},
+		{name: "ah", code: []byte{0xB4, 0x9A}, reg: EAX, byteOffset: 1, imm: 0x9A},
+		{name: "ch", code: []byte{0xB5, 0xBC}, reg: ECX, byteOffset: 1, imm: 0xBC},
+		{name: "dh", code: []byte{0xB6, 0xDE}, reg: EDX, byteOffset: 1, imm: 0xDE},
+		{name: "bh", code: []byte{0xB7, 0xF0}, reg: EBX, byteOffset: 1, imm: 0xF0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != OpMovByteImm || instruction.Len != 2 || instruction.Dst.Reg != test.reg || instruction.Dst.Width != 1 || instruction.Dst.ByteOffset != test.byteOffset || instruction.Imm != test.imm {
+				t.Fatalf("instruction = %#v, want byte MOV reg=%v offset=%d imm=%#x", instruction, test.reg, test.byteOffset, test.imm)
+			}
+		})
+	}
+}

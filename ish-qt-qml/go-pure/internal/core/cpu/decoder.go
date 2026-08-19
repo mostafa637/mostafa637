@@ -23,6 +23,7 @@ const (
 	OpMovRegMem
 	OpMovMemReg
 	OpMovMemImm
+	OpMovByteImm
 	OpLeaRegMem
 	OpAddRegImm
 	OpSubRegImm
@@ -305,6 +306,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return stringInstruction, nil
+	}
+	if byteMove, handled, err := decodeX86ByteMove(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return byteMove, nil
 	}
 	if dataMovement, handled, err := decodeX86DataMovement(disassembled); handled {
 		if err != nil {
@@ -873,6 +880,34 @@ func x86Reg32(reg x86asm.Reg) (Reg32, bool) {
 	default:
 		return RegNone, false
 	}
+}
+
+func decodeX86ByteMove(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.Op != x86asm.MOV {
+		return Instruction{}, false, nil
+	}
+	if len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+		return Instruction{}, true, fmt.Errorf("%w: MOV byte-immediate operands", ErrUnsupportedAddressing)
+	}
+	dstReg, isReg := inst.Args[0].(x86asm.Reg)
+	if !isReg || !isX86ByteReg(dstReg) {
+		return Instruction{}, false, nil
+	}
+	if inst.DataSize != 32 {
+		return Instruction{}, true, fmt.Errorf("%w: MOV byte-immediate data size %d", ErrUnsupportedAddressing, inst.DataSize)
+	}
+	imm, isImm := inst.Args[1].(x86asm.Imm)
+	if !isImm {
+		return Instruction{}, true, fmt.Errorf("%w: MOV byte-immediate source %T", ErrUnsupportedAddressing, inst.Args[1])
+	}
+	dst, ok, err := x86Operand8(dstReg)
+	if err != nil || !ok || dst.Width != 1 {
+		if err == nil {
+			err = fmt.Errorf("%w: MOV byte-immediate destination", ErrUnsupportedAddressing)
+		}
+		return Instruction{}, true, err
+	}
+	return Instruction{Op: OpMovByteImm, Len: uint32(inst.Len), Dst: dst, Imm: int32(imm) & 0xff}, true, nil
 }
 
 func decodeX86DataMovement(inst x86asm.Inst) (Instruction, bool, error) {
