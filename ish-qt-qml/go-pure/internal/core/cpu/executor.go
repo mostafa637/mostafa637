@@ -101,6 +101,25 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			return instruction, err
 		}
 		state.EIP = next
+	case OpAddOperands, OpSubOperands:
+		left, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		right, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		result := left
+		if instruction.Op == OpAddOperands {
+			result = e.add(state, left, right)
+		} else {
+			result = e.sub(state, left, right)
+		}
+		if err := storeOperand(state, instruction.Dst, result); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
 	case OpCmpOperandImm:
 		left, err := loadOperand(state, instruction.Dst)
 		if err != nil {

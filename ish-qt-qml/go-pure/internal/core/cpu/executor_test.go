@@ -594,3 +594,66 @@ func TestExecutorXchgMemory(t *testing.T) {
 		t.Fatalf("memory after XCHG = %d, want 7", got)
 	}
 }
+
+func TestExecutorAddSubMemoryDestination(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+		0xB8, 0x07, 0x00, 0x00, 0x00, // mov eax, 7
+		0xC7, 0x03, 0x2A, 0x00, 0x00, 0x00, // mov dword ptr [ebx], 42
+		0x01, 0x03, // add dword ptr [ebx], eax
+		0x29, 0x03, // sub dword ptr [ebx], eax
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 6); err != nil {
+		t.Fatal(err)
+	}
+	var raw [4]byte
+	if err := memory.Read(Address(0x2000), raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 42 {
+		t.Fatalf("memory after ADD/SUB = %d, want 42", got)
+	}
+	if got := state.Get(EAX); got != 7 {
+		t.Fatalf("EAX after ADD/SUB = %d, want 7", got)
+	}
+	if state.Flag(FlagZF) {
+		t.Fatal("ZF unexpectedly set after final SUB")
+	}
+}
+
+func TestExecutorAddRegisterFromMemory(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+		0xC7, 0x03, 0x2A, 0x00, 0x00, 0x00, // mov dword ptr [ebx], 42
+		0xB8, 0x07, 0x00, 0x00, 0x00, // mov eax, 7
+		0x03, 0x03, // add eax, dword ptr [ebx]
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 49 {
+		t.Fatalf("EAX after ADD EAX, [EBX] = %d, want 49", got)
+	}
+}
+
+func TestExecutorAddSubMemoryImmediate(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+		0xC7, 0x03, 0x2A, 0x00, 0x00, 0x00, // mov dword ptr [ebx], 42
+		0x83, 0x03, 0x05, // add dword ptr [ebx], 5
+		0x83, 0x2B, 0x02, // sub dword ptr [ebx], 2
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 5); err != nil {
+		t.Fatal(err)
+	}
+	var raw [4]byte
+	if err := memory.Read(Address(0x2000), raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 45 {
+		t.Fatalf("memory after immediate ADD/SUB = %d, want 45", got)
+	}
+}

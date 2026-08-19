@@ -95,3 +95,77 @@ func TestDecodeXchgByteRegisters(t *testing.T) {
 		t.Fatalf("unexpected byte source: %#v", instruction.Src)
 	}
 }
+
+func TestDecodeX86AddSubMemoryOperands(t *testing.T) {
+	tests := []struct {
+		name string
+		code []byte
+		op   Op
+		dst  Operand
+		src  Operand
+	}{
+		{
+			name: "add memory destination",
+			code: []byte{0x01, 0x03}, // add dword ptr [ebx], eax
+			op:   OpAddOperands,
+			dst:  Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1}},
+			src:  regOperand(EAX),
+		},
+		{
+			name: "sub memory destination",
+			code: []byte{0x29, 0x03}, // sub dword ptr [ebx], eax
+			op:   OpSubOperands,
+			dst:  Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1}},
+			src:  regOperand(EAX),
+		},
+		{
+			name: "add register destination",
+			code: []byte{0x03, 0x03}, // add eax, dword ptr [ebx]
+			op:   OpAddOperands,
+			dst:  regOperand(EAX),
+			src:  Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Len != uint32(len(test.code)) {
+				t.Fatalf("instruction = %#v, want op %v len %d", instruction, test.op, len(test.code))
+			}
+			if instruction.Dst != test.dst {
+				t.Fatalf("destination = %#v, want %#v", instruction.Dst, test.dst)
+			}
+			if instruction.Src != test.src {
+				t.Fatalf("source = %#v, want %#v", instruction.Src, test.src)
+			}
+		})
+	}
+}
+
+func TestDecodeX86AddSubMemoryImmediate(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		code []byte
+		op   Op
+		imm  int32
+	}{
+		{name: "add", code: []byte{0x83, 0x03, 0x05}, op: OpAddOperandImm, imm: 5},
+		{name: "sub", code: []byte{0x83, 0x2B, 0x05}, op: OpSubOperandImm, imm: 5},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Imm != test.imm || !instruction.Dst.IsMem || instruction.Dst.Width != 4 {
+				t.Fatalf("instruction = %#v, want op %v imm %d memory destination", instruction, test.op, test.imm)
+			}
+		})
+	}
+}

@@ -63,6 +63,8 @@ const (
 	OpSTD
 	OpAddOperandImm
 	OpSubOperandImm
+	OpAddOperands
+	OpSubOperands
 	OpCmpOperandImm
 	OpIncOperand
 	OpDecOperand
@@ -258,6 +260,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return logical, nil
+	}
+	if addSub, handled, err := decodeX86AddSub(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return addSub, nil
 	}
 	if shift, handled, err := decodeX86Shift(disassembled); handled {
 		if err != nil {
@@ -1013,4 +1021,43 @@ func decodeX86Xchg(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{}, true, fmt.Errorf("%w: XCHG memory to memory", ErrUnsupportedAddressing)
 	}
 	return Instruction{Op: OpXchg, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
+}
+
+func decodeX86AddSub(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.DataSize != 32 || len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+		return Instruction{}, false, nil
+	}
+	if inst.Op != x86asm.ADD && inst.Op != x86asm.SUB {
+		return Instruction{}, false, nil
+	}
+	if inst.MemBytes != 0 && inst.MemBytes != 4 {
+		return Instruction{}, true, fmt.Errorf("%w: %v memory width %d", ErrUnsupportedAddressing, inst.Op, inst.MemBytes)
+	}
+
+	dst, ok, err := x86Operand32(inst.Args[0])
+	if err != nil || !ok {
+		return Instruction{}, true, err
+	}
+	if dst.Width != 4 {
+		return Instruction{}, true, fmt.Errorf("%w: %v destination width %d", ErrUnsupportedAddressing, inst.Op, dst.Width)
+	}
+
+	if imm, ok := inst.Args[1].(x86asm.Imm); ok {
+		if inst.Op == x86asm.ADD {
+			return Instruction{Op: OpAddOperandImm, Len: uint32(inst.Len), Dst: dst, Imm: int32(imm)}, true, nil
+		}
+		return Instruction{Op: OpSubOperandImm, Len: uint32(inst.Len), Dst: dst, Imm: int32(imm)}, true, nil
+	}
+
+	src, ok, err := x86Operand32(inst.Args[1])
+	if err != nil || !ok {
+		return Instruction{}, true, err
+	}
+	if src.Width != 4 {
+		return Instruction{}, true, fmt.Errorf("%w: %v source width %d", ErrUnsupportedAddressing, inst.Op, src.Width)
+	}
+	if inst.Op == x86asm.ADD {
+		return Instruction{Op: OpAddOperands, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
+	}
+	return Instruction{Op: OpSubOperands, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
 }
