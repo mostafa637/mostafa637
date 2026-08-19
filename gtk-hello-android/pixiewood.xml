@@ -6,6 +6,10 @@
 
   <style>
     <theme name="gtk" />
+    <icon type="generate">
+      <drawable target="foreground" type="avd" path="src://data/icon.avd.xml" />
+      <color target="background">#2563EB</color>
+    </icon>
   </style>
 
   <dependencies>
@@ -16,7 +20,7 @@
     <gtk />
   </dependencies>
 
-  <build target="gtk-hello-android">
+  <build target="gtk-hello-android" java-sources="src/android-java">
     <architectures>
       <arch>aarch64</arch>
       <arch>x86_64</arch>
