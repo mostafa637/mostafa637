@@ -103,6 +103,9 @@ type Context64 struct {
 	Memory        *corecpu.Memory64
 	FS            *corefs.FS
 	CWD           string
+	WinCols       uint16
+	WinRows       uint16
+	Termios       [44]byte
 	PID           uint64
 	TID           uint64
 	TIDAddress    uint64
@@ -121,7 +124,7 @@ type Dispatcher64 struct {
 }
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
-	return &Context64{Memory: memory, CWD: "/", FDs: corefd.New(), Futexes: NewFutexRegistry64(), signalFDs: make(map[*signalFD64]struct{})}
+	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), signalFDs: make(map[*signalFD64]struct{})}
 }
 
 const maxFD64 = uint64(^uint32(0) >> 1)
@@ -158,6 +161,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64GetPPID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
 	d.Register(Sys64GetTID, gettid64)
 	d.Register(Sys64SetTIDAddr, setTIDAddress64)
+	d.Register(Sys64Fcntl, fcntl64_64)
+	d.Register(Sys64Ioctl, ioctl64)
 	d.Register(Sys64Nanosleep, nanosleep64)
 	d.Register(Sys64Futex, futex64)
 	d.Register(Sys64Rseq, rseq64)
