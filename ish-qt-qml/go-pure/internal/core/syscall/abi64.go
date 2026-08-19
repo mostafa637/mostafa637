@@ -30,6 +30,9 @@ const (
 	Sys64Brk            Number64 = 12
 	Sys64Lseek          Number64 = 8
 	Sys64Ioctl          Number64 = 16
+	Sys64RtSigaction    Number64 = 13
+	Sys64RtSigprocmask  Number64 = 14
+	Sys64RtSigreturn    Number64 = 15
 	Sys64Readv          Number64 = 19
 	Sys64Writev         Number64 = 20
 	Sys64SchedYield     Number64 = 24
@@ -37,6 +40,10 @@ const (
 	Sys64Dup2           Number64 = 33
 	Sys64Nanosleep      Number64 = 35
 	Sys64GetPID         Number64 = 39
+	Sys64GetRlimit      Number64 = 97
+	Sys64GetRUsage      Number64 = 98
+	Sys64GetGroups      Number64 = 115
+	Sys64SetGroups      Number64 = 116
 	Sys64Socket         Number64 = 41
 	Sys64Connect        Number64 = 42
 	Sys64Accept         Number64 = 43
@@ -69,6 +76,7 @@ const (
 	Sys64GetEGID        Number64 = 108
 	Sys64GetPPID        Number64 = 110
 	Sys64GetTID         Number64 = 186
+	Sys64Tkill          Number64 = 200
 	Sys64Futex          Number64 = 202
 	Sys64SetTIDAddr     Number64 = 218
 	Sys64ExitGroup      Number64 = 231
@@ -87,6 +95,8 @@ const (
 	Sys64Signalfd4      Number64 = 289
 	Sys64Eventfd2       Number64 = 290
 	Sys64EpollCreate1   Number64 = 291
+	Sys64Tgkill         Number64 = 234
+	Sys64SetRlimit      Number64 = 160
 	Sys64Accept4        Number64 = 288
 	Sys64InotifyInit1   Number64 = 294
 	Sys64Prlimit64      Number64 = 302
@@ -123,6 +133,7 @@ type Context64 struct {
 	RseqLength     uint64
 	RseqSignature  uint64
 	RLimits        map[uint64]ResourceLimit64
+	Groups         []uint32
 
 	// Execve is provided by the guest session. It replaces the current ELF
 	// image while preserving process identity and the descriptor table.
@@ -184,6 +195,15 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Wait4, wait4_64)
 	d.Register(Sys64SetRobust, setRobustList64)
 	d.Register(Sys64GetRobust, getRobustList64)
+	d.Register(Sys64GetRlimit, getrlimit64)
+	d.Register(Sys64SetRlimit, setrlimit64)
+	d.Register(Sys64GetGroups, getgroups64)
+	d.Register(Sys64SetGroups, setgroups64)
+	d.Register(Sys64RtSigaction, signalStub64)
+	d.Register(Sys64RtSigprocmask, signalStub64)
+	d.Register(Sys64RtSigreturn, signalStub64)
+	d.Register(Sys64Tkill, tkill64)
+	d.Register(Sys64Tgkill, tgkill64)
 	d.Register(Sys64GetUID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
 	d.Register(Sys64GetGID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
 	d.Register(Sys64GetEUID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
