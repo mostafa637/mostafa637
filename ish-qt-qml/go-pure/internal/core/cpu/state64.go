@@ -127,6 +127,7 @@ type MachineState64 struct {
 	LazyWidth uint8
 
 	XMM    [16][16]byte
+	MMX    [8]uint64
 	FP     [8]fpu.Value
 	FSW    uint16
 	FCW    uint16
@@ -242,6 +243,13 @@ const (
 	fpu64StatusC2 uint16 = 1 << 10
 	fpu64StatusC3 uint16 = 1 << 14
 )
+
+// EnterMMX marks the architectural transition made by MMX/SSE bridge
+// instructions. The current state model has no x87 tag word, but it does
+// preserve the architectural TOP reset required by the transition.
+func (s *MachineState64) EnterMMX() {
+	s.SetFPUTop(0)
+}
 
 func (s *MachineState64) FPUTop() uint8 {
 	return uint8((s.FSW >> 11) & 7)

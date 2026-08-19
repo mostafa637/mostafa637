@@ -35,6 +35,7 @@ const (
 	operand64Reg
 	operand64Mem
 	operand64XMM
+	operand64MMX
 	operand64Imm
 	operand64Rel
 )
@@ -54,6 +55,7 @@ type operand64 struct {
 	Kind       operand64Kind
 	Reg        Reg64
 	XMM        uint8
+	MMX        uint8
 	ByteOffset uint8
 	Width      uint8
 	Mem        memoryOperand64
@@ -327,6 +329,12 @@ func reg64FromX86(reg x86asm.Reg) (Reg64, uint8, uint8, bool) {
 func operand64FromArg(arg x86asm.Arg, width uint8) (operand64, error) {
 	switch value := arg.(type) {
 	case x86asm.Reg:
+		if value >= x86asm.M0 && value <= x86asm.M7 {
+			if width != 0 && width != 8 {
+				return operand64{}, fmt.Errorf("MMX width %d", width)
+			}
+			return operand64{Kind: operand64MMX, MMX: uint8(value - x86asm.M0), Width: 8}, nil
+		}
 		if value >= x86asm.X0 && value <= x86asm.X15 {
 			if width != 0 && width != 16 {
 				return operand64{}, fmt.Errorf("XMM width %d", width)
@@ -488,6 +496,26 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("MOV destination: %v", err)
 		}
 		return makeMove64(address, uint8(inst.Len), left, right), false, nil
+	case x86asm.MOVDQ2Q:
+		destination, err := operand64FromArg(arg(0), 8)
+		if err != nil || destination.Kind != operand64MMX {
+			return microOp64{}, false, fmt.Errorf("MOVDQ2Q destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || source.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("MOVDQ2Q source: %v", err)
+		}
+		return makeMOVDQ2Q64(address, uint8(inst.Len), destination, source), false, nil
+	case x86asm.MOVQ2DQ:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("MOVQ2DQ destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 8)
+		if err != nil || source.Kind != operand64MMX {
+			return microOp64{}, false, fmt.Errorf("MOVQ2DQ source: %v", err)
+		}
+		return makeMOVQ2DQ64(address, uint8(inst.Len), destination, source), false, nil
 	case x86asm.MOVD, x86asm.MOVQ:
 		scalarWidth := uint8(4)
 		if inst.Op == x86asm.MOVQ {
@@ -4157,6 +4185,39 @@ func makeUnary64(address uint64, size uint8, op x86asm.Op, dst operand64) microO
 		if err := writeOperand64(state, dst, next, result); err != nil {
 			return Flow64Stop, err
 		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeMOVDQ2Q64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if destination.MMX >= uint8(len(state.MMX)) || source.XMM >= uint8(len(state.XMM)) {
+			return Flow64Stop, ErrUnsupported64
+		}
+		var value uint64
+		for lane := uint8(0); lane < 8; lane++ {
+			value |= uint64(state.XMM[source.XMM][lane]) << (8 * lane)
+		}
+		state.MMX[destination.MMX] = value
+		state.EnterMMX()
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeMOVQ2DQ64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if destination.XMM >= uint8(len(state.XMM)) || source.MMX >= uint8(len(state.MMX)) {
+			return Flow64Stop, ErrUnsupported64
+		}
+		value := state.MMX[source.MMX]
+		var result [16]byte
+		for lane := uint8(0); lane < 8; lane++ {
+			result[lane] = byte(value >> (8 * lane))
+		}
+		state.XMM[destination.XMM] = result
+		state.EnterMMX()
 		state.RIP = next
 		return Flow64Continue, nil
 	}}

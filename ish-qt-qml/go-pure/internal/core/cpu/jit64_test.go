@@ -4883,3 +4883,61 @@ func TestJIT64PBLENDVB(t *testing.T) {
 		t.Fatalf("PBLENDVB XMM0 alias result=%x, want %x", state.XMM[0], want0)
 	}
 }
+
+func TestJIT64MOVDQ2QAndMOVQ2DQ(t *testing.T) {
+	const codeAddress Address64 = 0x67000
+	memory := NewMemory64()
+	code := []byte{
+		0xf2, 0x0f, 0xd6, 0xc1, // movdq2q mm0,xmm1
+		0xf3, 0x0f, 0xd6, 0xd0, // movq2dq xmm2,mm0
+		0xf2, 0x41, 0x0f, 0xd6, 0xc8, // movdq2q mm1,xmm8 (REX.B)
+		0xf3, 0x44, 0x0f, 0xd6, 0xc9, // movq2dq xmm9,mm1 (REX.R)
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	for lane := uint8(0); lane < 8; lane++ {
+		state.XMM[1][lane] = 0x10 + lane
+		state.XMM[1][8+lane] = 0xa0 + lane
+		state.XMM[8][lane] = 0x20 + lane
+		state.XMM[8][8+lane] = 0xb0 + lane
+	}
+	for lane := uint8(8); lane < 16; lane++ {
+		state.XMM[2][lane] = 0xc0 + lane
+		state.XMM[9][lane] = 0xd0 + lane
+	}
+	state.MMX[0] = 0x1111111111111111
+	state.MMX[1] = 0x2222222222222222
+	state.SetFPUTop(5)
+	state.RFLAGS = Flag64IF | Flag64CF | Flag64ZF | Flag64SF
+	flagsBefore := state.RFLAGS
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("MMX bridge changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	if got, want := state.MMX[0], uint64(0x1716151413121110); got != want {
+		t.Fatalf("MMX0=%#x, want %#x", got, want)
+	}
+	if got, want := state.MMX[1], uint64(0x2726252423222120); got != want {
+		t.Fatalf("MMX1=%#x, want %#x", got, want)
+	}
+	var want2 [16]byte
+	var want9 [16]byte
+	for lane := uint8(0); lane < 8; lane++ {
+		want2[lane] = 0x10 + lane
+		want9[lane] = 0x20 + lane
+	}
+	if state.XMM[2] != want2 {
+		t.Fatalf("XMM2=%x, want %x", state.XMM[2], want2)
+	}
+	if state.XMM[9] != want9 {
+		t.Fatalf("XMM9=%x, want %x", state.XMM[9], want9)
+	}
+	if got := state.FPUTop(); got != 0 {
+		t.Fatalf("FPU TOP=%d after MMX transition, want 0", got)
+	}
+}
