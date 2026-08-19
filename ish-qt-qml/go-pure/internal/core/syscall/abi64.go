@@ -67,6 +67,7 @@ const (
 	Sys64GetEUID        Number64 = 107
 	Sys64GetEGID        Number64 = 108
 	Sys64GetPPID        Number64 = 110
+	Sys64GetTID         Number64 = 186
 	Sys64Futex          Number64 = 202
 	Sys64SetTIDAddr     Number64 = 218
 	Sys64ExitGroup      Number64 = 231
@@ -99,14 +100,19 @@ const (
 type Handler64 func(*Context64, [6]uint64) int64
 
 type Context64 struct {
-	Memory    *corecpu.Memory64
-	FS        *corefs.FS
-	CWD       string
-	PID       uint64
-	TID       uint64
-	Brk       uint64
-	FDs       *corefd.Table
-	signalFDs map[*signalFD64]struct{}
+	Memory        *corecpu.Memory64
+	FS            *corefs.FS
+	CWD           string
+	PID           uint64
+	TID           uint64
+	TIDAddress    uint64
+	Brk           uint64
+	Futexes       *FutexRegistry64
+	RseqAddress   uint64
+	RseqLength    uint64
+	RseqSignature uint64
+	FDs           *corefd.Table
+	signalFDs     map[*signalFD64]struct{}
 }
 
 type Dispatcher64 struct {
@@ -115,7 +121,7 @@ type Dispatcher64 struct {
 }
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
-	return &Context64{Memory: memory, CWD: "/", FDs: corefd.New(), signalFDs: make(map[*signalFD64]struct{})}
+	return &Context64{Memory: memory, CWD: "/", FDs: corefd.New(), Futexes: NewFutexRegistry64(), signalFDs: make(map[*signalFD64]struct{})}
 }
 
 const maxFD64 = uint64(^uint32(0) >> 1)
@@ -150,6 +156,11 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64GetEUID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
 	d.Register(Sys64GetEGID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
 	d.Register(Sys64GetPPID, func(ctx *Context64, args [6]uint64) int64 { return 0 })
+	d.Register(Sys64GetTID, gettid64)
+	d.Register(Sys64SetTIDAddr, setTIDAddress64)
+	d.Register(Sys64Nanosleep, nanosleep64)
+	d.Register(Sys64Futex, futex64)
+	d.Register(Sys64Rseq, rseq64)
 	d.Register(Sys64SchedYield, func(ctx *Context64, args [6]uint64) int64 {
 		runtime.Gosched()
 		return 0
