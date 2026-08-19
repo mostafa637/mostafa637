@@ -970,3 +970,53 @@ func TestExecutorCallRegisterAndRetImm(t *testing.T) {
 		t.Fatalf("esp = %#x, want %#x", got, 2*PageSize+8)
 	}
 }
+
+func TestExecutorJccTakenAndNotTaken(t *testing.T) {
+	code := []byte{
+		0x76, 0x05, // jbe +5: target offset 7
+		0xB8, 0x63, 0x00, 0x00, 0x00, // mov eax, 99 (not-taken path)
+		0xF4, // hlt
+	}
+	memory, taken := mappedCode(t, code)
+	taken.SetEFlags(FlagCF)
+	beforeFlags := taken.EFlags
+	if err := NewExecutor(nil).Run(taken, 8); err != nil {
+		t.Fatal(err)
+	}
+	if got := taken.Get(EAX); got != 0 {
+		t.Fatalf("taken JBE eax = %d, want 0", got)
+	}
+	if taken.EFlags != beforeFlags {
+		t.Fatalf("taken JBE changed EFLAGS: before %#x after %#x", beforeFlags, taken.EFlags)
+	}
+
+	_, notTaken := mappedCode(t, code)
+	notTaken.SetEFlags(0)
+	beforeFlags = notTaken.EFlags
+	if err := NewExecutor(nil).Run(notTaken, 8); err != nil {
+		t.Fatal(err)
+	}
+	if got := notTaken.Get(EAX); got != 99 {
+		t.Fatalf("not-taken JBE eax = %d, want 99", got)
+	}
+	if notTaken.EFlags != beforeFlags {
+		t.Fatalf("not-taken JBE changed EFLAGS: before %#x after %#x", beforeFlags, notTaken.EFlags)
+	}
+	_ = memory
+}
+
+func TestExecutorJccSignedCondition(t *testing.T) {
+	code := []byte{
+		0x7F, 0x05, // jg +5: target offset 7
+		0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (not-taken path)
+		0xF4,
+	}
+	_, state := mappedCode(t, code)
+	state.SetEFlags(FlagZF)
+	if err := NewExecutor(nil).Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 1 {
+		t.Fatalf("not-taken JG eax = %d, want 1", got)
+	}
+}

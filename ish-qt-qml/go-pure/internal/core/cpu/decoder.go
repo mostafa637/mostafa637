@@ -56,6 +56,7 @@ const (
 	OpJmpOperand
 	OpJzRel
 	OpJnzRel
+	OpJcc
 	OpInt
 	OpHalt
 	OpPushFlags
@@ -313,6 +314,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return cmov, nil
+	}
+	if jcc, handled, err := decodeX86Jcc(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return jcc, nil
 	}
 	if xchg, handled, err := decodeX86Xchg(disassembled); handled {
 		if err != nil {
@@ -1010,6 +1017,54 @@ func decodeX86CMOVcc(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{}, true, err
 	}
 	return Instruction{Op: OpCMOVcc, Len: uint32(inst.Len), Dst: dst, Src: src, Group: condition}, true, nil
+}
+
+func decodeX86Jcc(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.DataSize != 32 || len(inst.Args) < 1 || inst.Args[0] == nil {
+		return Instruction{}, false, nil
+	}
+	var condition uint8
+	switch inst.Op {
+	case x86asm.JB:
+		condition = 0
+	case x86asm.JAE:
+		condition = 1
+	case x86asm.JE:
+		condition = 2
+	case x86asm.JNE:
+		condition = 3
+	case x86asm.JBE:
+		condition = 4
+	case x86asm.JA:
+		condition = 5
+	case x86asm.JS:
+		condition = 6
+	case x86asm.JNS:
+		condition = 7
+	case x86asm.JP:
+		condition = 8
+	case x86asm.JNP:
+		condition = 9
+	case x86asm.JL:
+		condition = 10
+	case x86asm.JGE:
+		condition = 11
+	case x86asm.JLE:
+		condition = 12
+	case x86asm.JG:
+		condition = 13
+	case x86asm.JO:
+		condition = 14
+	case x86asm.JNO:
+		condition = 15
+	default:
+		return Instruction{}, false, nil
+	}
+	relative, ok := inst.Args[0].(x86asm.Rel)
+	if !ok {
+		return Instruction{}, true, fmt.Errorf("%w: %v operand %T", ErrUnsupportedAddressing, inst.Op, inst.Args[0])
+	}
+	return Instruction{Op: OpJcc, Len: uint32(inst.Len), Rel: int32(relative), Group: condition}, true, nil
 }
 
 func decodeX86Xchg(inst x86asm.Inst) (Instruction, bool, error) {

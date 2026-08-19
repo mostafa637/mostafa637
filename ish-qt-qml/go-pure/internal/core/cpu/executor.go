@@ -476,6 +476,12 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		} else {
 			state.EIP = next
 		}
+	case OpJcc:
+		if conditionValue(state, instruction.Group) {
+			state.EIP = uint32(int64(next) + int64(instruction.Rel))
+		} else {
+			state.EIP = next
+		}
 	case OpInt:
 		state.EIP = next
 		state.TrapNo = uint32(instruction.Vector)

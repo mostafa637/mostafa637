@@ -293,3 +293,51 @@ func TestDecodeX86StackAndControlFlow(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX86JccConditions(t *testing.T) {
+	tests := []struct {
+		name      string
+		opcode    byte
+		condition uint8
+	}{
+		{name: "jo", opcode: 0x70, condition: 14},
+		{name: "jno", opcode: 0x71, condition: 15},
+		{name: "jb", opcode: 0x72, condition: 0},
+		{name: "jae", opcode: 0x73, condition: 1},
+		{name: "je", opcode: 0x74, condition: 2},
+		{name: "jne", opcode: 0x75, condition: 3},
+		{name: "jbe", opcode: 0x76, condition: 4},
+		{name: "ja", opcode: 0x77, condition: 5},
+		{name: "js", opcode: 0x78, condition: 6},
+		{name: "jns", opcode: 0x79, condition: 7},
+		{name: "jp", opcode: 0x7A, condition: 8},
+		{name: "jnp", opcode: 0x7B, condition: 9},
+		{name: "jl", opcode: 0x7C, condition: 10},
+		{name: "jge", opcode: 0x7D, condition: 11},
+		{name: "jle", opcode: 0x7E, condition: 12},
+		{name: "jg", opcode: 0x7F, condition: 13},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, []byte{test.opcode, 0x05})
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != OpJcc || instruction.Len != 2 || instruction.Rel != 5 || instruction.Group != test.condition {
+				t.Fatalf("instruction = %#v, want OpJcc len 2 rel 5 group %d", instruction, test.condition)
+			}
+		})
+	}
+}
+
+func TestDecodeX86JccNear(t *testing.T) {
+	memory, _ := mappedCode(t, []byte{0x0F, 0x8C, 0x05, 0x00, 0x00, 0x00}) // jl near +5
+	instruction, err := Decode(memory, PageSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instruction.Op != OpJcc || instruction.Len != 6 || instruction.Rel != 5 || instruction.Group != 10 {
+		t.Fatalf("instruction = %#v, want near JL group 10 rel 5", instruction)
+	}
+}
