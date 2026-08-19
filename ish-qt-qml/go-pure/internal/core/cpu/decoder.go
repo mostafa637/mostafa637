@@ -65,6 +65,11 @@ const (
 	OpSubOperandImm
 	OpAddOperands
 	OpSubOperands
+	OpMulImplicit
+	OpIMulImplicit
+	OpIMulOperands
+	OpDivImplicit
+	OpIDivImplicit
 	OpCmpOperandImm
 	OpIncOperand
 	OpDecOperand
@@ -266,6 +271,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 			return Instruction{}, err
 		}
 		return addSub, nil
+	}
+	if mulDiv, handled, err := decodeX86MulDiv(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return mulDiv, nil
 	}
 	if shift, handled, err := decodeX86Shift(disassembled); handled {
 		if err != nil {
@@ -1060,4 +1071,78 @@ func decodeX86AddSub(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{Op: OpAddOperands, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
 	}
 	return Instruction{Op: OpSubOperands, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
+}
+
+func decodeX86MulDiv(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.DataSize != 32 || len(inst.Args) < 1 || inst.Args[0] == nil {
+		return Instruction{}, false, nil
+	}
+	switch inst.Op {
+	case x86asm.MUL, x86asm.IMUL, x86asm.DIV, x86asm.IDIV:
+	default:
+		return Instruction{}, false, nil
+	}
+	if inst.MemBytes != 0 && inst.MemBytes != 4 {
+		return Instruction{}, true, fmt.Errorf("%w: %v memory width %d", ErrUnsupportedAddressing, inst.Op, inst.MemBytes)
+	}
+
+	decodeOneOperand := func(arg x86asm.Arg) (Operand, error) {
+		operand, ok, err := x86Operand32(arg)
+		if err != nil {
+			return Operand{}, err
+		}
+		if !ok || operand.Width != 4 {
+			return Operand{}, fmt.Errorf("%w: %v source width", ErrUnsupportedAddressing, inst.Op)
+		}
+		return operand, nil
+	}
+
+	switch inst.Op {
+	case x86asm.MUL:
+		src, err := decodeOneOperand(inst.Args[0])
+		if err != nil {
+			return Instruction{}, true, err
+		}
+		return Instruction{Op: OpMulImplicit, Len: uint32(inst.Len), Src: src}, true, nil
+	case x86asm.DIV:
+		src, err := decodeOneOperand(inst.Args[0])
+		if err != nil {
+			return Instruction{}, true, err
+		}
+		return Instruction{Op: OpDivImplicit, Len: uint32(inst.Len), Src: src}, true, nil
+	case x86asm.IDIV:
+		src, err := decodeOneOperand(inst.Args[0])
+		if err != nil {
+			return Instruction{}, true, err
+		}
+		return Instruction{Op: OpIDivImplicit, Len: uint32(inst.Len), Src: src}, true, nil
+	case x86asm.IMUL:
+		if len(inst.Args) < 2 || inst.Args[1] == nil {
+			src, err := decodeOneOperand(inst.Args[0])
+			if err != nil {
+				return Instruction{}, true, err
+			}
+			return Instruction{Op: OpIMulImplicit, Len: uint32(inst.Len), Src: src}, true, nil
+		}
+		dst, ok, err := x86Operand32(inst.Args[0])
+		if err != nil || !ok || dst.Width != 4 {
+			if err == nil {
+				err = fmt.Errorf("%w: IMUL destination width", ErrUnsupportedAddressing)
+			}
+			return Instruction{}, true, err
+		}
+		src, err := decodeOneOperand(inst.Args[1])
+		if err != nil {
+			return Instruction{}, true, err
+		}
+		if len(inst.Args) < 3 || inst.Args[2] == nil {
+			return Instruction{Op: OpIMulOperands, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
+		}
+		imm, ok := inst.Args[2].(x86asm.Imm)
+		if !ok {
+			return Instruction{}, true, fmt.Errorf("%w: IMUL immediate %T", ErrUnsupportedAddressing, inst.Args[2])
+		}
+		return Instruction{Op: OpIMulOperands, Len: uint32(inst.Len), Dst: dst, Src: src, Imm: int32(imm), Group: 1}, true, nil
+	}
+	return Instruction{}, false, nil
 }

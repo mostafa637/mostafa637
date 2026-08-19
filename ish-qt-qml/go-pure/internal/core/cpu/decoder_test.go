@@ -169,3 +169,46 @@ func TestDecodeX86AddSubMemoryImmediate(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX86MulDiv(t *testing.T) {
+	tests := []struct {
+		name string
+		code []byte
+		op   Op
+		dst  Reg32
+		src  Reg32
+		imm  int32
+		grp  uint8
+	}{
+		{name: "mul implicit", code: []byte{0xF7, 0xE3}, op: OpMulImplicit, src: EBX},
+		{name: "imul implicit", code: []byte{0xF7, 0xEB}, op: OpIMulImplicit, src: EBX},
+		{name: "div implicit", code: []byte{0xF7, 0xF3}, op: OpDivImplicit, src: EBX},
+		{name: "idiv implicit", code: []byte{0xF7, 0xFB}, op: OpIDivImplicit, src: EBX},
+		{name: "imul two operands", code: []byte{0x0F, 0xAF, 0xC3}, op: OpIMulOperands, dst: EAX, src: EBX},
+		{name: "imul imm8", code: []byte{0x6B, 0xC3, 0x05}, op: OpIMulOperands, dst: EAX, src: EBX, imm: 5, grp: 1},
+		{name: "imul imm32", code: []byte{0x69, 0xC3, 0x05, 0x00, 0x00, 0x00}, op: OpIMulOperands, dst: EAX, src: EBX, imm: 5, grp: 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != test.op || instruction.Len != uint32(len(test.code)) {
+				t.Fatalf("instruction = %#v, want op %v len %d", instruction, test.op, len(test.code))
+			}
+			if test.op == OpIMulOperands {
+				if instruction.Dst.IsMem || instruction.Dst.Reg != test.dst || instruction.Src.IsMem || instruction.Src.Reg != test.src || instruction.Dst.Width != 4 || instruction.Src.Width != 4 {
+					t.Fatalf("operands = dst %#v src %#v", instruction.Dst, instruction.Src)
+				}
+				if instruction.Imm != test.imm || instruction.Group != test.grp {
+					t.Fatalf("IMUL metadata = imm %d group %d, want imm %d group %d", instruction.Imm, instruction.Group, test.imm, test.grp)
+				}
+			} else if instruction.Src.IsMem || instruction.Src.Reg != test.src || instruction.Src.Width != 4 {
+				t.Fatalf("source = %#v, want register %v width 4", instruction.Src, test.src)
+			}
+		})
+	}
+}

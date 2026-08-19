@@ -9,6 +9,8 @@ import (
 var (
 	ErrUnhandledInterrupt = errors.New("cpu: unhandled interrupt")
 	ErrStepLimit          = errors.New("cpu: instruction step limit reached")
+	ErrDivisionByZero     = errors.New("cpu: division by zero")
+	ErrDivisionOverflow   = errors.New("cpu: division quotient overflow")
 )
 
 type SyscallHandler func(*MachineState) int32
@@ -119,6 +121,85 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		if err := storeOperand(state, instruction.Dst, result); err != nil {
 			return instruction, err
 		}
+		state.EIP = next
+	case OpMulImplicit:
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		wide := uint64(state.EAXValue()) * uint64(value)
+		state.SetEAX(uint32(wide))
+		state.Set(EDX, uint32(wide>>32))
+		setMultiplicationFlags(state, wide>>32 != 0)
+		state.EIP = next
+	case OpIMulImplicit:
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		wide := int64(int32(state.EAXValue())) * int64(int32(value))
+		low := uint32(wide)
+		state.SetEAX(low)
+		state.Set(EDX, uint32(uint64(wide)>>32))
+		setMultiplicationFlags(state, int64(int32(low)) != wide)
+		state.EIP = next
+	case OpIMulOperands:
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		var wide int64
+		if instruction.Group == 1 {
+			wide = int64(int32(value)) * int64(instruction.Imm)
+		} else {
+			left, err := loadOperand(state, instruction.Dst)
+			if err != nil {
+				return instruction, err
+			}
+			wide = int64(int32(left)) * int64(int32(value))
+		}
+		result := uint32(wide)
+		if err := storeOperand(state, instruction.Dst, result); err != nil {
+			return instruction, err
+		}
+		setMultiplicationFlags(state, int64(int32(result)) != wide)
+		state.EIP = next
+	case OpDivImplicit:
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		if value == 0 {
+			return instruction, ErrDivisionByZero
+		}
+		dividend := (uint64(state.Get(EDX)) << 32) | uint64(state.EAXValue())
+		quotient := dividend / uint64(value)
+		if quotient > uint64(^uint32(0)) {
+			return instruction, ErrDivisionOverflow
+		}
+		state.SetEAX(uint32(quotient))
+		state.Set(EDX, uint32(dividend%uint64(value)))
+		state.EIP = next
+	case OpIDivImplicit:
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		divisor := int64(int32(value))
+		if divisor == 0 {
+			return instruction, ErrDivisionByZero
+		}
+		dividend := (int64(int32(state.Get(EDX))) << 32) | int64(uint64(state.EAXValue()))
+		if dividend == -1<<63 && divisor == -1 {
+			return instruction, ErrDivisionOverflow
+		}
+		quotient := dividend / divisor
+		if quotient < -1<<31 || quotient > 1<<31-1 {
+			return instruction, ErrDivisionOverflow
+		}
+		remainder := dividend % divisor
+		state.SetEAX(uint32(int32(quotient)))
+		state.Set(EDX, uint32(int32(remainder)))
 		state.EIP = next
 	case OpCmpOperandImm:
 		left, err := loadOperand(state, instruction.Dst)
@@ -612,6 +693,12 @@ func (e *Executor) sub(state *MachineState, left, right uint32) uint32 {
 	overflow := ((left ^ right) & (left ^ result) & 0x80000000) != 0
 	state.SetLazyArithmetic(left, right, result, borrow != 0, overflow, true)
 	return result
+}
+
+func setMultiplicationFlags(state *MachineState, overflow bool) {
+	state.CF = boolByte(overflow)
+	state.OF = boolByte(overflow)
+	state.Lazy = 0
 }
 
 func push(state *MachineState, value uint32) error {

@@ -2,6 +2,7 @@ package cpu
 
 import (
 	"encoding/binary"
+	"errors"
 	"testing"
 )
 
@@ -655,5 +656,140 @@ func TestExecutorAddSubMemoryImmediate(t *testing.T) {
 	}
 	if got := binary.LittleEndian.Uint32(raw[:]); got != 45 {
 		t.Fatalf("memory after immediate ADD/SUB = %d, want 45", got)
+	}
+}
+
+func TestExecutorMulImplicit(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xB8, 0x00, 0x00, 0x00, 0x80, // mov eax, 0x80000000
+		0xBB, 0x02, 0x00, 0x00, 0x00, // mov ebx, 2
+		0xF7, 0xE3, // mul ebx
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 4); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 0 {
+		t.Fatalf("EAX after MUL = %#x, want 0", got)
+	}
+	if got := state.Get(EDX); got != 1 {
+		t.Fatalf("EDX after MUL = %#x, want 1", got)
+	}
+	if !state.Flag(FlagCF) || !state.Flag(FlagOF) {
+		t.Fatal("MUL did not set CF and OF for non-zero high half")
+	}
+}
+
+func TestExecutorIMulForms(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xB8, 0xFE, 0xFF, 0xFF, 0xFF, // mov eax, -2
+		0xBB, 0x03, 0x00, 0x00, 0x00, // mov ebx, 3
+		0x0F, 0xAF, 0xC3, // imul eax, ebx
+		0x6B, 0xC3, 0x04, // imul eax, ebx, 4
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := int32(state.Get(EAX)); got != 12 {
+		t.Fatalf("EAX after IMUL forms = %d, want 12", got)
+	}
+	if got := state.Get(EDX); got != 0 {
+		t.Fatalf("EDX changed by two/three operand IMUL = %#x, want 0", got)
+	}
+	if state.Flag(FlagCF) || state.Flag(FlagOF) {
+		t.Fatal("IMUL unexpectedly set CF or OF for representable result")
+	}
+}
+
+func TestExecutorIMulImplicit(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xB8, 0xF6, 0xFF, 0xFF, 0xFF, // mov eax, -10
+		0xBB, 0x03, 0x00, 0x00, 0x00, // mov ebx, 3
+		0xF7, 0xEB, // imul ebx
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 4); err != nil {
+		t.Fatal(err)
+	}
+	if got := int32(state.Get(EAX)); got != -30 {
+		t.Fatalf("EAX after implicit IMUL = %d, want -30", got)
+	}
+	if got := int32(state.Get(EDX)); got != -1 {
+		t.Fatalf("EDX after implicit IMUL = %d, want -1", got)
+	}
+}
+
+func TestExecutorDivImplicit(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xBA, 0x02, 0x00, 0x00, 0x00, // mov edx, 2
+		0xB8, 0x1A, 0x00, 0x00, 0x00, // mov eax, 26
+		0xBB, 0x08, 0x00, 0x00, 0x00, // mov ebx, 8
+		0xF7, 0xF3, // div ebx
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 0x40000000+3 { // (2<<32 + 26) / 8
+		t.Fatalf("EAX after DIV = %#x, want %#x", got, uint32(0x40000000+3))
+	}
+	if got := state.Get(EDX); got != 2 {
+		t.Fatalf("EDX after DIV = %#x, want 2", got)
+	}
+}
+
+func TestExecutorIDivImplicit(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xBA, 0xFF, 0xFF, 0xFF, 0xFF, // mov edx, -1
+		0xB8, 0xF6, 0xFF, 0xFF, 0xFF, // mov eax, -10
+		0xBB, 0x03, 0x00, 0x00, 0x00, // mov ebx, 3
+		0xF7, 0xFB, // idiv ebx
+		0xF4,
+	})
+	if err := NewExecutor(nil).Run(state, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := int32(state.Get(EAX)); got != -3 {
+		t.Fatalf("EAX after IDIV = %d, want -3", got)
+	}
+	if got := int32(state.Get(EDX)); got != -1 {
+		t.Fatalf("EDX after IDIV = %d, want -1", got)
+	}
+}
+
+func TestExecutorDivisionErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		code []byte
+		want error
+	}{
+		{
+			name: "zero divisor",
+			code: []byte{
+				0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+				0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0
+				0xF7, 0xF3, // div ebx
+			},
+			want: ErrDivisionByZero,
+		},
+		{
+			name: "unsigned quotient overflow",
+			code: []byte{
+				0xBA, 0x01, 0x00, 0x00, 0x00, // mov edx, 1
+				0xB8, 0x00, 0x00, 0x00, 0x00, // mov eax, 0
+				0xBB, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1
+				0xF7, 0xF3, // div ebx
+			},
+			want: ErrDivisionOverflow,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, state := mappedCode(t, test.code)
+			if err := NewExecutor(nil).Run(state, 5); !errors.Is(err, test.want) {
+				t.Fatalf("Run error = %v, want %v", err, test.want)
+			}
+		})
 	}
 }
