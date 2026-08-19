@@ -2382,3 +2382,111 @@ func TestJIT64PackedMultiplyAccumulateAndQwordArithmetic(t *testing.T) {
 	}, memoryState)
 	checkWords(memoryState.XMM[0], 1, 1, 0, 0, 0, 0, 0, 0)
 }
+
+func TestJIT64SSSE3HorizontalArithmetic(t *testing.T) {
+	checkRun := func(t *testing.T, memory *Memory64, codeAddress Address64, code []byte, state *MachineState64) {
+		t.Helper()
+		if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+			t.Fatal(err)
+		}
+		if err := memory.Write(codeAddress, code); err != nil {
+			t.Fatal(err)
+		}
+		state.RIP = uint64(codeAddress)
+		trap := NewJIT64(memory).RunToInterrupt(state)
+		if trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+	}
+	putWords := func(vector *[16]byte, values ...int16) {
+		t.Helper()
+		if len(values) != 8 {
+			t.Fatalf("word count=%d, want 8", len(values))
+		}
+		for i, value := range values {
+			binary.LittleEndian.PutUint16(vector[i*2:], uint16(value))
+		}
+	}
+	checkWords := func(vector [16]byte, want ...int16) {
+		t.Helper()
+		if len(want) != 8 {
+			t.Fatalf("want word count=%d, want 8", len(want))
+		}
+		for i, value := range want {
+			if got := int16(binary.LittleEndian.Uint16(vector[i*2:])); got != value {
+				t.Fatalf("word lane %d=%d, want %d; vector=%x", i, got, value, vector)
+			}
+		}
+	}
+	putDwords := func(vector *[16]byte, values ...int32) {
+		t.Helper()
+		if len(values) != 4 {
+			t.Fatalf("dword count=%d, want 4", len(values))
+		}
+		for i, value := range values {
+			binary.LittleEndian.PutUint32(vector[i*4:], uint32(value))
+		}
+	}
+	checkDwords := func(vector [16]byte, want ...int32) {
+		t.Helper()
+		if len(want) != 4 {
+			t.Fatalf("want dword count=%d, want 4", len(want))
+		}
+		for i, value := range want {
+			if got := int32(binary.LittleEndian.Uint32(vector[i*4:])); got != value {
+				t.Fatalf("dword lane %d=%d, want %d; vector=%x", i, got, value, vector)
+			}
+		}
+	}
+
+	state := NewMachineState64(NewMemory64())
+	putWords(&state.XMM[0], 1000, -2000, 30000, 10000, -32768, -1, 100, 200)
+	putWords(&state.XMM[1], 1, 2, -1000, -2000, 32767, -1, -100, -200)
+	putWords(&state.XMM[2], 30000, 10000, -30000, -10000, 1, 2, 3, 4)
+	putWords(&state.XMM[3], 30000, 10000, -2, -3, 32767, 1, -32768, -1)
+	putWords(&state.XMM[4], 10, 3, -10, 20, 1000, -2000, -3000, 4000)
+	putWords(&state.XMM[5], 1, 4, 20, -10, 100, 50, -100, -200)
+	putWords(&state.XMM[6], -32768, 1, 32767, -1, -100, 100, -200, 200)
+	putWords(&state.XMM[7], 32767, -1, -32768, 1, 32767, -1, -32768, 1)
+	putDwords(&state.XMM[8], 100000, -40000, 0x7fffffff, 1)
+	putDwords(&state.XMM[9], 5, 6, -7, -8)
+	putDwords(&state.XMM[10], 100, 50, -100, 100)
+	putDwords(&state.XMM[11], 7, 10, -200, 300)
+	putWords(&state.XMM[12], 16384, -16384, -32768, 1000, 1, -1, 1234, -1234)
+	putWords(&state.XMM[13], 16384, 16384, -32768, 1000, 1, -1, -1234, 1234)
+	checkRun(t, state.Memory, 0x31000, []byte{
+		0x66, 0x0f, 0x38, 0x01, 0xc1, // phaddw xmm0, xmm1
+		0x66, 0x0f, 0x38, 0x03, 0xd3, // phaddsw xmm2, xmm3
+		0x66, 0x0f, 0x38, 0x05, 0xe5, // phsubw xmm4, xmm5
+		0x66, 0x0f, 0x38, 0x07, 0xf7, // phsubsw xmm6, xmm7
+		0x66, 0x45, 0x0f, 0x38, 0x02, 0xc1, // phaddd xmm8, xmm9
+		0x66, 0x45, 0x0f, 0x38, 0x06, 0xd3, // phsubd xmm10, xmm11
+		0x66, 0x0f, 0x38, 0x0b, 0xe5, // pmulhrsw xmm4, xmm5
+		0xf4,
+	}, state)
+	checkWords(state.XMM[0], -1000, -25536, 32767, 300, 3, -3000, 32766, -300)
+	checkWords(state.XMM[2], 32767, -32768, 3, 7, 32767, -5, 32767, -32768)
+	checkWords(state.XMM[4], 0, 0, 2, 2, 0, 0, 0, -1)
+	checkWords(state.XMM[6], -32768, 32767, -200, -400, 32767, -32768, 32767, -32768)
+	checkDwords(state.XMM[8], 60000, -2147483648, 11, -15)
+	checkDwords(state.XMM[10], 50, -200, -3, -500)
+
+	memory := NewMemory64()
+	const dataAddress Address64 = 0x32000
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, 16)
+	putWords((*[16]byte)(data), 1, 2, 3, 4, 5, 6, 7, 8)
+	if err := memory.Write(dataAddress, data); err != nil {
+		t.Fatal(err)
+	}
+	memoryState := NewMachineState64(memory)
+	memoryState.Set(RDI, uint64(dataAddress))
+	putWords(&memoryState.XMM[0], 10, 20, 30, 40, 50, 60, 70, 80)
+	checkRun(t, memory, 0x33000, []byte{
+		0x66, 0x0f, 0x38, 0x01, 0x07, // phaddw xmm0, [rdi]
+		0xf4,
+	}, memoryState)
+	checkWords(memoryState.XMM[0], 30, 70, 110, 150, 3, 7, 11, 15)
+}

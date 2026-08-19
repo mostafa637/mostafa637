@@ -834,7 +834,9 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		}
 		return makeSSEExtract64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
 	case x86asm.PMULUDQ, x86asm.PMULHUW, x86asm.PMULLW, x86asm.PMULHW, x86asm.PSADBW,
-		x86asm.PMADDWD, x86asm.PMADDUBSW,
+		x86asm.PMADDWD, x86asm.PMADDUBSW, x86asm.PMULHRSW,
+		x86asm.PHADDW, x86asm.PHADDSW, x86asm.PHADDD,
+		x86asm.PHSUBW, x86asm.PHSUBSW, x86asm.PHSUBD,
 		x86asm.PACKSSWB, x86asm.PACKSSDW, x86asm.PACKUSWB,
 		x86asm.PADDUSB, x86asm.PADDUSW, x86asm.PSUBUSB, x86asm.PSUBUSW,
 		x86asm.PADDSB, x86asm.PADDSW, x86asm.PSUBSB, x86asm.PSUBSW:
@@ -2367,6 +2369,56 @@ func makeSSESpecialBinary64(address uint64, size uint8, op x86asm.Op, dst, src o
 			for offset := 0; offset < 16; offset += 2 {
 				sum := int64(left[offset])*int64(int8(right[offset])) + int64(left[offset+1])*int64(int8(right[offset+1]))
 				binary.LittleEndian.PutUint16(result[offset:], uint16(int16(clampSigned64(sum, -32768, 32767))))
+			}
+		case x86asm.PMULHRSW:
+			for offset := 0; offset < 16; offset += 2 {
+				leftValue := int64(int16(binary.LittleEndian.Uint16(left[offset:])))
+				rightValue := int64(int16(binary.LittleEndian.Uint16(right[offset:])))
+				product := leftValue * rightValue
+				rounded := (product + 0x4000) >> 15
+				binary.LittleEndian.PutUint16(result[offset:], uint16(int16(clampSigned64(rounded, -32768, 32767))))
+			}
+		case x86asm.PHADDW, x86asm.PHADDSW, x86asm.PHADDD,
+			x86asm.PHSUBW, x86asm.PHSUBSW, x86asm.PHSUBD:
+			subtract := op == x86asm.PHSUBW || op == x86asm.PHSUBSW || op == x86asm.PHSUBD
+			saturate := op == x86asm.PHADDSW || op == x86asm.PHSUBSW
+			if op == x86asm.PHADDD || op == x86asm.PHSUBD {
+				for lane := 0; lane < 4; lane++ {
+					vector := left
+					pair := lane
+					if lane >= 2 {
+						vector = right
+						pair = lane - 2
+					}
+					base := pair * 8
+					first := int64(int32(binary.LittleEndian.Uint32(vector[base:])))
+					second := int64(int32(binary.LittleEndian.Uint32(vector[base+4:])))
+					value := first + second
+					if subtract {
+						value = first - second
+					}
+					binary.LittleEndian.PutUint32(result[lane*4:], uint32(int32(value)))
+				}
+			} else {
+				for lane := 0; lane < 8; lane++ {
+					vector := left
+					pair := lane
+					if lane >= 4 {
+						vector = right
+						pair = lane - 4
+					}
+					base := pair * 4
+					first := int64(int16(binary.LittleEndian.Uint16(vector[base:])))
+					second := int64(int16(binary.LittleEndian.Uint16(vector[base+2:])))
+					value := first + second
+					if subtract {
+						value = first - second
+					}
+					if saturate {
+						value = clampSigned64(value, -32768, 32767)
+					}
+					binary.LittleEndian.PutUint16(result[lane*2:], uint16(int16(value)))
+				}
 			}
 		case x86asm.PSADBW:
 
