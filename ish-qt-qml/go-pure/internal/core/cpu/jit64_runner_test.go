@@ -48,3 +48,28 @@ func TestJIT64PokeAndPageFault(t *testing.T) {
 		t.Fatalf("fault trap=%#x, want page fault", trap)
 	}
 }
+
+func TestJIT64FallbackRDTSCPAndPrefetch(t *testing.T) {
+	memory := NewMemory64()
+	const start Address64 = 0x6000
+	// rdtscp; prefetchnta [rax]; syscall. RAX intentionally points to an
+	// unmapped address: prefetch is a non-faulting hint in the guest model.
+	code := []byte{0x0f, 0x01, 0xf9, 0x0f, 0x18, 0x00, 0x0f, 0x05}
+	mapExecutable64(t, memory, start, code)
+	jit := NewJIT64(memory)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(start)
+	state.Cycle = 0x1122334455667788
+	state.Set(RAX, 0xdeadbeef)
+	state.Set(RCX, 0xabcdef)
+
+	if trap := jit.RunToInterrupt(state); trap != Trap64Syscall {
+		t.Fatalf("trap=%#x, want syscall", trap)
+	}
+	if state.Get(RAX) != 0x55667788 || state.Get(RDX) != 0x11223344 || state.Get(RCX) != 0 {
+		t.Fatalf("rdtscp state rax=%#x rdx=%#x rcx=%#x", state.Get(RAX), state.Get(RDX), state.Get(RCX))
+	}
+	if state.RIP != uint64(start)+8 {
+		t.Fatalf("rip=%#x, want %#x", state.RIP, uint64(start)+8)
+	}
+}

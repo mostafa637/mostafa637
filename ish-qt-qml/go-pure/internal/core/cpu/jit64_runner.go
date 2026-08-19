@@ -212,10 +212,14 @@ func fallbackInstruction64(state *MachineState64, inst x86asm.Inst) (Flow64, err
 		}
 		state.RIP = next
 		return Flow64Continue, nil
-	case x86asm.RDTSC:
+	case x86asm.RDTSC, x86asm.RDTSCP:
 		value := state.Cycle
 		state.Set(RAX, uint64(uint32(value)))
 		state.Set(RDX, uint64(uint32(value>>32)))
+		if inst.Op == x86asm.RDTSCP {
+			// The guest has no host TSC_AUX topology, so expose a stable zero.
+			state.Set(RCX, 0)
+		}
 		state.RIP = next
 		return Flow64Continue, nil
 	case x86asm.CPUID:
@@ -234,6 +238,11 @@ func fallbackInstruction64(state *MachineState64, inst x86asm.Inst) (Flow64, err
 			state.Set(RCX, 0)
 			state.Set(RDX, 0)
 		}
+		state.RIP = next
+		return Flow64Continue, nil
+	case x86asm.PREFETCHNTA, x86asm.PREFETCHT0, x86asm.PREFETCHT1, x86asm.PREFETCHT2, x86asm.PREFETCHW:
+		// Prefetch hints have no architectural result and must not fault on an
+		// unmapped guest address in this software-managed address space.
 		state.RIP = next
 		return Flow64Continue, nil
 	case x86asm.HLT:
