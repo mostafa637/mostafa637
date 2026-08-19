@@ -742,6 +742,17 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			state.RIP = next
 			return Flow64Continue, nil
 		}}, false, nil
+	case x86asm.MOVSB, x86asm.MOVSW, x86asm.MOVSD, x86asm.MOVSQ,
+		x86asm.STOSB, x86asm.STOSW, x86asm.STOSD, x86asm.STOSQ,
+		x86asm.LODSB, x86asm.LODSW, x86asm.LODSD, x86asm.LODSQ,
+		x86asm.CMPSB, x86asm.CMPSW, x86asm.CMPSD, x86asm.CMPSQ,
+		x86asm.SCASB, x86asm.SCASW, x86asm.SCASD, x86asm.SCASQ:
+		stringWidth, ok := stringWidth64(inst.Op)
+		if !ok {
+			return microOp64{}, false, ErrUnsupported64
+		}
+		repeat := stringRepeatMode64(inst.Prefix)
+		return makeString64(address, uint8(inst.Len), inst.Op, stringWidth, uint8(inst.AddrSize), repeat), false, nil
 	default:
 		if condition, ok := decodeSETcc64(inst.Op); ok {
 			destination, err := operand64FromArg(arg(0), 1)
@@ -2303,5 +2314,194 @@ func makeJcc64(address uint64, size uint8, condition conditionCode64, target ope
 			state.RIP = next
 		}
 		return Flow64Branch, nil
+	}}
+}
+
+func stringWidth64(op x86asm.Op) (uint8, bool) {
+	switch op {
+	case x86asm.MOVSB, x86asm.STOSB, x86asm.LODSB, x86asm.CMPSB, x86asm.SCASB:
+		return 1, true
+	case x86asm.MOVSW, x86asm.STOSW, x86asm.LODSW, x86asm.CMPSW, x86asm.SCASW:
+		return 2, true
+	case x86asm.MOVSD, x86asm.STOSD, x86asm.LODSD, x86asm.CMPSD, x86asm.SCASD:
+		return 4, true
+	case x86asm.MOVSQ, x86asm.STOSQ, x86asm.LODSQ, x86asm.CMPSQ, x86asm.SCASQ:
+		return 8, true
+	default:
+		return 0, false
+	}
+}
+
+func stringRepeatMode64(prefixes x86asm.Prefixes) uint8 {
+	for _, prefix := range prefixes {
+		if prefix == 0 {
+			break
+		}
+		switch prefix & 0xff {
+		case x86asm.PrefixREP & 0xff:
+			return 1 // REP/REPE.
+		case x86asm.PrefixREPN & 0xff:
+			return 2 // REPNE.
+		}
+	}
+	return 0
+}
+
+func stringIndex64(state *MachineState64, reg Reg64, addressSize uint8) uint64 {
+	value := state.Get(reg)
+	if addressSize == 32 {
+		return uint64(uint32(value))
+	}
+	return value
+}
+
+func advanceStringIndex64(state *MachineState64, reg Reg64, addressSize, width uint8, decrement bool) {
+	value := stringIndex64(state, reg, addressSize)
+	if decrement {
+		value -= uint64(width)
+	} else {
+		value += uint64(width)
+	}
+	if addressSize == 32 {
+		state.Set(reg, uint64(uint32(value)))
+	} else {
+		state.Set(reg, value)
+	}
+}
+
+func stringCount64(state *MachineState64, addressSize uint8) uint64 {
+	if addressSize == 32 {
+		return uint64(uint32(state.Get(RCX)))
+	}
+	return state.Get(RCX)
+}
+
+func decrementStringCount64(state *MachineState64, addressSize uint8, count uint64) {
+	if addressSize == 32 {
+		state.Set(RCX, uint64(uint32(count-1)))
+	} else {
+		state.Set(RCX, count-1)
+	}
+}
+
+func readString64(state *MachineState64, address uint64, width uint8) (uint64, error) {
+	if width == 0 || width > 8 {
+		return 0, ErrUnsupportedAddressing
+	}
+	var raw [8]byte
+	if err := state.Memory.Read(Address64(address), raw[:width]); err != nil {
+		return 0, err
+	}
+	var value uint64
+	for i := uint8(0); i < width; i++ {
+		value |= uint64(raw[i]) << (8 * i)
+	}
+	return value, nil
+}
+
+func writeString64(state *MachineState64, address uint64, width uint8, value uint64) error {
+	if width == 0 || width > 8 {
+		return ErrUnsupportedAddressing
+	}
+	var raw [8]byte
+	for i := uint8(0); i < width; i++ {
+		raw[i] = byte(value >> (8 * i))
+	}
+	return state.Memory.Write(Address64(address), raw[:width])
+}
+
+func setStringCompareFlags64(state *MachineState64, left, right uint64, width uint8) {
+	mask := mask64Width(width)
+	left &= mask
+	right &= mask
+	result := (left - right) & mask
+	sign := uint64(1) << (uint(width)*8 - 1)
+	overflow := ((left ^ right) & (left ^ result) & sign) != 0
+	state.SetLazyArithmeticWidth(left, right, result, left < right, overflow, true, width)
+}
+
+func makeString64(address uint64, size uint8, op x86asm.Op, width, addressSize, repeat uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if addressSize != 32 {
+			addressSize = 64
+		}
+		count := uint64(1)
+		if repeat != 0 {
+			count = stringCount64(state, addressSize)
+			if count == 0 {
+				state.RIP = next
+				return Flow64Continue, nil
+			}
+		}
+		decrement := state.RFLAGS&Flag64DF != 0
+		compare := op == x86asm.CMPSB || op == x86asm.CMPSW || op == x86asm.CMPSD || op == x86asm.CMPSQ ||
+			op == x86asm.SCASB || op == x86asm.SCASW || op == x86asm.SCASD || op == x86asm.SCASQ
+		for count != 0 {
+			switch op {
+			case x86asm.MOVSB, x86asm.MOVSW, x86asm.MOVSD, x86asm.MOVSQ:
+				value, err := readString64(state, stringIndex64(state, RSI, addressSize), width)
+				if err != nil {
+					return Flow64Stop, err
+				}
+				if err := writeString64(state, stringIndex64(state, RDI, addressSize), width, value); err != nil {
+					return Flow64Stop, err
+				}
+				advanceStringIndex64(state, RSI, addressSize, width, decrement)
+				advanceStringIndex64(state, RDI, addressSize, width, decrement)
+			case x86asm.STOSB, x86asm.STOSW, x86asm.STOSD, x86asm.STOSQ:
+				value := readReg64(state, operand64{Kind: operand64Reg, Reg: RAX, Width: width})
+				if err := writeString64(state, stringIndex64(state, RDI, addressSize), width, value); err != nil {
+					return Flow64Stop, err
+				}
+				advanceStringIndex64(state, RDI, addressSize, width, decrement)
+			case x86asm.LODSB, x86asm.LODSW, x86asm.LODSD, x86asm.LODSQ:
+				value, err := readString64(state, stringIndex64(state, RSI, addressSize), width)
+				if err != nil {
+					return Flow64Stop, err
+				}
+				writeReg64(state, operand64{Kind: operand64Reg, Reg: RAX, Width: width}, value)
+				advanceStringIndex64(state, RSI, addressSize, width, decrement)
+			case x86asm.CMPSB, x86asm.CMPSW, x86asm.CMPSD, x86asm.CMPSQ:
+				left, err := readString64(state, stringIndex64(state, RSI, addressSize), width)
+				if err != nil {
+					return Flow64Stop, err
+				}
+				right, err := readString64(state, stringIndex64(state, RDI, addressSize), width)
+				if err != nil {
+					return Flow64Stop, err
+				}
+				setStringCompareFlags64(state, left, right, width)
+				advanceStringIndex64(state, RSI, addressSize, width, decrement)
+				advanceStringIndex64(state, RDI, addressSize, width, decrement)
+			case x86asm.SCASB, x86asm.SCASW, x86asm.SCASD, x86asm.SCASQ:
+				left := readReg64(state, operand64{Kind: operand64Reg, Reg: RAX, Width: width})
+				right, err := readString64(state, stringIndex64(state, RDI, addressSize), width)
+				if err != nil {
+					return Flow64Stop, err
+				}
+				setStringCompareFlags64(state, left, right, width)
+				advanceStringIndex64(state, RDI, addressSize, width, decrement)
+			default:
+				return Flow64Stop, ErrUnsupported64
+			}
+			if repeat == 0 {
+				break
+			}
+			decrementStringCount64(state, addressSize, count)
+			count--
+			if count == 0 {
+				break
+			}
+			if compare {
+				if repeat == 1 && !state.Flag(Flag64ZF) {
+					break
+				}
+				if repeat == 2 && state.Flag(Flag64ZF) {
+					break
+				}
+			}
+		}
+		state.RIP = next
+		return Flow64Continue, nil
 	}}
 }

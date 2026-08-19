@@ -564,3 +564,132 @@ func TestJIT64PushAndPopFlags(t *testing.T) {
 		t.Fatalf("popfq/setb cl=%d, want 1", got)
 	}
 }
+
+func TestJIT64StringOperations(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x13000
+	const sourceAddress Address64 = 0x20000
+	const copyAddress Address64 = 0x20100
+	const fillAddress Address64 = 0x20200
+	code := []byte{
+		0x48, 0xbe, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rsi, source
+		0x48, 0xbf, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rdi, copy
+		0x48, 0xc7, 0xc1, 0x03, 0x00, 0x00, 0x00, // mov rcx, 3
+		0xf3, 0xa4, // rep movsb
+		0xb0, 0x7f, // mov al, 0x7f
+		0x48, 0xbf, 0x00, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rdi, fill
+		0x48, 0xc7, 0xc1, 0x04, 0x00, 0x00, 0x00, // mov rcx, 4
+		0xf3, 0xaa, // rep stosb
+		0x48, 0xbe, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rsi, source
+		0xac,                                                       // lodsb
+		0x48, 0xbe, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rsi, source
+		0x48, 0xbf, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rdi, copy
+		0x48, 0xc7, 0xc1, 0x03, 0x00, 0x00, 0x00, // mov rcx, 3
+		0xf3, 0xa6, // repe cmpsb
+		0xb0, 0x03, // mov al, 3
+		0x48, 0xbf, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rdi, copy
+		0x48, 0xc7, 0xc1, 0x03, 0x00, 0x00, 0x00, // mov rcx, 3
+		0xf2, 0xae, // repne scasb
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	if err := memory.Map(sourceAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(fillAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(sourceAddress, []byte{1, 2, 3}); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("string trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	var copied [3]byte
+	if err := memory.Read(copyAddress, copied[:]); err != nil {
+		t.Fatal(err)
+	}
+	if copied != [3]byte{1, 2, 3} {
+		t.Fatalf("rep movsb copy=%v, want [1 2 3]", copied)
+	}
+	var filled [4]byte
+	if err := memory.Read(fillAddress, filled[:]); err != nil {
+		t.Fatal(err)
+	}
+	if filled != [4]byte{0x7f, 0x7f, 0x7f, 0x7f} {
+		t.Fatalf("rep stosb fill=%v, want four 0x7f bytes", filled)
+	}
+	if got := state.Get(RAX) & 0xff; got != 3 {
+		t.Fatalf("lodsb/scasb al=%d, want 3", got)
+	}
+	if got := state.Get(RCX); got != 0 {
+		t.Fatalf("repne scasb rcx=%d, want 0", got)
+	}
+	if got := state.Get(RDI); got != uint64(copyAddress+3) {
+		t.Fatalf("repne scasb rdi=%#x, want %#x", got, uint64(copyAddress+3))
+	}
+	if !state.Flag(Flag64ZF) {
+		t.Fatalf("repne scasb did not leave ZF set: rflags=%#x", state.RFLAGS)
+	}
+}
+
+func TestJIT64StringWidthsDirectionAndAddressSize(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x14000
+	const wordSource Address64 = 0x21000
+	const wordDest Address64 = 0x21100
+	const byteSource Address64 = 0x22000
+	const byteDest Address64 = 0x22100
+	code := []byte{
+		0x48, 0xbe, 0x02, 0x10, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rsi, wordSource+2
+		0x48, 0xbf, 0x02, 0x11, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rdi, wordDest+2
+		0x48, 0xc7, 0xc1, 0x02, 0x00, 0x00, 0x00, // mov rcx, 2
+		0xfd,             // std
+		0x66, 0xf3, 0xa5, // rep movsw backwards
+		0xfc,                                                       // cld
+		0x48, 0xbe, 0x00, 0x20, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, // rsi=1<<32|byteSource
+		0x48, 0xbf, 0x00, 0x21, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, // rdi=1<<32|byteDest
+		0x48, 0xb9, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // rcx=1<<32|3
+		0x67, 0xf3, 0xa4, // addr32 rep movsb
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	for _, address := range []Address64{wordSource, wordDest, byteSource, byteDest} {
+		if err := memory.Map(address, Page64Size, PRead|PWrite); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := memory.Write(wordSource, []byte{1, 2, 3, 4}); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(byteSource, []byte{5, 6, 7}); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("string widths trap=%#x halted=%v", trap, state.Halted)
+	}
+	var words [4]byte
+	if err := memory.Read(wordDest, words[:]); err != nil {
+		t.Fatal(err)
+	}
+	if words != [4]byte{1, 2, 3, 4} {
+		t.Fatalf("DF rep movsw=%v, want [1 2 3 4]", words)
+	}
+	var bytes [3]byte
+	if err := memory.Read(byteDest, bytes[:]); err != nil {
+		t.Fatal(err)
+	}
+	if bytes != [3]byte{5, 6, 7} {
+		t.Fatalf("addr32 rep movsb=%v, want [5 6 7]", bytes)
+	}
+	if got := state.Get(RSI); got != uint64(byteSource+3) || state.Get(RDI) != uint64(byteDest+3) || state.Get(RCX) != 0 {
+		t.Fatalf("addr32 final indices rsi=%#x rdi=%#x rcx=%#x", got, state.Get(RDI), state.Get(RCX))
+	}
+	if state.RFLAGS&Flag64DF != 0 {
+		t.Fatal("cld did not clear direction flag")
+	}
+}
