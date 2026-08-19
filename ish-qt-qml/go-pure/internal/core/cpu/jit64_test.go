@@ -693,3 +693,87 @@ func TestJIT64StringWidthsDirectionAndAddressSize(t *testing.T) {
 		t.Fatal("cld did not clear direction flag")
 	}
 }
+
+func TestJIT64MOVBEAndAccumulatorConversions(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x15000
+	const dataAddress Address64 = 0x23000
+	code := []byte{
+		0xb8, 0x44, 0x33, 0x22, 0x11, // mov eax, 0x11223344
+		0x0f, 0x38, 0xf1, 0x07, // movbe [rdi], eax
+		0x0f, 0x38, 0xf0, 0x0f, // movbe ecx, [rdi]
+		0x48, 0xb8, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, // mov rax, 0x0102030405060708
+		0x48, 0x0f, 0x38, 0xf1, 0x47, 0x08, // movbe [rdi+8], rax
+		0x48, 0x0f, 0x38, 0xf0, 0x77, 0x08, // movbe rsi, [rdi+8]
+		0xb8, 0x44, 0x33, 0x22, 0x11, // mov eax, 0x11223344
+		0x48, 0x63, 0xd0, // movsxd rdx, eax
+		0x49, 0x89, 0xd5, // mov r13, rdx
+		0xb0, 0x80, // mov al, 0x80
+		0x66, 0x98, // cbw
+		0x0f, 0xb7, 0xc8, // movzx ecx, ax
+		0xb8, 0x00, 0x80, 0x00, 0x00, // mov eax, 0x8000
+		0x98,             // cwde
+		0x41, 0x89, 0xc0, // mov r8d, eax
+		0xb8, 0x00, 0x00, 0x00, 0x80, // mov eax, 0x80000000
+		0x48, 0x98, // cdqe
+		0x49, 0x89, 0xc1, // mov r9, rax
+		0xb8, 0x00, 0x80, 0x00, 0x00, // mov eax, 0x8000
+		0x66, 0x99, // cwd
+		0x41, 0x89, 0xd2, // mov r10d, edx
+		0xb8, 0x00, 0x00, 0x00, 0x80, // mov eax, 0x80000000
+		0x99,             // cdq
+		0x41, 0x89, 0xd3, // mov r11d, edx
+		0x48, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, // mov rax, -1
+		0x48, 0x99, // cqo
+		0x49, 0x89, 0xd4, // mov r12, rdx
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("conversion trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	var first [4]byte
+	if err := memory.Read(dataAddress, first[:]); err != nil {
+		t.Fatal(err)
+	}
+	if first != [4]byte{0x11, 0x22, 0x33, 0x44} {
+		t.Fatalf("movbe dword bytes=%x, want 11223344", first)
+	}
+	var second [8]byte
+	if err := memory.Read(dataAddress+8, second[:]); err != nil {
+		t.Fatal(err)
+	}
+	if second != [8]byte{1, 2, 3, 4, 5, 6, 7, 8} {
+		t.Fatalf("movbe qword bytes=%x, want 0102030405060708", second)
+	}
+	if state.Get(RCX) != 0xff80 {
+		t.Fatalf("cbw/movzx ecx=%#x, want 0xff80", state.Get(RCX))
+	}
+	if state.Get(R8) != 0xffff8000 {
+		t.Fatalf("cwde r8=%#x, want 0xffff8000", state.Get(R8))
+	}
+	if state.Get(R9) != 0xffffffff80000000 {
+		t.Fatalf("cdqe r9=%#x, want 0xffffffff80000000", state.Get(R9))
+	}
+	if state.Get(R10) != 0x1122ffff {
+		t.Fatalf("cwd r10=%#x, want 0x1122ffff (DX sign extension with preserved upper EDX)", state.Get(R10))
+	}
+	if state.Get(R11) != 0xffffffff {
+		t.Fatalf("cdq r11=%#x, want 0xffffffff", state.Get(R11))
+	}
+	if state.Get(R12) != ^uint64(0) {
+		t.Fatalf("cqo r12=%#x, want %#x", state.Get(R12), ^uint64(0))
+	}
+	if state.Get(R13) != 0x11223344 {
+		t.Fatalf("movsxd r13=%#x, want 0x11223344", state.Get(R13))
+	}
+	if state.Get(RSI) != 0x0102030405060708 {
+		t.Fatalf("movbe qword rsi=%#x, want 0x0102030405060708", state.Get(RSI))
+	}
+}

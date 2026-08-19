@@ -560,6 +560,28 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("extend source: %v", err)
 		}
 		return makeExtend64(address, uint8(inst.Len), inst.Op == x86asm.MOVSX, destination, source), false, nil
+	case x86asm.MOVSXD:
+		destination, err := operand64FromArg(arg(0), 8)
+		if err != nil || destination.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("MOVSXD destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 4)
+		if err != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("MOVSXD source: %v", err)
+		}
+		return makeExtend64(address, uint8(inst.Len), true, destination, source), false, nil
+	case x86asm.MOVBE:
+		left, err := operand64FromArg(arg(0), width)
+		if err != nil {
+			return microOp64{}, false, err
+		}
+		right, err := operand64FromArg(arg(1), width)
+		if err != nil || (left.Kind == operand64Mem && right.Kind == operand64Mem) || (left.Kind != operand64Mem && right.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("MOVBE requires one register and one memory operand: %v", err)
+		}
+		return makeMOVBE64(address, uint8(inst.Len), left, right), false, nil
+	case x86asm.CBW, x86asm.CWDE, x86asm.CDQ, x86asm.CDQE, x86asm.CWD, x86asm.CQO:
+		return makeConvertAccumulator64(address, uint8(inst.Len), inst.Op), false, nil
 	case x86asm.SHL, x86asm.SHR, x86asm.SAR, x86asm.ROL, x86asm.ROR, x86asm.RCL, x86asm.RCR:
 		destination, err := operand64FromArg(arg(0), width)
 		if err != nil || (destination.Kind != operand64Reg && destination.Kind != operand64Mem) {
@@ -2500,6 +2522,72 @@ func makeString64(address uint64, size uint8, op x86asm.Op, width, addressSize, 
 					break
 				}
 			}
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func byteSwap64Width(value uint64, width uint8) uint64 {
+	switch width {
+	case 2:
+		return uint64(bits.ReverseBytes16(uint16(value)))
+	case 4:
+		return uint64(bits.ReverseBytes32(uint32(value)))
+	case 8:
+		return bits.ReverseBytes64(value)
+	default:
+		return value
+	}
+}
+
+func makeMOVBE64(address uint64, size uint8, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readOperand64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		value = byteSwap64Width(value, src.Width)
+		if err := writeOperand64(state, dst, next, value); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeConvertAccumulator64(address uint64, size uint8, op x86asm.Op) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		switch op {
+		case x86asm.CBW:
+			value := signExtend64Width(state.Get(RAX), 1)
+			writeReg64(state, operand64{Kind: operand64Reg, Reg: RAX, Width: 2}, uint64(value))
+		case x86asm.CWDE:
+			value := signExtend64Width(state.Get(RAX), 2)
+			writeReg64(state, operand64{Kind: operand64Reg, Reg: RAX, Width: 4}, uint64(value))
+		case x86asm.CDQ:
+			if state.Get(RAX)&0x80000000 != 0 {
+				writeReg64(state, operand64{Kind: operand64Reg, Reg: RDX, Width: 4}, 0xffffffff)
+			} else {
+				writeReg64(state, operand64{Kind: operand64Reg, Reg: RDX, Width: 4}, 0)
+			}
+		case x86asm.CDQE:
+			value := signExtend64Width(state.Get(RAX), 4)
+			writeReg64(state, operand64{Kind: operand64Reg, Reg: RAX, Width: 8}, uint64(value))
+		case x86asm.CWD:
+			if state.Get(RAX)&0x8000 != 0 {
+				writeReg64(state, operand64{Kind: operand64Reg, Reg: RDX, Width: 2}, 0xffff)
+			} else {
+				writeReg64(state, operand64{Kind: operand64Reg, Reg: RDX, Width: 2}, 0)
+			}
+		case x86asm.CQO:
+			if state.Get(RAX)&(uint64(1)<<63) != 0 {
+				state.Set(RDX, ^uint64(0))
+			} else {
+				state.Set(RDX, 0)
+			}
+		default:
+			return Flow64Stop, ErrUnsupported64
 		}
 		state.RIP = next
 		return Flow64Continue, nil
