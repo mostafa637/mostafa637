@@ -553,6 +553,7 @@ func TestDecodeX86BitOperations(t *testing.T) {
 		imm   int32
 	}{
 		{name: "bswap", code: []byte{0x0F, 0xC8}, op: OpBswap, dst: regOperand(EAX)},
+		{name: "bound", code: []byte{0x62, 0x44, 0x8B, 0x04}, op: OpBound, dst: regOperand(EAX), src: Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, Index: ECX, Scale: 4, Disp: 4, HasBase: true, HasIndex: true}}},
 		{name: "bt register", code: []byte{0x0F, 0xA3, 0xCB}, op: OpBitTest, dst: regOperand(EBX), src: regOperand(ECX)},
 		{name: "bts memory", code: []byte{0x0F, 0xAB, 0x4B, 0x04}, op: OpBitTest, group: 1, dst: Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1, Disp: 4}}, src: regOperand(ECX)},
 		{name: "btr memory", code: []byte{0x0F, 0xB3, 0x53, 0x08}, op: OpBitTest, group: 2, dst: Operand{IsMem: true, Width: 4, Memory: MemoryOperand{Base: EBX, HasBase: true, Scale: 1, Disp: 8}}, src: regOperand(EDX)},

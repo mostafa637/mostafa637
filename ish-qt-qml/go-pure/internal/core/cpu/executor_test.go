@@ -1591,6 +1591,63 @@ func TestExecutorMovByteImmediate(t *testing.T) {
 	}
 }
 
+func TestExecutorBound(t *testing.T) {
+	const boundsAddress = Address(0x2000)
+	writeBounds := func(t *testing.T, memory *Memory, lower, upper int32) {
+		t.Helper()
+		var raw [8]byte
+		binary.LittleEndian.PutUint32(raw[:4], uint32(lower))
+		binary.LittleEndian.PutUint32(raw[4:], uint32(upper))
+		if err := memory.Write(boundsAddress, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("signed index inside range", func(t *testing.T) {
+		memory, state := mappedCode(t, []byte{
+			0x62, 0x03, // bound eax, [ebx]
+			0xF4,
+		})
+		state.Set(EBX, uint32(boundsAddress))
+		negativeIndex := int32(-2)
+		state.Set(EAX, uint32(negativeIndex))
+		writeBounds(t, memory, -5, -1)
+		state.EFlags |= FlagCF | FlagZF
+		state.ExpandFlags()
+		if _, err := NewExecutor(nil).Step(state); err != nil {
+			t.Fatal(err)
+		}
+		if state.EIP != PageSize+2 {
+			t.Fatalf("EIP after BOUND=%#x, want %#x", state.EIP, PageSize+2)
+		}
+		if !state.Flag(FlagCF) || !state.Flag(FlagZF) {
+			t.Fatalf("BOUND changed flags: cf=%v zf=%v", state.Flag(FlagCF), state.Flag(FlagZF))
+		}
+	})
+
+	t.Run("out of range traps before advancing", func(t *testing.T) {
+		memory, state := mappedCode(t, []byte{
+			0x62, 0x03, // bound eax, [ebx]
+			0xF4,
+		})
+		state.Set(EBX, uint32(boundsAddress))
+		state.Set(EAX, 8)
+		writeBounds(t, memory, -5, 7)
+		state.EFlags |= FlagCF | FlagZF
+		state.ExpandFlags()
+		beforeEIP := state.EIP
+		if _, err := NewExecutor(nil).Step(state); !errors.Is(err, ErrBoundRange) {
+			t.Fatalf("BOUND error=%v, want %v", err, ErrBoundRange)
+		}
+		if state.EIP != beforeEIP {
+			t.Fatalf("EIP after BOUND trap=%#x, want %#x", state.EIP, beforeEIP)
+		}
+		if !state.Flag(FlagCF) || !state.Flag(FlagZF) {
+			t.Fatalf("BOUND trap changed flags: cf=%v zf=%v", state.Flag(FlagCF), state.Flag(FlagZF))
+		}
+	})
+}
+
 func TestExecutorEnter(t *testing.T) {
 	t.Run("simple frame and leave compatibility", func(t *testing.T) {
 		memory, state := mappedCode(t, []byte{

@@ -12,6 +12,7 @@ var (
 	ErrStepLimit          = errors.New("cpu: instruction step limit reached")
 	ErrDivisionByZero     = errors.New("cpu: division by zero")
 	ErrDivisionOverflow   = errors.New("cpu: division quotient overflow")
+	ErrBoundRange         = errors.New("cpu: BOUND range check failed")
 )
 
 type SyscallHandler func(*MachineState) int32
@@ -507,6 +508,22 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 	case OpBswap:
 		value := state.Get(instruction.Dst.Reg)
 		state.Set(instruction.Dst.Reg, bits.ReverseBytes32(value))
+		state.EIP = next
+	case OpBound:
+		address, err := effectiveAddress(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		var raw [8]byte
+		if err := state.Memory.Read(address, raw[:]); err != nil {
+			return instruction, err
+		}
+		lower := int32(binary.LittleEndian.Uint32(raw[:4]))
+		upper := int32(binary.LittleEndian.Uint32(raw[4:]))
+		index := int32(state.Get(instruction.Dst.Reg))
+		if index < lower || index > upper {
+			return instruction, fmt.Errorf("%w: index %d outside [%d,%d]", ErrBoundRange, index, lower, upper)
+		}
 		state.EIP = next
 	case OpBitTest:
 		bitIndex, target, err := bitTestTarget(state, instruction)

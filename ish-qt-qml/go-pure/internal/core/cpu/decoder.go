@@ -103,6 +103,7 @@ const (
 	OpLahf
 	OpSahf
 	OpBswap
+	OpBound
 	OpBitTest
 	OpBitScan
 	OpPopcnt
@@ -1198,15 +1199,38 @@ func decodeX86Atomic(inst x86asm.Inst) (Instruction, bool, error) {
 
 func decodeX86BitOps(inst x86asm.Inst) (Instruction, bool, error) {
 	switch inst.Op {
-	case x86asm.BSWAP, x86asm.BT, x86asm.BTS, x86asm.BTR, x86asm.BTC, x86asm.BSF, x86asm.BSR, x86asm.POPCNT:
+	case x86asm.BSWAP, x86asm.BOUND, x86asm.BT, x86asm.BTS, x86asm.BTR, x86asm.BTC, x86asm.BSF, x86asm.BSR, x86asm.POPCNT:
 	default:
 		return Instruction{}, false, nil
 	}
 	if inst.DataSize != 32 {
 		return Instruction{}, true, fmt.Errorf("%w: %v data size %d", ErrUnsupportedAddressing, inst.Op, inst.DataSize)
 	}
+	if inst.Op == x86asm.BOUND && (inst.AddrSize != 32 || inst.MemBytes != 8) {
+		return Instruction{}, true, fmt.Errorf("%w: BOUND data/address/memory size %d/%d/%d", ErrUnsupportedAddressing, inst.DataSize, inst.AddrSize, inst.MemBytes)
+	}
 
 	switch inst.Op {
+	case x86asm.BOUND:
+		if len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+			return Instruction{}, true, fmt.Errorf("%w: BOUND operands", ErrUnsupportedAddressing)
+		}
+		dst, ok, err := x86Operand32(inst.Args[0])
+		if err != nil || !ok || dst.IsMem || dst.Width != 4 {
+			if err == nil {
+				err = fmt.Errorf("%w: BOUND destination", ErrUnsupportedAddressing)
+			}
+			return Instruction{}, true, err
+		}
+		src, ok, err := x86Operand32(inst.Args[1])
+		if err != nil || !ok || !src.IsMem || src.Width != 4 {
+			if err == nil {
+				err = fmt.Errorf("%w: BOUND bounds operand", ErrUnsupportedAddressing)
+			}
+			return Instruction{}, true, err
+		}
+		return Instruction{Op: OpBound, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
+
 	case x86asm.BSWAP:
 		if len(inst.Args) < 1 || inst.Args[0] == nil {
 			return Instruction{}, true, fmt.Errorf("%w: BSWAP operands", ErrUnsupportedAddressing)
