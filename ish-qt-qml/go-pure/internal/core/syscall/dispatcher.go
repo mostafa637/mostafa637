@@ -128,6 +128,7 @@ type Context struct {
 	RLimits        map[uint32]ResourceLimit
 	Groups         []uint32
 	StartTime      time.Time
+	Mappings       []GuestMapping
 
 	StartBrk uint32
 	Brk      uint32
@@ -402,6 +403,7 @@ func doMmap(context *Context, addr, length, prot, flags, fd, offset uint32) int3
 	}
 	anonymous := flags&MapAnonymous != 0
 	var backing *corefd.File
+	var fileSize int64
 	if !anonymous {
 		if fd == ^uint32(0) || offset&(corecpu.PageSize-1) != 0 {
 			return EBADF
@@ -445,6 +447,7 @@ func doMmap(context *Context, addr, length, prot, flags, fd, offset uint32) int3
 			_ = context.Memory.UnmapAlways(page, pages)
 			return errnoForOpen(err)
 		}
+		fileSize = info.Size
 		available := uint64(0)
 		if info.Size > int64(offset) {
 			available = uint64(info.Size - int64(offset))
@@ -475,16 +478,28 @@ func doMmap(context *Context, addr, length, prot, flags, fd, offset uint32) int3
 		_ = context.Memory.UnmapAlways(page, pages)
 		return ENOMEM
 	}
+	if backing != nil {
+		context.addMapping(GuestMapping{
+			Base: base, Length: uint32(pages) * corecpu.PageSize, Pages: pages,
+			Path: backing.Path, Offset: uint64(offset), FileSize: fileSize,
+			Prot: prot, Shared: flags&MapShared != 0,
+		})
+	}
 	return int32(base)
 }
 
 func munmap(context *Context, _ *corecpu.MachineState, args [6]uint32) int32 {
-	if context.Memory == nil || args[0]&(corecpu.PageSize-1) != 0 || args[1] == 0 {
+	if context == nil || context.Memory == nil || args[0]&(corecpu.PageSize-1) != 0 || args[1] == 0 {
 		return EINVAL
 	}
-	if err := context.Memory.UnmapAlways(corecpu.Page(args[0]>>corecpu.PageBits), pagesFor(args[1])); err != nil {
+	if result := context.flushMappings(args[0], args[1]); result != 0 {
+		return result
+	}
+	pages := pagesFor(args[1])
+	if err := context.Memory.UnmapAlways(corecpu.Page(args[0]>>corecpu.PageBits), pages); err != nil {
 		return EINVAL
 	}
+	context.removeMappings(args[0], uint32(pages)*corecpu.PageSize)
 	return 0
 }
 

@@ -362,6 +362,7 @@ func (p *Process) execve(filename string, argv, env []string) int32 {
 	p.Memory = candidate
 	p.CPU.Memory = candidate
 	p.Context.Memory = candidate
+	p.Context.Mappings = nil
 	if _, err := p.loadELF(bytes.NewReader(data), int64(len(data)), filename, 0, stack); err != nil {
 		*p.CPU = oldCPU
 		*p.Context = oldContext

@@ -604,6 +604,55 @@ func TestLibcSupportSyscalls(t *testing.T) {
 	}
 }
 
+func TestSharedFileBackedMmapWritesBackOnMunmap(t *testing.T) {
+	db, err := storage.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	fake, err := corefs.New(filepath.Join(t.TempDir(), "root"), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fake.Close()
+	if err := fake.WriteFile("/shared", []byte("before"), 0o644, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	memory := cpu.NewMemory()
+	if err := memory.Map(1, 5, cpu.PRead|cpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	context := NewContext(memory)
+	context.FS = fake
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+	if err := memory.Write(cpu.PageSize, append([]byte("/shared"), 0)); err != nil {
+		t.Fatal(err)
+	}
+	fd := dispatcher.Dispatch(state, SysOpen, cpu.PageSize, 0, 0)
+	if fd < 0 {
+		t.Fatalf("open = %d", fd)
+	}
+	base := uint32(0x30000)
+	flags := MapShared | MapFixed
+	if got := dispatcher.Dispatch(state, SysMmap2, base, cpu.PageSize, ProtRead|ProtWrite, flags, uint32(fd), 0); uint32(got) != base {
+		t.Fatalf("shared mmap2 = %#x", uint32(got))
+	}
+	if err := memory.Write(cpu.Address(base), []byte("after!")); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatcher.Dispatch(state, SysMunmap, base, cpu.PageSize); got != 0 {
+		t.Fatalf("munmap = %d", got)
+	}
+	data, err := fake.ReadFile("/shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "after!" {
+		t.Fatalf("shared backing = %q, want after!", data)
+	}
+}
+
 func TestFakeFSStatfsAndFileBackedMmap(t *testing.T) {
 	db, err := storage.Open(t.Context(), ":memory:")
 	if err != nil {
