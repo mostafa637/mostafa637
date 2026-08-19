@@ -130,6 +130,51 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		result := left & right
 		state.SetLazyArithmetic(left, right, result, false, false, false)
 		state.EIP = next
+	case OpTestOperands:
+		left, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		right, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		state.SetLazyArithmetic(left, right, left&right, false, false, false)
+		state.EIP = next
+	case OpTestImm:
+		left, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		right := uint32(instruction.Imm)
+		state.SetLazyArithmetic(left, right, left&right, false, false, false)
+		state.EIP = next
+	case OpLogical:
+		left, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		right, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		result := logicalValue(left, right, instruction.Group)
+		if err := storeOperand(state, instruction.Dst, result); err != nil {
+			return instruction, err
+		}
+		state.SetLazyArithmetic(left, right, result, false, false, false)
+		state.EIP = next
+	case OpLogicalImm:
+		left, err := loadOperand(state, instruction.Dst)
+		if err != nil {
+			return instruction, err
+		}
+		result := logicalValue(left, uint32(instruction.Imm), instruction.Group)
+		if err := storeOperand(state, instruction.Dst, result); err != nil {
+			return instruction, err
+		}
+		state.SetLazyArithmetic(left, uint32(instruction.Imm), result, false, false, false)
+		state.EIP = next
 	case OpIncReg:
 		carry := state.Flag(FlagCF)
 		reg := state.Get(instruction.Reg)
@@ -487,4 +532,17 @@ func uint32Bytes(value uint32) []byte {
 	var raw [4]byte
 	binary.LittleEndian.PutUint32(raw[:], value)
 	return raw[:]
+}
+
+func logicalValue(left, right uint32, group uint8) uint32 {
+	switch group {
+	case 0: // OR
+		return left | right
+	case 1: // AND
+		return left & right
+	case 2: // XOR
+		return left ^ right
+	default:
+		return 0
+	}
 }

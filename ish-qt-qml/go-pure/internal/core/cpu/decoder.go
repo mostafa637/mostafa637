@@ -33,6 +33,10 @@ const (
 	OpCmpRegImm
 	OpCmpEAXImm
 	OpTestRegReg
+	OpLogical
+	OpLogicalImm
+	OpTestOperands
+	OpTestImm
 	OpIncReg
 	OpDecReg
 	OpPushReg
@@ -242,6 +246,12 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 	disassembled, err := Disassemble32(memory, eip)
 	if err != nil {
 		return Instruction{}, err
+	}
+	if logical, handled, err := decodeX86Logical(disassembled); handled {
+		if err != nil {
+			return Instruction{}, err
+		}
+		return logical, nil
 	}
 	reader := newCodeReader(memory, eip)
 	opcode, err := reader.byte()
@@ -626,4 +636,109 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 		return Instruction{}, fmt.Errorf("cpu: decoder length mismatch at %#x: IR=%d x86asm=%d", eip, instruction.Len, disassembled.Len)
 	}
 	return instruction, nil
+}
+
+func decodeX86Logical(inst x86asm.Inst) (Instruction, bool, error) {
+	if inst.DataSize != 32 || len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+		return Instruction{}, false, nil
+	}
+	var group uint8
+	switch inst.Op {
+	case x86asm.OR:
+		group = 0
+	case x86asm.AND:
+		group = 1
+	case x86asm.XOR:
+		group = 2
+	case x86asm.TEST:
+		group = 3
+	default:
+		return Instruction{}, false, nil
+	}
+	dst, ok, err := x86Operand32(inst.Args[0])
+	if err != nil || !ok {
+		return Instruction{}, true, err
+	}
+	if imm, ok := inst.Args[1].(x86asm.Imm); ok {
+		if inst.Op == x86asm.TEST {
+			return Instruction{Op: OpTestImm, Len: uint32(inst.Len), Dst: dst, Imm: int32(imm)}, true, nil
+		}
+		return Instruction{Op: OpLogicalImm, Len: uint32(inst.Len), Dst: dst, Group: group, Imm: int32(imm)}, true, nil
+	}
+	src, ok, err := x86Operand32(inst.Args[1])
+	if err != nil || !ok {
+		return Instruction{}, true, err
+	}
+	if inst.Op == x86asm.TEST {
+		if !dst.IsMem && !src.IsMem {
+			return Instruction{Op: OpTestRegReg, Len: uint32(inst.Len), Reg: dst.Reg, Reg2: src.Reg}, true, nil
+		}
+		return Instruction{Op: OpTestOperands, Len: uint32(inst.Len), Dst: dst, Src: src}, true, nil
+	}
+	return Instruction{Op: OpLogical, Len: uint32(inst.Len), Dst: dst, Src: src, Group: group}, true, nil
+}
+
+func x86Operand32(arg x86asm.Arg) (Operand, bool, error) {
+	switch value := arg.(type) {
+	case x86asm.Reg:
+		reg, ok := x86Reg32(value)
+		if !ok {
+			return Operand{}, false, fmt.Errorf("%w: register %v", ErrUnsupportedAddressing, value)
+		}
+		return regOperand(reg), true, nil
+	case x86asm.Mem:
+		if value.Disp < -1<<31 || value.Disp > 1<<31-1 || value.Scale > 8 {
+			return Operand{}, false, fmt.Errorf("%w: memory %v", ErrUnsupportedAddressing, value)
+		}
+		memory := MemoryOperand{Disp: int32(value.Disp), Scale: value.Scale}
+		if memory.Scale == 0 {
+			memory.Scale = 1
+		}
+		if value.Base != 0 {
+			base, ok := x86Reg32(value.Base)
+			if !ok {
+				return Operand{}, false, fmt.Errorf("%w: base %v", ErrUnsupportedAddressing, value.Base)
+			}
+			memory.Base, memory.HasBase = base, true
+		}
+		if value.Index != 0 {
+			index, ok := x86Reg32(value.Index)
+			if !ok {
+				return Operand{}, false, fmt.Errorf("%w: index %v", ErrUnsupportedAddressing, value.Index)
+			}
+			memory.Index, memory.HasIndex = index, true
+		}
+		switch value.Segment {
+		case x86asm.FS:
+			memory.Segment = SegmentFS
+		case x86asm.GS:
+			memory.Segment = SegmentGS
+		}
+		return Operand{Memory: memory, IsMem: true, Width: 4}, true, nil
+	default:
+		return Operand{}, false, nil
+	}
+}
+
+func x86Reg32(reg x86asm.Reg) (Reg32, bool) {
+	switch reg {
+	case x86asm.EAX:
+		return EAX, true
+	case x86asm.ECX:
+		return ECX, true
+	case x86asm.EDX:
+		return EDX, true
+	case x86asm.EBX:
+		return EBX, true
+	case x86asm.ESP:
+		return ESP, true
+	case x86asm.EBP:
+		return EBP, true
+	case x86asm.ESI:
+		return ESI, true
+	case x86asm.EDI:
+		return EDI, true
+	default:
+		return RegNone, false
+	}
 }

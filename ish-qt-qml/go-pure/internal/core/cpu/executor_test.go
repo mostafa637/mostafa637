@@ -284,3 +284,70 @@ func TestDisassemble32GSInstruction(t *testing.T) {
 		t.Fatalf("x86asm length = %d, want 3", instruction.Len)
 	}
 }
+
+func TestExecutorLogicalInstructionsDecodedByX86ASM(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xB8, 0xF0, 0x00, 0x00, 0x00, // mov eax, 0xf0
+		0x25, 0x0F, 0x00, 0x00, 0x00, // and eax, 0x0f => 0
+		0x0D, 0x03, 0x00, 0x00, 0x00, // or eax, 3 => 3
+		0xA9, 0x01, 0x00, 0x00, 0x00, // test eax, 1 => ZF=0
+		0xF4,
+	})
+	andInst, err := Decode(memory, PageSize+5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if andInst.Op != OpLogicalImm || andInst.Group != 1 {
+		t.Fatalf("AND decode = %+v", andInst)
+	}
+	orInst, err := Decode(memory, PageSize+10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if orInst.Op != OpLogicalImm || orInst.Group != 0 {
+		t.Fatalf("OR decode = %+v", orInst)
+	}
+	testInst, err := Decode(memory, PageSize+15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testInst.Op != OpTestImm {
+		t.Fatalf("TEST decode = %+v", testInst)
+	}
+	executor := NewExecutor(nil)
+	if err := executor.Run(state, 16); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Get(EAX); got != 3 {
+		t.Fatalf("eax = %#x, want 3", got)
+	}
+	if state.Flag(FlagZF) {
+		t.Fatal("TEST incorrectly set ZF")
+	}
+}
+
+func TestExecutorLogicalMemoryOperandDecodedByX86ASM(t *testing.T) {
+	memory, state := mappedCode(t, []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+		0xC7, 0x03, 0xF0, 0x00, 0x00, 0x00, // mov dword [ebx], 0xf0
+		0x81, 0x23, 0x0F, 0x00, 0x00, 0x00, // and dword [ebx], 0x0f
+		0xF4,
+	})
+	inst, err := Decode(memory, PageSize+11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Op != OpLogicalImm || !inst.Dst.IsMem || inst.Group != 1 {
+		t.Fatalf("memory AND decode = %+v", inst)
+	}
+	if err := NewExecutor(nil).Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	var raw [4]byte
+	if err := memory.Read(0x2000, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 0 {
+		t.Fatalf("memory = %#x, want 0", got)
+	}
+}
