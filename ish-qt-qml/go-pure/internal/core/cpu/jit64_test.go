@@ -3019,3 +3019,68 @@ func TestJIT64SIMDNonTemporalAndMaskedStores(t *testing.T) {
 		}
 	}
 }
+
+func TestJIT64PCMPEQQ(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x45000
+		dataAddress Address64 = 0x46000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	var data [16]byte
+	binary.LittleEndian.PutUint64(data[0:], 0x1122334455667788)
+	binary.LittleEndian.PutUint64(data[8:], 0xdeadbeefcafebabe)
+	if err := memory.Write(dataAddress, data[:]); err != nil {
+		t.Fatal(err)
+	}
+	code := []byte{
+		0x66, 0x0f, 0x38, 0x29, 0xc1, // pcmpeqq xmm0, xmm1
+		0x66, 0x44, 0x0f, 0x38, 0x29, 0xca, // pcmpeqq xmm9, xmm2
+		0x66, 0x0f, 0x38, 0x29, 0x1f, // pcmpeqq xmm3, [rdi]
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	binary.LittleEndian.PutUint64(state.XMM[0][0:], 0x1122334455667788)
+	binary.LittleEndian.PutUint64(state.XMM[0][8:], 0x0102030405060708)
+	binary.LittleEndian.PutUint64(state.XMM[1][0:], 0x1122334455667788)
+	binary.LittleEndian.PutUint64(state.XMM[1][8:], 0x1112131415161718)
+	binary.LittleEndian.PutUint64(state.XMM[9][0:], 0xaabbccddeeff0011)
+	binary.LittleEndian.PutUint64(state.XMM[9][8:], 0x8899aabbccddeeff)
+	binary.LittleEndian.PutUint64(state.XMM[2][0:], 0xaabbccddeeff0011)
+	binary.LittleEndian.PutUint64(state.XMM[2][8:], 0x8899aabbccddeeee)
+	binary.LittleEndian.PutUint64(state.XMM[3][0:], 0x1122334455667788)
+	binary.LittleEndian.PutUint64(state.XMM[3][8:], 2)
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	allOnes := uint64(0xffffffffffffffff)
+	if got := binary.LittleEndian.Uint64(state.XMM[0][0:]); got != allOnes {
+		t.Fatalf("xmm0 lane0=%#x, want all ones", got)
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[0][8:]); got != 0 {
+		t.Fatalf("xmm0 lane1=%#x, want zero", got)
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[9][0:]); got != allOnes {
+		t.Fatalf("xmm9 lane0=%#x, want all ones", got)
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[9][8:]); got != 0 {
+		t.Fatalf("xmm9 lane1=%#x, want zero", got)
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[3][0:]); got != allOnes {
+		t.Fatalf("xmm3 memory lane0=%#x, want all ones", got)
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[3][8:]); got != 0 {
+		t.Fatalf("xmm3 memory lane1=%#x, want zero", got)
+	}
+}
