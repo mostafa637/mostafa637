@@ -95,6 +95,35 @@ func TestDispatcher64TimerFD(t *testing.T) {
 	if time.Since(start) < time.Millisecond {
 		t.Fatal("timerfd read returned before timer expiration")
 	}
+
+	absolute := time.Since(context64.StartTime) + 2*time.Millisecond
+	var absoluteSpec [32]byte
+	binary.LittleEndian.PutUint64(absoluteSpec[16:24], uint64(absolute/time.Second))
+	binary.LittleEndian.PutUint64(absoluteSpec[24:32], uint64(absolute%time.Second))
+	if err := context64.Memory.Write(area+0x200, absoluteSpec[:]); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(corecpu.RAX, uint64(Sys64TimerfdSettime))
+	state.Set(corecpu.RDI, fd)
+	state.Set(corecpu.RSI, timerfdTimerAbs64)
+	state.Set(corecpu.RDX, uint64(area+0x200))
+	state.Set(corecpu.R10, 0)
+	resume, err = dispatcher.Dispatch(state)
+	if err != nil || !resume || int64(state.Get(corecpu.RAX)) != 0 {
+		t.Fatalf("timerfd_settime absolute: resume=%v err=%v rax=%d", resume, err, int64(state.Get(corecpu.RAX)))
+	}
+	start = time.Now()
+	state.Set(corecpu.RAX, uint64(Sys64Read))
+	state.Set(corecpu.RDI, fd)
+	state.Set(corecpu.RSI, uint64(area+0x300))
+	state.Set(corecpu.RDX, 8)
+	resume, err = dispatcher.Dispatch(state)
+	if err != nil || !resume || int64(state.Get(corecpu.RAX)) != 8 {
+		t.Fatalf("timerfd absolute read: resume=%v err=%v rax=%d", resume, err, int64(state.Get(corecpu.RAX)))
+	}
+	if time.Since(start) < time.Millisecond {
+		t.Fatal("absolute timerfd read returned before timer expiration")
+	}
 }
 
 func TestDispatcher64EpollAndInotify(t *testing.T) {

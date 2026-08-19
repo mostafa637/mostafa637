@@ -27,6 +27,7 @@ const (
 	epollCtlDel64            = 2
 	epollCtlMod64            = 3
 	clockMonotonic64         = 1
+	timerfdTimerAbs64        = 1
 	inotifyNonblock64        = 0x800
 	inotifyCloexec64         = 0x80000
 )
@@ -131,14 +132,15 @@ func (e *eventFD64) Poll(events uint16) uint16 {
 type timerFD64 struct {
 	mu       sync.Mutex
 	cond     *sync.Cond
+	clockID  uint64
 	interval time.Duration
 	next     time.Time
 	nonblock bool
 	closed   bool
 }
 
-func newTimerFD64(flags uint64) *timerFD64 {
-	t := &timerFD64{nonblock: flags&tfdNonblock64 != 0}
+func newTimerFD64(clockID, flags uint64) *timerFD64 {
+	t := &timerFD64{clockID: clockID, nonblock: flags&tfdNonblock64 != 0}
 	t.cond = sync.NewCond(&t.mu)
 	return t
 }
@@ -253,7 +255,7 @@ func timerfdCreate64(ctx *Context64, args [6]uint64) int64 {
 	if args[1]&^(tfdNonblock64|tfdCloexec64) != 0 {
 		return int64(EINVAL)
 	}
-	handle := newTimerFD64(args[1])
+	handle := newTimerFD64(args[0], args[1])
 	file := &corefd.File{Reader: handle, Writer: handle, Closer: handle, Poll: handle.Poll, Cloexec: args[1]&tfdCloexec64 != 0}
 	fd, err := ctx.FDs.Open(file)
 	if err != nil {
@@ -294,7 +296,7 @@ func timerfdSettime64(ctx *Context64, args [6]uint64) int64 {
 	if !ok {
 		return int64(EINVAL)
 	}
-	if args[1]&^uint64(1) != 0 {
+	if args[1]&^timerfdTimerAbs64 != 0 {
 		return int64(EINVAL)
 	}
 	interval, ok := readTimespec64(ctx, corecpu.Address64(args[2]))
@@ -325,6 +327,20 @@ func timerfdSettime64(ctx *Context64, args [6]uint64) int64 {
 	handle.interval = interval
 	if initial == 0 {
 		handle.next = time.Time{}
+	} else if args[1]&timerfdTimerAbs64 != 0 {
+		if handle.clockID == 0 {
+			handle.next = time.Unix(seconds, nanos)
+		} else {
+			if ctx.StartTime.IsZero() {
+				ctx.StartTime = time.Now()
+			}
+			guestNow := time.Since(ctx.StartTime)
+			if initial <= guestNow {
+				handle.next = time.Now()
+			} else {
+				handle.next = time.Now().Add(initial - guestNow)
+			}
+		}
 	} else {
 		handle.next = time.Now().Add(initial)
 	}
