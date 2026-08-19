@@ -31,6 +31,8 @@ const (
 	Sys64Mprotect      Number64 = 10
 	Sys64Munmap        Number64 = 11
 	Sys64Brk           Number64 = 12
+	Sys64Mremap        Number64 = 25
+	Sys64Madvise       Number64 = 28
 	Sys64Gettimeofday  Number64 = 96
 	Sys64Times         Number64 = 100
 	Sys64Lseek         Number64 = 8
@@ -54,10 +56,11 @@ const (
 	Sys64Umask         Number64 = 95
 	Sys64Fchmod        Number64 = 91
 
-	Sys64GetRlimit Number64 = 97
-	Sys64Prctl     Number64 = 157
-	Sys64Fchownat  Number64 = 260
-	Sys64Fchmodat  Number64 = 268
+	Sys64GetRlimit  Number64 = 97
+	Sys64Prctl      Number64 = 157
+	Sys64Fchownat   Number64 = 260
+	Sys64Fchmodat   Number64 = 268
+	Sys64Faccessat2 Number64 = 439
 
 	Sys64GetRUsage Number64 = 98
 	Sys64GetGroups Number64 = 115
@@ -306,6 +309,7 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Stat, stat64Guest)
 	d.Register(Sys64Fstat, fstat64Guest)
 	d.Register(Sys64Fstatat, fstatat64Guest)
+	d.Register(Sys64Faccessat2, faccessat2_64)
 	d.Register(Sys64Statx, statx64Guest)
 	d.Register(Sys64Unlinkat, unlinkat64Guest)
 	d.Register(Sys64Renameat, renameat64Guest)
@@ -326,6 +330,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Mmap, mmap64)
 	d.Register(Sys64Mprotect, mprotect64)
 	d.Register(Sys64Munmap, munmap64)
+	d.Register(Sys64Mremap, mremap64)
+	d.Register(Sys64Madvise, madvise64)
 	d.Register(Sys64Lseek, lseek64)
 	d.Register(Sys64Socket, socket64)
 	d.Register(Sys64Socketpair, socketpair64)
