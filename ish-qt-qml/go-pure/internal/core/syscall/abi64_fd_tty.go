@@ -62,7 +62,15 @@ func fcntl64_64(ctx *Context64, args [6]uint64) int64 {
 		}
 		file.Cloexec = args[2]&fdCloexec != 0
 		return 0
-	case fcntlGetFL, fcntlSetFL:
+	case fcntlGetFL:
+		return int64(file.StatusFlags)
+	case fcntlSetFL:
+		const allowedStatusFlags = uint64(guestOpenNonblock | guestOpenAppend)
+		if args[2]&^allowedStatusFlags != 0 {
+			return int64(EINVAL)
+		}
+		file.StatusFlags = (file.StatusFlags &^ allowedStatusFlags) | (args[2] & allowedStatusFlags)
+		setPipeNonblock64(file, args[2]&uint64(guestOpenNonblock) != 0)
 		return 0
 	default:
 		return int64(EINVAL)

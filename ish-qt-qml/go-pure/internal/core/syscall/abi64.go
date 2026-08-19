@@ -47,6 +47,7 @@ const (
 	Sys64Dup2          Number64 = 33
 	Sys64Nanosleep     Number64 = 35
 	Sys64GetPID        Number64 = 39
+	Sys64Sendfile      Number64 = 40
 	Sys64Chown         Number64 = 92
 	Sys64Fchown        Number64 = 93
 	Sys64Lchown        Number64 = 94
@@ -118,10 +119,12 @@ const (
 	Sys64Linkat           Number64 = 265
 	Sys64Symlinkat        Number64 = 266
 	Sys64SetRobust        Number64 = 273
+	Sys64Splice           Number64 = 275
 	Sys64GetRobust        Number64 = 274
 	Sys64Signalfd4        Number64 = 289
 	Sys64Eventfd2         Number64 = 290
 	Sys64EpollCreate1     Number64 = 291
+	Sys64Pipe2            Number64 = 293
 	Sys64Tgkill           Number64 = 234
 	Sys64SetRlimit        Number64 = 160
 	Sys64ArchPrctl        Number64 = 158
@@ -292,6 +295,9 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Write, write64)
 	d.Register(Sys64Readv, readv64)
 	d.Register(Sys64Writev, writev64)
+	d.Register(Sys64Sendfile, sendfile64)
+	d.Register(Sys64Splice, splice64)
+	d.Register(Sys64Pipe2, pipe264)
 	d.Register(Sys64Close, close64)
 	d.Register(Sys64Dup, dup64)
 	d.Register(Sys64Dup2, dup264)

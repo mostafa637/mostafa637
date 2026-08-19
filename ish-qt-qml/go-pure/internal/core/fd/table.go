@@ -16,12 +16,13 @@ var (
 )
 
 type File struct {
-	Reader  io.Reader
-	Writer  io.Writer
-	Closer  io.Closer
-	Seeker  io.Seeker
-	Poll    func(events uint16) uint16
-	Cloexec bool
+	Reader      io.Reader
+	Writer      io.Writer
+	Closer      io.Closer
+	Seeker      io.Seeker
+	Poll        func(events uint16) uint16
+	Cloexec     bool
+	StatusFlags uint64
 
 	refMu  sync.Mutex
 	refs   int

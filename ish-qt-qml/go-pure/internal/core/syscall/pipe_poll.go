@@ -30,10 +30,14 @@ type guestPipe struct {
 	buffer      bytes.Buffer
 	readClosed  bool
 	writeClosed bool
+	nonblock    bool
 }
 
-func newGuestPipe() *guestPipe {
+func newGuestPipe(nonblock ...bool) *guestPipe {
 	pipe := &guestPipe{}
+	if len(nonblock) != 0 {
+		pipe.nonblock = nonblock[0]
+	}
 	pipe.cond = sync.NewCond(&pipe.mu)
 	return pipe
 }
@@ -45,6 +49,9 @@ func (p *guestPipe) read(dst []byte) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for p.buffer.Len() == 0 && !p.writeClosed && !p.readClosed {
+		if p.nonblock {
+			return 0, errWouldBlock64
+		}
 		p.cond.Wait()
 	}
 	if p.buffer.Len() != 0 {
@@ -81,6 +88,29 @@ func (p *guestPipe) closeWrite() error {
 	p.cond.Broadcast()
 	p.mu.Unlock()
 	return nil
+}
+
+func (p *guestPipe) setNonblock(nonblock bool) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.nonblock = nonblock
+	p.cond.Broadcast()
+	p.mu.Unlock()
+}
+
+func setPipeNonblock64(file *corefd.File, nonblock bool) {
+	if file == nil {
+		return
+	}
+	switch handle := file.Reader.(type) {
+	case *pipeReader:
+		handle.pipe.setNonblock(nonblock)
+	}
+	if handle, ok := file.Writer.(*pipeWriter); ok {
+		handle.pipe.setNonblock(nonblock)
+	}
 }
 
 func (p *guestPipe) ready(events uint16) uint16 {
@@ -129,10 +159,14 @@ func makePipe(context *Context, state *corecpu.MachineState, address corecpu.Add
 	if context == nil || context.Memory == nil || context.FDs == nil || address == 0 {
 		return EFAULT
 	}
-	pipe := newGuestPipe()
+	pipe := newGuestPipe(flags&uint32(pipe2Nonblock) != 0)
 	cloexec := flags&uint32(pipe2Cloexec) != 0
-	reader := &corefd.File{Reader: &pipeReader{pipe: pipe}, Closer: &pipeReader{pipe: pipe}, Cloexec: cloexec}
-	writer := &corefd.File{Writer: &pipeWriter{pipe: pipe}, Closer: &pipeWriter{pipe: pipe}, Cloexec: cloexec}
+	statusFlags := uint64(0)
+	if flags&uint32(pipe2Nonblock) != 0 {
+		statusFlags = uint64(guestOpenNonblock)
+	}
+	reader := &corefd.File{Reader: &pipeReader{pipe: pipe}, Closer: &pipeReader{pipe: pipe}, Cloexec: cloexec, StatusFlags: statusFlags}
+	writer := &corefd.File{Writer: &pipeWriter{pipe: pipe}, Closer: &pipeWriter{pipe: pipe}, Cloexec: cloexec, StatusFlags: statusFlags}
 	reader.Poll = func(events uint16) uint16 { return pipe.ready(events) }
 	writer.Poll = func(events uint16) uint16 { return pipe.ready(events) }
 	readFD, err := context.FDs.Open(reader)
