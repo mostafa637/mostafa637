@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	"golang.org/x/arch/x86/x86asm"
 )
 
 var (
@@ -210,7 +212,37 @@ func parseModRM(reader *codeReader, modrm byte, segment Segment) (Reg32, Operand
 	return reg, Operand{Memory: memory, IsMem: true, Width: 4}, nil
 }
 
+// Disassemble32 decodes one guest instruction with the canonical x86asm
+// decoder in 32-bit mode. The executor still consumes the project's compact
+// Instruction IR so unsupported semantics remain explicit at the execution
+// boundary.
+func Disassemble32(memory *Memory, eip Address) (x86asm.Inst, error) {
+	if memory == nil {
+		return x86asm.Inst{}, ErrUnmapped
+	}
+	var code [15]byte
+	read := 0
+	for read < len(code) {
+		if err := memory.Read(eip+Address(read), code[read:read+1]); err != nil {
+			if read == 0 {
+				return x86asm.Inst{}, err
+			}
+			break
+		}
+		read++
+	}
+	inst, err := x86asm.Decode(code[:read], 32)
+	if err != nil {
+		return x86asm.Inst{}, fmt.Errorf("cpu: x86asm decode at %#x: %w", eip, err)
+	}
+	return inst, nil
+}
+
 func Decode(memory *Memory, eip Address) (Instruction, error) {
+	disassembled, err := Disassemble32(memory, eip)
+	if err != nil {
+		return Instruction{}, err
+	}
 	reader := newCodeReader(memory, eip)
 	opcode, err := reader.byte()
 	if err != nil {
@@ -590,5 +622,8 @@ func Decode(memory *Memory, eip Address) (Instruction, error) {
 		return Instruction{}, fmt.Errorf("%w: opcode=%#x", ErrUnsupportedInstruction, opcode)
 	}
 	instruction.Len = reader.length()
+	if instruction.Len != uint32(disassembled.Len) {
+		return Instruction{}, fmt.Errorf("cpu: decoder length mismatch at %#x: IR=%d x86asm=%d", eip, instruction.Len, disassembled.Len)
+	}
 	return instruction, nil
 }

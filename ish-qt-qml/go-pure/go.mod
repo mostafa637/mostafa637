@@ -7,6 +7,7 @@ require (
 	github.com/creack/pty v1.1.18
 	github.com/jenska/float v1.0.0
 	github.com/viktomas/gritty v0.0.0-20231008101841-e77d027024e3
+	golang.org/x/arch v0.30.0
 	modernc.org/sqlite v1.56.0
 )
 

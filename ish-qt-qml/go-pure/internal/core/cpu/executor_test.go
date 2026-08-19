@@ -271,3 +271,16 @@ func TestExecutorGSRelativeMemoryOperand(t *testing.T) {
 		t.Fatalf("GS-relative load = %#x, want %#x", got, uint32(0xA1B2C3D4))
 	}
 }
+
+func TestDisassemble32GSInstruction(t *testing.T) {
+	memory, _ := mappedCode(t, []byte{
+		0x65, 0x8B, 0x03, // mov eax, gs:[ebx]
+	})
+	instruction, err := Disassemble32(memory, PageSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instruction.Len != 3 {
+		t.Fatalf("x86asm length = %d, want 3", instruction.Len)
+	}
+}
