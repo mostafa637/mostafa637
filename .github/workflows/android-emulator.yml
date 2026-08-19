@@ -44,7 +44,7 @@ jobs:
             sleep 10
             adb logcat -d -v threadtime > gtk-hello-android/logcat.txt || true
             adb exec-out screencap -p > gtk-hello-android/emulator-screen.png || true
-            adb shell pidof com.example.gtkhelloworld | grep -q '[0-9]'
+            adb shell ps -A | grep -q 'com.example.gtkhelloworld'
             adb shell dumpsys activity activities | grep -q 'com.example.gtkhelloworld'
 
       - name: Upload APK and emulator screenshot
