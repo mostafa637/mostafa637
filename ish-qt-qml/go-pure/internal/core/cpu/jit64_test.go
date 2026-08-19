@@ -4561,3 +4561,84 @@ func TestJIT64SSEFloatComparePredicates(t *testing.T) {
 		t.Fatalf("CMP predicates changed flags: got=%#x want=%#x", state.RFLAGS, flagsBefore)
 	}
 }
+
+func TestJIT64PCMPGTQAndPACKUSDW(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x5e000
+		dataAddress Address64 = 0x5f000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	// PCMPGTQ xmm0,xmm1; PCMPGTQ xmm8,[rdi];
+	// PACKUSDW xmm2,xmm3; PACKUSDW xmm9,[rdi].
+	code := []byte{
+		0x66, 0x0f, 0x38, 0x37, 0xc1,
+		0x66, 0x44, 0x0f, 0x38, 0x37, 0x07,
+		0x66, 0x0f, 0x38, 0x2b, 0xd3,
+		0x66, 0x44, 0x0f, 0x38, 0x2b, 0x0f,
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	var source [16]byte
+	binary.LittleEndian.PutUint32(source[0:], 2)
+	binary.LittleEndian.PutUint32(source[4:], 0)
+	binary.LittleEndian.PutUint32(source[8:], 65536)
+	binary.LittleEndian.PutUint32(source[12:], 1)
+	if err := memory.Write(dataAddress, source[:]); err != nil {
+		t.Fatal(err)
+	}
+
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	binary.LittleEndian.PutUint64(state.XMM[0][0:], 3)
+	binary.LittleEndian.PutUint64(state.XMM[0][8:], ^uint64(1))
+	binary.LittleEndian.PutUint64(state.XMM[1][0:], 2)
+	binary.LittleEndian.PutUint64(state.XMM[1][8:], ^uint64(0))
+	binary.LittleEndian.PutUint64(state.XMM[8][0:], 3)
+	binary.LittleEndian.PutUint64(state.XMM[8][8:], ^uint64(1))
+	for i, value := range []int32{-1, 0, 65536, 65535} {
+		binary.LittleEndian.PutUint32(state.XMM[2][i*4:], uint32(value))
+	}
+	for i, value := range []int32{1, 2, -2, 100000} {
+		binary.LittleEndian.PutUint32(state.XMM[3][i*4:], uint32(value))
+	}
+	for i, value := range []int32{-3, 0, 65536, 7} {
+		binary.LittleEndian.PutUint32(state.XMM[9][i*4:], uint32(value))
+	}
+	state.RFLAGS = Flag64IF | Flag64CF | Flag64ZF | Flag64SF
+	flagsBefore := state.RFLAGS
+
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("SIMD instructions changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[0][0:]); got != ^uint64(0) || binary.LittleEndian.Uint64(state.XMM[0][8:]) != 0 {
+		t.Fatalf("PCMPGTQ register=%x, want low all-ones/high zero", state.XMM[0])
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[8][0:]); got != ^uint64(0) || binary.LittleEndian.Uint64(state.XMM[8][8:]) != 0 {
+		t.Fatalf("PCMPGTQ memory/REX.R=%x, want low all-ones/high zero", state.XMM[8])
+	}
+	wantRegister := []uint16{0, 0, 65535, 65535, 1, 2, 0, 65535}
+	for lane, want := range wantRegister {
+		if got := binary.LittleEndian.Uint16(state.XMM[2][lane*2:]); got != want {
+			t.Fatalf("PACKUSDW register lane %d=%d, want %d", lane, got, want)
+		}
+	}
+	wantMemory := []uint16{0, 0, 65535, 7, 2, 0, 65535, 1}
+	for lane, want := range wantMemory {
+		if got := binary.LittleEndian.Uint16(state.XMM[9][lane*2:]); got != want {
+			t.Fatalf("PACKUSDW memory/REX.R lane %d=%d, want %d", lane, got, want)
+		}
+	}
+}

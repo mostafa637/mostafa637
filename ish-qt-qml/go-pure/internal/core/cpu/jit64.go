@@ -1164,7 +1164,8 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		x86asm.PADDUSB, x86asm.PADDUSW, x86asm.PSUBUSB, x86asm.PSUBUSW,
 		x86asm.PADDSB, x86asm.PADDSW, x86asm.PSUBSB, x86asm.PSUBSW,
 		x86asm.PSIGNB, x86asm.PSIGNW, x86asm.PSIGND,
-		x86asm.PABSB, x86asm.PABSW, x86asm.PABSD:
+		x86asm.PABSB, x86asm.PABSW, x86asm.PABSD,
+		x86asm.PCMPGTQ, x86asm.PACKUSDW:
 
 		left, err := operand64FromArg(arg(0), 16)
 		if err != nil || left.Kind != operand64XMM {
@@ -3345,6 +3346,21 @@ func makeSSESpecialBinary64(address uint64, size uint8, op x86asm.Op, dst, src o
 		}
 		var result [16]byte
 		switch op {
+		case x86asm.PCMPGTQ:
+			for _, offset := range []int{0, 8} {
+				leftValue := int64(binary.LittleEndian.Uint64(left[offset:]))
+				rightValue := int64(binary.LittleEndian.Uint64(right[offset:]))
+				if leftValue > rightValue {
+					binary.LittleEndian.PutUint64(result[offset:], ^uint64(0))
+				}
+			}
+		case x86asm.PACKUSDW:
+			for i := 0; i < 4; i++ {
+				value := int64(int32(binary.LittleEndian.Uint32(left[i*4:])))
+				binary.LittleEndian.PutUint16(result[i*2:], uint16(clampSigned64(value, 0, 65535)))
+				value = int64(int32(binary.LittleEndian.Uint32(right[i*4:])))
+				binary.LittleEndian.PutUint16(result[(i+4)*2:], uint16(clampSigned64(value, 0, 65535)))
+			}
 		case x86asm.PMULUDQ:
 			for _, offset := range []int{0, 8} {
 				l := uint64(binary.LittleEndian.Uint32(left[offset:]))
