@@ -387,3 +387,120 @@ func TestShellProbeSyscalls(t *testing.T) {
 		t.Fatalf("getppid = %d", got)
 	}
 }
+
+func TestDispatcherExecveReadsGuestVectors(t *testing.T) {
+	memory := cpu.NewMemory()
+	if err := memory.Map(4, 1, cpu.PRead|cpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	context := NewContext(memory)
+	var gotPath string
+	var gotArgv, gotEnv []string
+	context.Execve = func(path string, argv, env []string) int32 {
+		gotPath = path
+		gotArgv = append([]string(nil), argv...)
+		gotEnv = append([]string(nil), env...)
+		return 0
+	}
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+
+	const base = uint32(4 * cpu.PageSize)
+	pathAddr := base + 0x100
+	argvAddr := base + 0x120
+	envAddr := base + 0x130
+	arg0Addr := base + 0x140
+	env0Addr := base + 0x150
+	write := func(address uint32, data []byte) {
+		if err := memory.Write(cpu.Address(address), data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(pathAddr, []byte("/bin/echo\x00"))
+	write(arg0Addr, []byte("echo\x00"))
+	write(env0Addr, []byte("PATH=/bin\x00"))
+	var vector [8]byte
+	binary.LittleEndian.PutUint32(vector[0:4], arg0Addr)
+	write(argvAddr, vector[:])
+	binary.LittleEndian.PutUint32(vector[0:4], env0Addr)
+	write(envAddr, vector[:])
+
+	if got := dispatcher.Dispatch(state, SysExecve, pathAddr, argvAddr, envAddr); got != 0 {
+		t.Fatalf("execve result = %d", got)
+	}
+	if gotPath != "/bin/echo" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if len(gotArgv) != 1 || gotArgv[0] != "echo" {
+		t.Fatalf("argv = %#v", gotArgv)
+	}
+	if len(gotEnv) != 1 || gotEnv[0] != "PATH=/bin" {
+		t.Fatalf("env = %#v", gotEnv)
+	}
+}
+
+func TestDispatcherPipePollAndReadWrite(t *testing.T) {
+	memory := cpu.NewMemory()
+	for page := cpu.Page(4); page <= 6; page++ {
+		if err := memory.Map(page, 1, cpu.PRead|cpu.PWrite); err != nil {
+			t.Fatal(err)
+		}
+	}
+	context := NewContext(memory)
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+	const (
+		pipeAddress = uint32(4 * cpu.PageSize)
+		pollAddress = uint32(5 * cpu.PageSize)
+		dataAddress = uint32(6 * cpu.PageSize)
+	)
+	if got := dispatcher.Dispatch(state, SysPipe, pipeAddress); got != 0 {
+		t.Fatalf("pipe = %d", got)
+	}
+	var raw [8]byte
+	if err := memory.Read(cpu.Address(pipeAddress), raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	readFD := binary.LittleEndian.Uint32(raw[0:4])
+	writeFD := binary.LittleEndian.Uint32(raw[4:8])
+	if readFD == writeFD {
+		t.Fatalf("pipe descriptors are equal: %d", readFD)
+	}
+	if err := memory.Write(cpu.Address(dataAddress), []byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatcher.Dispatch(state, SysWrite, writeFD, dataAddress, 4); got != 4 {
+		t.Fatalf("pipe write = %d", got)
+	}
+	var pollfd [8]byte
+	binary.LittleEndian.PutUint32(pollfd[0:4], readFD)
+	binary.LittleEndian.PutUint16(pollfd[4:6], pollIn)
+	if err := memory.Write(cpu.Address(pollAddress), pollfd[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatcher.Dispatch(state, SysPoll, pollAddress, 1, 0); got != 1 {
+		t.Fatalf("poll = %d", got)
+	}
+	if err := memory.Read(cpu.Address(pollAddress+6), pollfd[6:8]); err != nil {
+		t.Fatal(err)
+	}
+	if binary.LittleEndian.Uint16(pollfd[6:8])&pollIn == 0 {
+		t.Fatalf("poll revents = %#x", binary.LittleEndian.Uint16(pollfd[6:8]))
+	}
+	if got := dispatcher.Dispatch(state, SysRead, readFD, dataAddress+0x100, 4); got != 4 {
+		t.Fatalf("pipe read = %d", got)
+	}
+	var result [4]byte
+	if err := memory.Read(cpu.Address(dataAddress+0x100), result[:]); err != nil {
+		t.Fatal(err)
+	}
+	if string(result[:]) != "ping" {
+		t.Fatalf("pipe data = %q", result[:])
+	}
+	if got := dispatcher.Dispatch(state, SysClose, writeFD); got != 0 {
+		t.Fatalf("close writer = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysPoll, pollAddress, 1, 0); got != 1 {
+		t.Fatalf("poll EOF = %d", got)
+	}
+}

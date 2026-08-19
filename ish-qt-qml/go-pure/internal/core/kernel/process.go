@@ -41,7 +41,7 @@ func NewProcess(pid uint32, fake *corefs.FS) *Process {
 		}
 		return result
 	})
-	return &Process{
+	process := &Process{
 		PID:      pid,
 		Memory:   memory,
 		CPU:      state,
@@ -50,6 +50,8 @@ func NewProcess(pid uint32, fake *corefs.FS) *Process {
 		Syscalls: dispatcher,
 		Executor: executor,
 	}
+	context.Execve = process.execve
+	return process
 }
 
 func (p *Process) AttachFile(fd uint32, reader io.Reader, writer io.Writer) error {

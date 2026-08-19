@@ -20,6 +20,11 @@ type File struct {
 	Writer io.Writer
 	Closer io.Closer
 	Seeker io.Seeker
+	Poll   func(events uint16) uint16
+
+	refMu  sync.Mutex
+	refs   int
+	closed bool
 
 	// Path is the guest absolute path for descriptors opened through fakefs.
 	// It is empty for pipes, console streams, and other anonymous handles.
@@ -29,14 +34,36 @@ type File struct {
 	DirPos int
 }
 
+func (f *File) retain() {
+	if f == nil {
+		return
+	}
+	f.refMu.Lock()
+	if !f.closed {
+		f.refs++
+	}
+	f.refMu.Unlock()
+}
+
 func (f *File) Close() error {
 	if f == nil {
 		return ErrBadFD
 	}
-	if f.Closer == nil {
+	f.refMu.Lock()
+	if f.refs > 0 {
+		f.refs--
+	}
+	if f.refs != 0 || f.closed {
+		f.refMu.Unlock()
 		return nil
 	}
-	return f.Closer.Close()
+	f.closed = true
+	closer := f.Closer
+	f.refMu.Unlock()
+	if closer == nil {
+		return nil
+	}
+	return closer.Close()
 }
 
 func (f *File) Read(p []byte) (int, error) {
@@ -75,16 +102,22 @@ func (t *Table) InstallAt(fd int32, file *File, replace bool) error {
 		return ErrBadFD
 	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	if t.entries == nil {
 		t.entries = make(map[int32]*File)
 	}
-	if _, exists := t.entries[fd]; exists && !replace {
+	old := t.entries[fd]
+	if old != nil && !replace {
+		t.mu.Unlock()
 		return ErrOccupied
 	}
+	file.retain()
 	t.entries[fd] = file
 	if fd >= t.next {
 		t.next = fd + 1
+	}
+	t.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
 	}
 	return nil
 }
@@ -102,6 +135,7 @@ func (t *Table) Open(file *File) (int32, error) {
 		if _, exists := t.entries[t.next]; !exists {
 			fd := t.next
 			t.entries[fd] = file
+			file.retain()
 			t.next++
 			return fd, nil
 		}
@@ -152,9 +186,6 @@ func (t *Table) Dup2(oldfd, newfd int32) (int32, error) {
 	}
 	if oldfd == newfd {
 		return newfd, nil
-	}
-	if existing, getErr := t.Get(newfd); getErr == nil {
-		_ = existing.Close()
 	}
 	if err := t.InstallAt(newfd, file, true); err != nil {
 		return -1, err

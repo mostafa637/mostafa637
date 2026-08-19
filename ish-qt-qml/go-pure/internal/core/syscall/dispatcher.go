@@ -19,10 +19,14 @@ type Number uint32
 
 const (
 	SysExit          Number = 1
+	SysExecve        Number = 11
 	SysFork          Number = 2
 	SysRead          Number = 3
 	SysOpen          Number = 5
 	SysWrite         Number = 4
+	SysPipe          Number = 42
+	SysPoll          Number = 168
+	SysPipe2         Number = 331
 	SysAccess        Number = 33
 	SysIoctl         Number = 54
 	SysReadlink      Number = 85
@@ -69,6 +73,7 @@ const (
 	EACCES       int32 = -13
 	EEXIST       int32 = -17
 	EBADF        int32 = -9
+	EMFILE       int32 = -24
 	ENOMEM       int32 = -12
 	EFAULT       int32 = -14
 	EINVAL       int32 = -22
@@ -114,6 +119,10 @@ type Context struct {
 
 	Exited   bool
 	ExitCode int32
+
+	// Execve is provided by kernel.Process. It replaces the current image while
+	// preserving the process identity and descriptor table.
+	Execve func(path string, argv, env []string) int32
 }
 
 type File = corefd.File
@@ -148,6 +157,7 @@ func NewDispatcher(context *Context) *Dispatcher {
 	d := &Dispatcher{Context: context, handlers: make(map[Number]Handler)}
 	d.Register(SysExit, exit)
 	d.Register(SysExitGroup, exit)
+	d.Register(SysExecve, execve)
 	d.Register(SysFork, forkStub)
 	d.Register(SysClone, cloneStub)
 	d.Register(SysWait4, wait4)
@@ -170,6 +180,9 @@ func NewDispatcher(context *Context) *Dispatcher {
 	d.Register(SysGetdents64, getdents64)
 	d.Register(SysRead, read)
 	d.Register(SysWrite, write)
+	d.Register(SysPipe, pipe)
+	d.Register(SysPoll, poll)
+	d.Register(SysPipe2, pipe2)
 	d.Register(SysClose, closeFD)
 	d.Register(SysLseek, lseek)
 	d.Register(SysGetPID, getpid)

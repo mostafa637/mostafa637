@@ -67,3 +67,35 @@ func TestTableDup2AndSeek(t *testing.T) {
 		t.Fatalf("read after seek = %q", buf)
 	}
 }
+
+type countingCloser struct{ calls int }
+
+func (c *countingCloser) Close() error {
+	c.calls++
+	return nil
+}
+
+func TestTableDupKeepsCloserAlive(t *testing.T) {
+	closer := &countingCloser{}
+	table := New()
+	fd, err := table.Open(&File{Closer: closer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dup, err := table.Dup(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := table.Close(fd); err != nil {
+		t.Fatal(err)
+	}
+	if closer.calls != 0 {
+		t.Fatalf("closer calls after first close = %d", closer.calls)
+	}
+	if err := table.Close(dup); err != nil {
+		t.Fatal(err)
+	}
+	if closer.calls != 1 {
+		t.Fatalf("closer calls after final close = %d", closer.calls)
+	}
+}

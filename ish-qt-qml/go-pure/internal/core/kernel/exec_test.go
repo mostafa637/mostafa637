@@ -3,10 +3,13 @@ package kernel
 import (
 	"bytes"
 	"encoding/binary"
+	"path/filepath"
 	"testing"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
+	corefs "github.com/mostafa637/mostafa637/go-pure/internal/core/fs"
 	coreloader "github.com/mostafa637/mostafa637/go-pure/internal/core/loader"
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/storage"
 )
 
 func processELF() []byte {
@@ -116,5 +119,91 @@ func TestProcessLoadAndRunExitELF(t *testing.T) {
 	}
 	if code, exited := process.ExitCode(); !exited || code != 42 {
 		t.Fatalf("exit state: exited=%v code=%d", exited, code)
+	}
+}
+
+func processExecveELF() []byte {
+	const (
+		headerSize    = 52
+		programSize   = 32
+		programOffset = headerSize
+		payloadOffset = 0x1000
+		entry         = 0x08048000
+		pathAddr      = entry + 0x100
+		argvAddr      = entry + 0x120
+		envAddr       = entry + 0x130
+		arg0Addr      = entry + 0x140
+		env0Addr      = entry + 0x150
+	)
+	code := []byte{
+		0xb8, 0x0b, 0x00, 0x00, 0x00, // mov eax, SYS_execve
+		0xbb, 0x00, 0x00, 0x00, 0x00, // mov ebx, filename
+		0xb9, 0x00, 0x00, 0x00, 0x00, // mov ecx, argv
+		0xba, 0x00, 0x00, 0x00, 0x00, // mov edx, envp
+		0xcd, 0x80, // int 0x80
+	}
+	binary.LittleEndian.PutUint32(code[6:10], pathAddr)
+	binary.LittleEndian.PutUint32(code[11:15], argvAddr)
+	binary.LittleEndian.PutUint32(code[16:20], envAddr)
+	data := make([]byte, payloadOffset+0x180)
+	copy(data[0:4], []byte{0x7f, 'E', 'L', 'F'})
+	data[4], data[5], data[6], data[7] = 1, 1, 1, 3
+	binary.LittleEndian.PutUint16(data[16:], 2)
+	binary.LittleEndian.PutUint16(data[18:], 3)
+	binary.LittleEndian.PutUint32(data[20:], 1)
+	binary.LittleEndian.PutUint32(data[24:], entry)
+	binary.LittleEndian.PutUint32(data[28:], programOffset)
+	binary.LittleEndian.PutUint16(data[40:], headerSize)
+	binary.LittleEndian.PutUint16(data[42:], programSize)
+	binary.LittleEndian.PutUint16(data[44:], 1)
+	ph := data[programOffset : programOffset+programSize]
+	binary.LittleEndian.PutUint32(ph[0:], 1)
+	binary.LittleEndian.PutUint32(ph[4:], payloadOffset)
+	binary.LittleEndian.PutUint32(ph[8:], entry)
+	binary.LittleEndian.PutUint32(ph[12:], entry)
+	binary.LittleEndian.PutUint32(ph[16:], uint32(len(data)-payloadOffset))
+	binary.LittleEndian.PutUint32(ph[20:], 0x1000)
+	binary.LittleEndian.PutUint32(ph[24:], 7)
+	binary.LittleEndian.PutUint32(ph[28:], 0x1000)
+	copy(data[payloadOffset:], code)
+	copy(data[payloadOffset+0x100:], []byte("/bin/second\x00"))
+	binary.LittleEndian.PutUint32(data[payloadOffset+0x120:], arg0Addr)
+	binary.LittleEndian.PutUint32(data[payloadOffset+0x124:], 0)
+	binary.LittleEndian.PutUint32(data[payloadOffset+0x130:], env0Addr)
+	binary.LittleEndian.PutUint32(data[payloadOffset+0x134:], 0)
+	copy(data[payloadOffset+0x140:], []byte("second\x00"))
+	copy(data[payloadOffset+0x150:], []byte("PATH=/bin\x00"))
+	return data
+}
+
+func TestProcessExecveReloadsImage(t *testing.T) {
+	db, err := storage.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake, err := corefs.New(filepath.Join(t.TempDir(), "root"), db)
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fake.Close() })
+	if err := fake.Mkdir("/bin", 0o755, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.WriteFile("/bin/second", processExitELF(), 0o755, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	process := NewProcess(99, fake)
+	defer process.Close()
+	first := processExecveELF()
+	if _, err := process.LoadELF(bytes.NewReader(first), int64(len(first)), "/bin/first", 0, coreloader.DefaultStackConfig()); err != nil {
+		t.Fatalf("LoadELF: %v", err)
+	}
+	if err := process.Run(64); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if code, exited := process.ExitCode(); !exited || code != 42 {
+		t.Fatalf("execve exit state: exited=%v code=%d", exited, code)
 	}
 }
