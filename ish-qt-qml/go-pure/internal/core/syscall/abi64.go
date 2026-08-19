@@ -20,20 +20,24 @@ import (
 type Number64 uint64
 
 const (
-	Sys64Read           Number64 = 0
-	Sys64Write          Number64 = 1
-	Sys64Poll           Number64 = 7
-	Sys64Select         Number64 = 23
-	Sys64Open           Number64 = 2
-	Sys64Close          Number64 = 3
-	Sys64Stat           Number64 = 4
-	Sys64Fstat          Number64 = 5
-	Sys64Mmap           Number64 = 9
-	Sys64Mprotect       Number64 = 10
-	Sys64Munmap         Number64 = 11
-	Sys64Brk            Number64 = 12
-	Sys64Mremap         Number64 = 25
-	Sys64Madvise        Number64 = 28
+	Sys64Read     Number64 = 0
+	Sys64Write    Number64 = 1
+	Sys64Poll     Number64 = 7
+	Sys64Select   Number64 = 23
+	Sys64Open     Number64 = 2
+	Sys64Close    Number64 = 3
+	Sys64Stat     Number64 = 4
+	Sys64Fstat    Number64 = 5
+	Sys64Mmap     Number64 = 9
+	Sys64Mprotect Number64 = 10
+	Sys64Munmap   Number64 = 11
+	Sys64Brk      Number64 = 12
+	Sys64Mremap   Number64 = 25
+	Sys64Madvise  Number64 = 28
+	Sys64Shmget   Number64 = 29
+	Sys64Shmat    Number64 = 30
+	Sys64Shmctl   Number64 = 31
+
 	Sys64Mlock          Number64 = 149
 	Sys64Munlock        Number64 = 150
 	Sys64Mlockall       Number64 = 151
@@ -56,14 +60,19 @@ const (
 	Sys64ClockNanosleep Number64 = 230
 	Sys64Pause          Number64 = 34
 
-	Sys64GetPID    Number64 = 39
-	Sys64Sendfile  Number64 = 40
-	Sys64Chown     Number64 = 92
-	Sys64Fchown    Number64 = 93
-	Sys64Lchown    Number64 = 94
-	Sys64Umask     Number64 = 95
-	Sys64Fchmod    Number64 = 91
-	Sys64Fsync     Number64 = 74
+	Sys64GetPID   Number64 = 39
+	Sys64Sendfile Number64 = 40
+	Sys64Chown    Number64 = 92
+	Sys64Fchown   Number64 = 93
+	Sys64Lchown   Number64 = 94
+	Sys64Umask    Number64 = 95
+	Sys64Fchmod   Number64 = 91
+	Sys64Shmdt    Number64 = 67
+	Sys64Semget   Number64 = 64
+	Sys64Semop    Number64 = 65
+	Sys64Semctl   Number64 = 66
+	Sys64Fsync    Number64 = 74
+
 	Sys64Fdatasync Number64 = 75
 	Sys64Truncate  Number64 = 76
 	Sys64Ftruncate Number64 = 77
@@ -234,9 +243,11 @@ type Context64 struct {
 	// image while preserving process identity and the descriptor table.
 	Execve func(path string, argv, env []string) int64
 
-	FDs       *corefd.Table
-	Mappings  []GuestMapping64
-	signalFDs map[*signalFD64]struct{}
+	FDs          *corefd.Table
+	Mappings     []GuestMapping64
+	SharedMemory *SharedMemoryRegistry64
+	Semaphores   *SemaphoreRegistry64
+	signalFDs    map[*signalFD64]struct{}
 }
 
 type Dispatcher64 struct {
@@ -246,6 +257,8 @@ type Dispatcher64 struct {
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
 	ctx := &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), SignalActions: make(map[uint64][32]byte), StartTime: time.Now(), CPUIDEnabled: true, Dumpable: true, AffinityMask: ^uint64(0), Umask: 0o022, signalFDs: make(map[*signalFD64]struct{})}
+	ctx.SharedMemory = newSharedMemoryRegistry64()
+	ctx.Semaphores = newSemaphoreRegistry64()
 	ctx.SignalCond = sync.NewCond(&ctx.SignalMu)
 	ctx.SignalWake = make(chan struct{})
 	return ctx
@@ -400,6 +413,13 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Munmap, munmap64)
 	d.Register(Sys64Mremap, mremap64)
 	d.Register(Sys64Madvise, madvise64)
+	d.Register(Sys64Shmget, shmget64)
+	d.Register(Sys64Shmat, shmat64)
+	d.Register(Sys64Shmctl, shmctl64)
+	d.Register(Sys64Shmdt, shmdt64)
+	d.Register(Sys64Semget, semget64)
+	d.Register(Sys64Semop, semop64)
+	d.Register(Sys64Semctl, semctl64)
 	d.Register(Sys64Mlock, mlock64)
 	d.Register(Sys64Munlock, munlock64)
 	d.Register(Sys64Mlockall, mlockall64)
