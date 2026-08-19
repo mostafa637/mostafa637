@@ -90,6 +90,7 @@ const (
 	OpPushAll
 	OpPopAll
 	OpLeave
+	OpEnter
 	OpRetImm
 	OpCWDE
 	OpCDQ
@@ -1904,6 +1905,19 @@ func decodeX86Stack(inst x86asm.Inst) (Instruction, bool, error) {
 		return Instruction{Op: OpPopAll, Len: uint32(inst.Len)}, true, nil
 	case x86asm.LEAVE:
 		return Instruction{Op: OpLeave, Len: uint32(inst.Len)}, true, nil
+	case x86asm.ENTER:
+		if len(inst.Args) < 2 || inst.Args[0] == nil || inst.Args[1] == nil {
+			return Instruction{}, true, fmt.Errorf("%w: ENTER operands", ErrInvalidInstruction)
+		}
+		frameSize, ok := inst.Args[0].(x86asm.Imm)
+		if !ok || frameSize < 0 || frameSize > 0xffff {
+			return Instruction{}, true, fmt.Errorf("%w: ENTER frame size %v", ErrUnsupportedInstruction, inst.Args[0])
+		}
+		nestingLevel, ok := inst.Args[1].(x86asm.Imm)
+		if !ok || nestingLevel < 0 || nestingLevel > 0xff {
+			return Instruction{}, true, fmt.Errorf("%w: ENTER nesting level %v", ErrUnsupportedInstruction, inst.Args[1])
+		}
+		return Instruction{Op: OpEnter, Len: uint32(inst.Len), Imm: int32(frameSize), Group: uint8(nestingLevel) & 31}, true, nil
 	default:
 		return Instruction{}, false, nil
 	}

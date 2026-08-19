@@ -829,6 +829,11 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		}
 		state.Set(EBP, value)
 		state.EIP = next
+	case OpEnter:
+		if err := enter(state, uint16(instruction.Imm), instruction.Group); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
 	case OpRetImm:
 		value, err := pop(state)
 		if err != nil {
@@ -1206,6 +1211,36 @@ func setMultiplicationFlags(state *MachineState, overflow bool) {
 	state.CF = boolByte(overflow)
 	state.OF = boolByte(overflow)
 	state.Lazy = 0
+}
+
+func enter(state *MachineState, frameSize uint16, nestingLevel uint8) error {
+	oldEBP := state.Get(EBP)
+	if err := push(state, oldEBP); err != nil {
+		return err
+	}
+	frameTemp := state.Get(ESP)
+	level := nestingLevel & 31
+	if level > 1 {
+		frame := oldEBP
+		for i := uint8(1); i < level; i++ {
+			frame -= 4
+			var raw [4]byte
+			if err := state.Memory.Read(Address(frame), raw[:]); err != nil {
+				return err
+			}
+			if err := push(state, binary.LittleEndian.Uint32(raw[:])); err != nil {
+				return err
+			}
+		}
+	}
+	if level > 0 {
+		if err := push(state, frameTemp); err != nil {
+			return err
+		}
+	}
+	state.Set(EBP, frameTemp)
+	state.Set(ESP, state.Get(ESP)-uint32(frameSize))
+	return nil
 }
 
 func push(state *MachineState, value uint32) error {

@@ -267,6 +267,7 @@ func TestDecodeX86StackAndControlFlow(t *testing.T) {
 		{name: "push all", code: []byte{0x60}, op: OpPushAll},
 		{name: "pop all", code: []byte{0x61}, op: OpPopAll},
 		{name: "leave", code: []byte{0xC9}, op: OpLeave},
+		{name: "enter frame", code: []byte{0xC8, 0x20, 0x01, 0x03}, op: OpEnter, imm: 0x120, rel: 0},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -284,6 +285,10 @@ func TestDecodeX86StackAndControlFlow(t *testing.T) {
 			if instruction.Imm != test.imm || instruction.Rel != test.rel {
 				t.Fatalf("immediate/relative = %d/%d, want %d/%d", instruction.Imm, instruction.Rel, test.imm, test.rel)
 			}
+			if test.op == OpEnter && instruction.Group != 3 {
+				t.Fatalf("ENTER nesting level = %d, want 3", instruction.Group)
+			}
+
 			if test.src != (Operand{}) && instruction.Src != test.src {
 				t.Fatalf("source = %#v, want %#v", instruction.Src, test.src)
 			}

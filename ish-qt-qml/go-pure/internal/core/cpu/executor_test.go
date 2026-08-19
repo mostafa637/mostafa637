@@ -1591,6 +1591,73 @@ func TestExecutorMovByteImmediate(t *testing.T) {
 	}
 }
 
+func TestExecutorEnter(t *testing.T) {
+	t.Run("simple frame and leave compatibility", func(t *testing.T) {
+		memory, state := mappedCode(t, []byte{
+			0xC8, 0x08, 0x00, 0x00, // enter 8, 0
+			0xC9, // leave
+			0xF4,
+		})
+		state.Set(ESP, 0x2000)
+		state.Set(EBP, 0x12345678)
+		state.EFlags |= FlagCF | FlagPF | FlagAF | FlagZF | FlagSF | FlagOF
+		state.ExpandFlags()
+		executor := NewExecutor(nil)
+		if _, err := executor.Step(state); err != nil {
+			t.Fatal(err)
+		}
+		if state.Get(EBP) != 0x1ffc || state.Get(ESP) != 0x1ff4 {
+			t.Fatalf("ENTER frame ebp=%#x esp=%#x, want ebp=0x1ffc esp=0x1ff4", state.Get(EBP), state.Get(ESP))
+		}
+		var saved [4]byte
+		if err := memory.Read(0x1ffc, saved[:]); err != nil {
+			t.Fatal(err)
+		}
+		if got := binary.LittleEndian.Uint32(saved[:]); got != 0x12345678 {
+			t.Fatalf("saved EBP=%#x, want 0x12345678", got)
+		}
+		for _, flag := range []uint32{FlagCF, FlagPF, FlagAF, FlagZF, FlagSF, FlagOF} {
+			if !state.Flag(flag) {
+				t.Fatalf("ENTER changed flag %#x", flag)
+			}
+		}
+		if _, err := executor.Step(state); err != nil {
+			t.Fatal(err)
+		}
+		if state.Get(EBP) != 0x12345678 || state.Get(ESP) != 0x2000 {
+			t.Fatalf("LEAVE after ENTER ebp=%#x esp=%#x, want ebp=0x12345678 esp=0x2000", state.Get(EBP), state.Get(ESP))
+		}
+	})
+
+	t.Run("nested display area", func(t *testing.T) {
+		memory, state := mappedCode(t, []byte{
+			0xC8, 0x04, 0x00, 0x02, // enter 4, 2
+			0xF4,
+		})
+		state.Set(ESP, 0x2000)
+		state.Set(EBP, 0x1f00)
+		if err := memory.Write(0x1efc, uint32Bytes(0xaaaabbbb)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := NewExecutor(nil).Step(state); err != nil {
+			t.Fatal(err)
+		}
+		if state.Get(EBP) != 0x1ffc || state.Get(ESP) != 0x1ff0 {
+			t.Fatalf("nested ENTER ebp=%#x esp=%#x, want ebp=0x1ffc esp=0x1ff0", state.Get(EBP), state.Get(ESP))
+		}
+		words := make([]byte, 12)
+		if err := memory.Read(0x1ff4, words); err != nil {
+			t.Fatal(err)
+		}
+		want := []uint32{0x1ffc, 0xaaaabbbb, 0x1f00}
+		for i, expected := range want {
+			if got := binary.LittleEndian.Uint32(words[i*4:]); got != expected {
+				t.Fatalf("nested frame word %d=%#x, want %#x", i, got, expected)
+			}
+		}
+	})
+}
+
 func TestExecutorMovbe(t *testing.T) {
 	t.Run("load register from memory", func(t *testing.T) {
 		memory, state := mappedCode(t, []byte{
