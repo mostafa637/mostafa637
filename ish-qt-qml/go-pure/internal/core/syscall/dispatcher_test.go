@@ -236,3 +236,33 @@ func TestFakeFSSyscalls(t *testing.T) {
 		t.Fatalf("relative file data = %q", data)
 	}
 }
+
+func TestTaskLifecycleStubs(t *testing.T) {
+	memory := cpu.NewMemory()
+	context := NewContext(memory)
+	context.PID = 77
+	dispatcher := NewDispatcher(context)
+	state := cpu.NewMachineState(memory)
+
+	if got := dispatcher.Dispatch(state, SysFork); got != ENOSYS {
+		t.Fatalf("fork = %d, want %d", got, ENOSYS)
+	}
+	if got := dispatcher.Dispatch(state, SysClone, 0, 0, 0, 0, 0); got != ENOSYS {
+		t.Fatalf("clone = %d, want %d", got, ENOSYS)
+	}
+	if got := dispatcher.Dispatch(state, SysWait4, ^uint32(0), 0, 0, 0); got != ECHILD {
+		t.Fatalf("wait4 = %d, want %d", got, ECHILD)
+	}
+	if got := dispatcher.Dispatch(state, SysKill, context.PID, 15); got != 0 {
+		t.Fatalf("kill self = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysKill, 999, 15); got != ESRCH {
+		t.Fatalf("kill unknown = %d, want %d", got, ESRCH)
+	}
+	if got := dispatcher.Dispatch(state, SysGetTID); got != int32(context.PID) {
+		t.Fatalf("gettid = %d", got)
+	}
+	if got := dispatcher.Dispatch(state, SysSetTIDAddress, 0x1234); got != int32(context.PID) || context.TIDAddress != 0x1234 {
+		t.Fatalf("set_tid_address = %d address=%#x", got, context.TIDAddress)
+	}
+}

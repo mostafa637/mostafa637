@@ -18,28 +18,37 @@ import (
 type Number uint32
 
 const (
-	SysExit       Number = 1
-	SysRead       Number = 3
-	SysOpen       Number = 5
-	SysWrite      Number = 4
-	SysChdir      Number = 12
-	SysClose      Number = 6
-	SysLseek      Number = 19
-	SysGetPID     Number = 20
-	SysGetCWD     Number = 183
-	SysStat64     Number = 195
-	SysFstat64    Number = 197
-	SysDup        Number = 41
-	SysDup2       Number = 63
-	SysBrk        Number = 45
-	SysMmap       Number = 90
-	SysMunmap     Number = 91
-	SysMprotect   Number = 125
-	SysMmap2      Number = 192
-	SysExitGroup  Number = 252
-	SysMadvise    Number = 219
-	SysGetdents64 Number = 220
-	SysSchedYield Number = 158
+	SysExit          Number = 1
+	SysFork          Number = 2
+	SysRead          Number = 3
+	SysOpen          Number = 5
+	SysWrite         Number = 4
+	SysChdir         Number = 12
+	SysClose         Number = 6
+	SysLseek         Number = 19
+	SysGetPID        Number = 20
+	SysKill          Number = 37
+	SysSignal        Number = 48
+	SysWait4         Number = 114
+	SysClone         Number = 120
+	SysGetCWD        Number = 183
+	SysStat64        Number = 195
+	SysFstat64       Number = 197
+	SysDup           Number = 41
+	SysDup2          Number = 63
+	SysBrk           Number = 45
+	SysMmap          Number = 90
+	SysMunmap        Number = 91
+	SysMprotect      Number = 125
+	SysMmap2         Number = 192
+	SysExitGroup     Number = 252
+	SysMadvise       Number = 219
+	SysGetdents64    Number = 220
+	SysGetTID        Number = 224
+	SysSchedYield    Number = 158
+	SysRtSigaction   Number = 174
+	SysRtSigprocmask Number = 175
+	SysSetTIDAddress Number = 258
 )
 
 var errFault = errors.New("syscall: bad guest address")
@@ -58,6 +67,9 @@ const (
 	ENAMETOOLONG int32 = -36
 	ENOTTY       int32 = -25
 	ENOSYS       int32 = -38
+	ECHILD       int32 = -10
+	ESRCH        int32 = -3
+	EINTR        int32 = -4
 )
 
 const (
@@ -72,10 +84,11 @@ const (
 )
 
 type Context struct {
-	Memory *corecpu.Memory
-	FS     *corefs.FS
-	PID    uint32
-	CWD    string
+	Memory     *corecpu.Memory
+	FS         *corefs.FS
+	PID        uint32
+	CWD        string
+	TIDAddress uint32
 
 	StartBrk uint32
 	Brk      uint32
@@ -121,6 +134,15 @@ func NewDispatcher(context *Context) *Dispatcher {
 	d := &Dispatcher{Context: context, handlers: make(map[Number]Handler)}
 	d.Register(SysExit, exit)
 	d.Register(SysExitGroup, exit)
+	d.Register(SysFork, forkStub)
+	d.Register(SysClone, cloneStub)
+	d.Register(SysWait4, wait4)
+	d.Register(SysKill, kill)
+	d.Register(SysSignal, signalStub)
+	d.Register(SysRtSigaction, signalStub)
+	d.Register(SysRtSigprocmask, signalStub)
+	d.Register(SysSetTIDAddress, setTIDAddress)
+	d.Register(SysGetTID, gettid)
 	d.Register(SysOpen, open)
 	d.Register(SysChdir, chdir)
 	d.Register(SysGetCWD, getcwd)
