@@ -5525,3 +5525,76 @@ func TestJIT64XSAVERejectsUnalignedDestination(t *testing.T) {
 		t.Fatalf("unaligned XSAVE changed destination memory")
 	}
 }
+
+func sha1RoundFunctionTest(b, c, d uint32, selector uint8) uint32 {
+	switch selector & 3 {
+	case 0:
+		return (b & c) | (^b & d)
+	case 1, 3:
+		return b ^ c ^ d
+	default:
+		return (b & c) | (b & d) | (c & d)
+	}
+}
+
+func sha1Rounds4Test(state, words [4]uint32, selector uint8) [4]uint32 {
+	a, b, c, d := state[3], state[2], state[1], state[0]
+	var e uint32
+	for round, word := range words {
+		if round != 0 {
+			word += e
+		}
+		t := sha1RoundFunctionTest(b, c, d, selector) + bits.RotateLeft32(a, 5) + word + sha1RoundConstant64(selector)
+		a, b, c, d, e = t, a, bits.RotateLeft32(b, 30), c, d
+	}
+	return [4]uint32{d, c, b, a}
+}
+
+func TestJIT64SHA1NextEAndRounds4(t *testing.T) {
+	const codeAddress Address64 = 0x62000
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	code := []byte{
+		0x0f, 0x38, 0xc8, 0xca, // sha1nexte xmm1,xmm2
+		0x0f, 0x3a, 0xcc, 0xdc, 0x01, // sha1rnds4 xmm3,xmm4,1
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.RFLAGS = Flag64IF | Flag64CF | Flag64ZF
+	flagsBefore := state.RFLAGS
+	nextEState := [4]uint32{0x01020304, 0x11121314, 0x21222324, 0x31323334}
+	nextEWords := [4]uint32{0xabcdef01, 0x23456789, 0x76543210, 0x10203040}
+	roundsState := [4]uint32{0x89abcdef, 0x01234567, 0xfedcba98, 0x76543210}
+	roundsWords := [4]uint32{0x10203040, 0x55667788, 0x99aabbcc, 0xddeeff00}
+	setSHATestWords(&state.XMM[1], nextEState)
+	setSHATestWords(&state.XMM[2], nextEWords)
+	setSHATestWords(&state.XMM[3], roundsState)
+	setSHATestWords(&state.XMM[4], roundsWords)
+
+	wantNextE := nextEWords
+	wantNextE[3] += bits.RotateLeft32(nextEState[3], 30)
+	wantRounds := sha1Rounds4Test(roundsState, [4]uint32{roundsWords[3], roundsWords[2], roundsWords[1], roundsWords[0]}, 1)
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("SHA1 instructions changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	for lane, want := range wantNextE {
+		if got := binary.LittleEndian.Uint32(state.XMM[1][lane*4:]); got != want {
+			t.Fatalf("SHA1NEXTE lane %d=%#x, want %#x", lane, got, want)
+		}
+	}
+	for lane, want := range wantRounds {
+		if got := binary.LittleEndian.Uint32(state.XMM[3][lane*4:]); got != want {
+			t.Fatalf("SHA1RNDS4 lane %d=%#x, want %#x", lane, got, want)
+		}
+	}
+}

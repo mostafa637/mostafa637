@@ -1150,6 +1150,30 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s requires an immediate round constant", inst.Op)
 		}
 		return makeAESKeygenAssist64(address, uint8(inst.Len), destination, source, uint8(immediate)), false, nil
+	case x86asm.SHA1NEXTE:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeSHA1NextE64(address, uint8(inst.Len), destination, source), false, nil
+	case x86asm.SHA1RNDS4:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("%s requires an immediate round selector", inst.Op)
+		}
+		return makeSHA1Rounds4_64(address, uint8(inst.Len), destination, source, uint8(immediate)), false, nil
 	case x86asm.SHA1MSG1, x86asm.SHA1MSG2, x86asm.SHA256MSG1, x86asm.SHA256MSG2:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
@@ -6044,6 +6068,87 @@ func sha256Choose64(x, y, z uint32) uint32 {
 
 func sha256Majority64(x, y, z uint32) uint32 {
 	return (x & y) ^ (x & z) ^ (y & z)
+}
+
+func makeSHA1NextE64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		src1, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		src2, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		result := src2
+		putSHADword64(&result, 3, shaDword64(src2, 3)+sha1RotateLeft64(shaDword64(src1, 3), 30))
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func sha1RoundFunction64(b, c, d uint32, selector uint8) uint32 {
+	switch selector & 3 {
+	case 0:
+		return (b & c) | (^b & d)
+	case 1, 3:
+		return b ^ c ^ d
+	case 2:
+		return (b & c) | (b & d) | (c & d)
+	default:
+		return 0
+	}
+}
+
+func sha1RoundConstant64(selector uint8) uint32 {
+	switch selector & 3 {
+	case 0:
+		return 0x5a827999
+	case 1:
+		return 0x6ed9eba1
+	case 2:
+		return 0x8f1bbcdc
+	default:
+		return 0xca62c1d6
+	}
+}
+
+func makeSHA1Rounds4_64(address uint64, size uint8, destination, source operand64, selector uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		src1, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		src2, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		selector &= 3
+		constant := sha1RoundConstant64(selector)
+		a, b, c, d := shaDword64(src1, 3), shaDword64(src1, 2), shaDword64(src1, 1), shaDword64(src1, 0)
+		words := [4]uint32{shaDword64(src2, 3), shaDword64(src2, 2), shaDword64(src2, 1), shaDword64(src2, 0)}
+		var e uint32
+		for round, word := range words {
+			if round != 0 {
+				word += e
+			}
+			t := sha1RoundFunction64(b, c, d, selector) + sha1RotateLeft64(a, 5) + word + constant
+			a, b, c, d, e = t, a, sha1RotateLeft64(b, 30), c, d
+		}
+		var result [16]byte
+		putSHADword64(&result, 3, a)
+		putSHADword64(&result, 2, b)
+		putSHADword64(&result, 1, c)
+		putSHADword64(&result, 0, d)
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
 }
 
 func makeSHAMessage64(address uint64, size uint8, op x86asm.Op, destination, source operand64) microOp64 {
