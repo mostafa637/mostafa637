@@ -5120,3 +5120,89 @@ func TestJIT64NonTemporalStores(t *testing.T) {
 		t.Fatalf("non-temporal store memory=%x, want %x", got, want)
 	}
 }
+
+func TestJIT64PackedFloatConversions(t *testing.T) {
+	const codeAddress Address64 = 0x7c000
+	const dataAddress Address64 = 0x7e000
+	memory := NewMemory64()
+	code := []byte{
+		0x49, 0xbf, 0, 0, 0, 0, 0, 0, 0, 0, // mov r15,dataAddress
+		0x44, 0x0f, 0x5a, 0xc0, // cvtps2pd xmm8,xmm0
+		0x66, 0x44, 0x0f, 0x5a, 0xc9, // cvtpd2ps xmm9,xmm1
+		0x66, 0x44, 0x0f, 0xe6, 0xd2, // cvttpd2dq xmm10,xmm2
+		0x45, 0x0f, 0x5a, 0x1f, // cvtps2pd xmm11,[r15]
+		0x66, 0x45, 0x0f, 0x5a, 0x67, 0x10, // cvtpd2ps xmm12,[r15+16]
+		0x66, 0x45, 0x0f, 0xe6, 0x6f, 0x20, // cvttpd2dq xmm13,[r15+32]
+		0xf4, // hlt
+	}
+	binary.LittleEndian.PutUint64(code[2:], uint64(dataAddress))
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	var data [48]byte
+	binary.LittleEndian.PutUint32(data[0:4], math.Float32bits(1.5))
+	binary.LittleEndian.PutUint32(data[4:8], math.Float32bits(-2.25))
+	binary.LittleEndian.PutUint64(data[16:24], math.Float64bits(3.5))
+	binary.LittleEndian.PutUint64(data[24:32], math.Float64bits(-4.75))
+	binary.LittleEndian.PutUint64(data[32:40], math.Float64bits(7.9))
+	binary.LittleEndian.PutUint64(data[40:48], math.Float64bits(-8.9))
+	if err := memory.Write(dataAddress, data[:]); err != nil {
+		t.Fatal(err)
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Regs[RAX] = 0x1122334455667788
+	state.XMM[0] = [16]byte{0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc}
+	binary.LittleEndian.PutUint32(state.XMM[0][0:4], math.Float32bits(1.5))
+	binary.LittleEndian.PutUint32(state.XMM[0][4:8], math.Float32bits(-2.25))
+	state.XMM[1] = [16]byte{0xdd, 0xdd, 0xdd, 0xdd, 0xdd, 0xdd, 0xdd, 0xdd, 0xdd, 0xdd, 0xdd, 0xdd, 0xdd, 0xdd, 0xdd, 0xdd}
+	binary.LittleEndian.PutUint64(state.XMM[1][0:8], math.Float64bits(3.5))
+	binary.LittleEndian.PutUint64(state.XMM[1][8:16], math.Float64bits(-4.75))
+	state.XMM[2] = [16]byte{0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee}
+	binary.LittleEndian.PutUint64(state.XMM[2][0:8], math.Float64bits(7.9))
+	binary.LittleEndian.PutUint64(state.XMM[2][8:16], math.Float64bits(-8.9))
+	for register := 10; register < 14; register++ {
+		state.XMM[register] = [16]byte{0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa}
+	}
+	state.SetFPUTop(6)
+	state.RFLAGS = Flag64OF | Flag64AF | Flag64PF | Flag64ZF | Flag64SF | Flag64CF
+	flagsBefore := state.RFLAGS
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("packed conversions changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	if state.Get(RAX) != 0x1122334455667788 || state.Get(R15) != uint64(dataAddress) {
+		t.Fatalf("GPR state changed: RAX=%#x R15=%#x", state.Get(RAX), state.Get(R15))
+	}
+	if state.FPUTop() != 6 {
+		t.Fatalf("packed conversions changed FPU TOP to %d, want 6", state.FPUTop())
+	}
+	var wantDouble [16]byte
+	binary.LittleEndian.PutUint64(wantDouble[0:8], math.Float64bits(1.5))
+	binary.LittleEndian.PutUint64(wantDouble[8:16], math.Float64bits(-2.25))
+	if state.XMM[8] != wantDouble || state.XMM[11] != wantDouble {
+		t.Fatalf("CVTPS2PD results: XMM8=%x XMM11=%x want=%x", state.XMM[8], state.XMM[11], wantDouble)
+	}
+	var wantSingle [16]byte
+	binary.LittleEndian.PutUint32(wantSingle[0:4], math.Float32bits(3.5))
+	binary.LittleEndian.PutUint32(wantSingle[4:8], math.Float32bits(-4.75))
+	if state.XMM[9] != wantSingle {
+		t.Fatalf("register CVTPD2PS result=%x, want=%x", state.XMM[9], wantSingle)
+	}
+	var wantMemorySingle [16]byte
+	binary.LittleEndian.PutUint32(wantMemorySingle[0:4], math.Float32bits(3.5))
+	binary.LittleEndian.PutUint32(wantMemorySingle[4:8], math.Float32bits(-4.75))
+	if state.XMM[12] != wantMemorySingle {
+		t.Fatalf("memory CVTPD2PS result=%x, want=%x", state.XMM[12], wantMemorySingle)
+	}
+	var wantInt [16]byte
+	binary.LittleEndian.PutUint32(wantInt[0:4], uint32(int32(7)))
+	binary.LittleEndian.PutUint32(wantInt[4:8], 0xfffffff8)
+	if state.XMM[10] != wantInt || state.XMM[13] != wantInt {
+		t.Fatalf("CVTTPD2DQ results: XMM10=%x XMM13=%x want=%x", state.XMM[10], state.XMM[13], wantInt)
+	}
+}

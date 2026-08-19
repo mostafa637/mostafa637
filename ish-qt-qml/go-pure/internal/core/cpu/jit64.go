@@ -908,14 +908,18 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, sourceErr)
 		}
 		return makeCVTScalar64(address, uint8(inst.Len), inst.Op, destination, source, sourceWidth), false, nil
-	case x86asm.CVTDQ2PS, x86asm.CVTPS2DQ, x86asm.CVTTPS2DQ, x86asm.CVTDQ2PD, x86asm.CVTPD2DQ:
+	case x86asm.CVTDQ2PS, x86asm.CVTPS2DQ, x86asm.CVTTPS2DQ, x86asm.CVTDQ2PD, x86asm.CVTPD2DQ,
+		x86asm.CVTPS2PD, x86asm.CVTPD2PS, x86asm.CVTTPD2DQ:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
 			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
 		}
-		source, err := operand64FromArg(arg(1), 16)
+		source, err := operand64FromArg(arg(1), 0)
 		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		if source.Kind == operand64Mem {
+			source.Width = packedConversionSourceWidth64(inst.Op)
 		}
 		return makeSSEPackedConvert64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
 	case x86asm.ADDPS, x86asm.SUBPS, x86asm.MULPS, x86asm.DIVPS,
@@ -2318,7 +2322,7 @@ func cvtFloatToInt64(value float64, width uint8, truncate bool) uint64 {
 }
 
 func packedConversionSourceWidth64(op x86asm.Op) uint8 {
-	if op == x86asm.CVTDQ2PD {
+	if op == x86asm.CVTDQ2PD || op == x86asm.CVTPS2PD {
 		return 8
 	}
 	return 16
@@ -2348,6 +2352,22 @@ func makeSSEPackedConvert64(address uint64, size uint8, op x86asm.Op, dst, src o
 			for lane := 0; lane < 2; lane++ {
 				value := int32(binary.LittleEndian.Uint32(source[lane*4:]))
 				binary.LittleEndian.PutUint64(result[lane*8:], math.Float64bits(float64(value)))
+			}
+		case x86asm.CVTPS2PD:
+			for lane := 0; lane < 2; lane++ {
+				value := math.Float32frombits(binary.LittleEndian.Uint32(source[lane*4:]))
+				binary.LittleEndian.PutUint64(result[lane*8:], math.Float64bits(float64(value)))
+			}
+		case x86asm.CVTPD2PS:
+			for lane := 0; lane < 2; lane++ {
+				value := math.Float64frombits(binary.LittleEndian.Uint64(source[lane*8:]))
+				binary.LittleEndian.PutUint32(result[lane*4:], math.Float32bits(float32(value)))
+			}
+		case x86asm.CVTTPD2DQ:
+			for lane := 0; lane < 2; lane++ {
+				value := math.Float64frombits(binary.LittleEndian.Uint64(source[lane*8:]))
+				raw := cvtFloatToInt64(value, 4, true)
+				binary.LittleEndian.PutUint32(result[lane*4:], uint32(raw))
 			}
 		case x86asm.CVTPD2DQ:
 			for lane := 0; lane < 2; lane++ {
