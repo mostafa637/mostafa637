@@ -4806,3 +4806,80 @@ func TestJIT64HalfRegisterMoves(t *testing.T) {
 		t.Fatalf("REX.R/B MOVLPS/MOVHLPS xmm9=%x, want %x", state.XMM[9], want9)
 	}
 }
+
+func TestJIT64PBLENDVB(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x64000
+		dataAddress Address64 = 0x65000
+	)
+	memory := NewMemory64()
+	code := []byte{
+		0x66, 0x0f, 0x38, 0x10, 0xd3, // pblendvb xmm2,xmm3
+		0x66, 0x44, 0x0f, 0x38, 0x10, 0x07, // pblendvb xmm8,[rdi] (REX.R)
+		0x66, 0x44, 0x0f, 0x38, 0x10, 0x4f, 0x10, // pblendvb xmm9,[rdi+0x10] (REX.R)
+		0x66, 0x0f, 0x38, 0x10, 0xc1, // pblendvb xmm0,xmm1 (implicit mask aliases destination)
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	var data [64]byte
+	for i := range data {
+		data[i] = byte(0x40 + i)
+	}
+	if err := memory.Write(dataAddress, data[:]); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	for lane := range state.XMM[1] {
+		state.XMM[1][lane] = byte(0x20 + lane)
+		state.XMM[2][lane] = byte(0xa0 + lane)
+		state.XMM[3][lane] = byte(0xb0 + lane)
+		state.XMM[8][lane] = byte(0xc0 + lane)
+		state.XMM[9][lane] = byte(0xd0 + lane)
+		if lane%2 == 0 {
+			state.XMM[0][lane] = 0x80
+		}
+	}
+	state.RFLAGS = Flag64IF | Flag64CF | Flag64ZF | Flag64SF
+	flagsBefore := state.RFLAGS
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("PBLENDVB changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	var want2 [16]byte
+	var want8 [16]byte
+	var want9 [16]byte
+	var want0 [16]byte
+	for lane := 0; lane < 16; lane++ {
+		if lane%2 == 0 {
+			want2[lane] = byte(0xb0 + lane)
+			want8[lane] = byte(0x40 + lane)
+			want9[lane] = byte(0x50 + lane)
+			want0[lane] = byte(0x20 + lane)
+		}
+	}
+	for lane := 1; lane < 16; lane += 2 {
+		want2[lane] = byte(0xa0 + lane)
+		want8[lane] = byte(0xc0 + lane)
+		want9[lane] = byte(0xd0 + lane)
+	}
+	if state.XMM[2] != want2 {
+		t.Fatalf("PBLENDVB register result=%x, want %x", state.XMM[2], want2)
+	}
+	if state.XMM[8] != want8 {
+		t.Fatalf("PBLENDVB memory REX.R result=%x, want %x", state.XMM[8], want8)
+	}
+	if state.XMM[9] != want9 {
+		t.Fatalf("PBLENDVB memory REX.R+disp result=%x, want %x", state.XMM[9], want9)
+	}
+	if state.XMM[0] != want0 {
+		t.Fatalf("PBLENDVB XMM0 alias result=%x, want %x", state.XMM[0], want0)
+	}
+}

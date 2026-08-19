@@ -954,6 +954,16 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
 		}
 		return makeSSEBlend64(address, uint8(inst.Len), inst.Op, destination, source, 0, true), false, nil
+	case x86asm.PBLENDVB:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("PBLENDVB destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("PBLENDVB source: %v", err)
+		}
+		return makeSSEBlendBytes64(address, uint8(inst.Len), destination, source), false, nil
 	case x86asm.DPPS, x86asm.DPPD:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
@@ -2371,6 +2381,30 @@ func makeSSERound64(address uint64, size uint8, op x86asm.Op, destination, sourc
 			if err := writeVector64(state, destination, next, result); err != nil {
 				return Flow64Stop, err
 			}
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEBlendBytes64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		result, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		sourceBytes, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		mask := state.XMM[0]
+		for lane := range result {
+			if mask[lane]&0x80 != 0 {
+				result[lane] = sourceBytes[lane]
+			}
+		}
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
 		}
 		state.RIP = next
 		return Flow64Continue, nil
