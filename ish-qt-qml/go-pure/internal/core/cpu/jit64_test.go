@@ -2908,3 +2908,114 @@ func TestJIT64PackedSSEFloatMinMaxAndDuplicate(t *testing.T) {
 		t.Fatalf("movshdup memory=%#v, want %#v", got, want)
 	}
 }
+
+func TestJIT64SIMDNonTemporalAndMaskedStores(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x42000
+		dataAddress Address64 = 0x43000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	initial := make([]byte, 64)
+	for i := range initial {
+		initial[i] = 0xcc
+	}
+	if err := memory.Write(dataAddress, initial); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	code := []byte{
+		0x66, 0x0f, 0xe7, 0x47, 0x03, // movntdq [rdi+3], xmm0
+		0x0f, 0x2b, 0x47, 0x13, // movntps [rdi+19], xmm0
+		0x66, 0x0f, 0xf7, 0xc1, // maskmovdqu xmm0, xmm1
+		0x66, 0x45, 0x0f, 0xf7, 0xc8, // maskmovdqu xmm9, xmm8
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress+5))
+	for lane := 0; lane < 16; lane++ {
+		state.XMM[0][lane] = byte(lane + 1)
+		state.XMM[9][lane] = byte(0xa0 + lane)
+	}
+	for lane, mask := range []byte{
+		0x80, 0x00, 0xff, 0x7f, 0x80, 0x01, 0x80, 0x00,
+		0x00, 0x80, 0x00, 0x00, 0x80, 0x01, 0x00, 0x80,
+	} {
+		state.XMM[1][lane] = mask
+		state.XMM[8][lane] = mask
+	}
+	originalRDI := state.Get(RDI)
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.Get(RDI) != originalRDI {
+		t.Fatalf("MASKMOVDQU changed RDI from %#x to %#x", originalRDI, state.Get(RDI))
+	}
+	var got [64]byte
+	if err := memory.Read(dataAddress, got[:]); err != nil {
+		t.Fatal(err)
+	}
+	want := initial
+	copy(want[8:24], state.XMM[0][:])
+	copy(want[24:40], state.XMM[0][:])
+	for lane, mask := range state.XMM[1] {
+		if mask&0x80 != 0 {
+			want[5+lane] = state.XMM[0][lane]
+		}
+	}
+	for lane, mask := range state.XMM[8] {
+		if mask&0x80 != 0 {
+			want[5+lane] = state.XMM[9][lane]
+		}
+	}
+	if got != [64]byte(want) {
+		t.Fatalf("masked/non-temporal stores=%x, want %x", got, want)
+	}
+
+	memory = NewMemory64()
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	zeroInitial := make([]byte, 16)
+	for i := range zeroInitial {
+		zeroInitial[i] = 0xab
+	}
+	if err := memory.Write(dataAddress, zeroInitial); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(codeAddress, []byte{0x66, 0x0f, 0xf7, 0xc1, 0xf4}); err != nil { // maskmovdqu xmm0, xmm1
+		t.Fatal(err)
+	}
+	state = NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	for lane := range state.XMM[1] {
+		state.XMM[0][lane] = byte(lane + 1)
+		state.XMM[1][lane] = 0
+	}
+	trap = NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("zero-mask trap=%#x halted=%v", trap, state.Halted)
+	}
+	var untouched [16]byte
+	if err := memory.Read(dataAddress, untouched[:]); err != nil {
+		t.Fatal(err)
+	}
+	for lane, value := range untouched {
+		if value != 0xab {
+			t.Fatalf("zero-mask changed byte %d to %#x", lane, value)
+		}
+	}
+}

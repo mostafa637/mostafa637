@@ -796,6 +796,26 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
 		}
 		return makeSSEPackedFloatUnary64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.MOVNTDQ, x86asm.MOVNTPS:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64Mem {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || source.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeSSEMove64(address, uint8(inst.Len), destination, source), false, nil
+	case x86asm.MASKMOVDQU:
+		source, err := operand64FromArg(arg(0), 16)
+		if err != nil || source.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		mask, err := operand64FromArg(arg(1), 16)
+		if err != nil || mask.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s mask: %v", inst.Op, err)
+		}
+		return makeSSEMaskMoveDQU64(address, uint8(inst.Len), source, mask), false, nil
 	case x86asm.MOVSLDUP, x86asm.MOVSHDUP:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
@@ -2297,6 +2317,30 @@ func makeSSEMove64(address uint64, size uint8, dst, src operand64) microOp64 {
 		}
 		if err := writeVector64(state, dst, next, value); err != nil {
 			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEMaskMoveDQU64(address uint64, size uint8, source, mask operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		sourceBytes, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		maskBytes, err := readVector64(state, mask, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		base := Address64(state.Get(RDI))
+		for lane := 0; lane < len(sourceBytes); lane++ {
+			if maskBytes[lane]&0x80 == 0 {
+				continue
+			}
+			if err := state.Memory.Write(base+Address64(lane), sourceBytes[lane:lane+1]); err != nil {
+				return Flow64Stop, err
+			}
 		}
 		state.RIP = next
 		return Flow64Continue, nil
