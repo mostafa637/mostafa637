@@ -45,6 +45,30 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 	case OpMovRegReg:
 		state.Set(instruction.Reg, state.Get(instruction.Reg2))
 		state.EIP = next
+	case OpMovRegMem:
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		state.Set(instruction.Dst.Reg, value)
+		state.EIP = next
+	case OpMovMemReg:
+		if err := storeOperand(state, instruction.Dst, state.Get(instruction.Src.Reg)); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
+	case OpMovMemImm:
+		if err := storeOperand(state, instruction.Dst, uint32(instruction.Imm)); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
+	case OpLeaRegMem:
+		address, err := effectiveAddress(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		state.Set(instruction.Dst.Reg, uint32(address))
+		state.EIP = next
 	case OpAddEAXImm:
 		state.SetEAX(e.add(state, state.EAXValue(), uint32(instruction.Imm)))
 		state.EIP = next
@@ -98,6 +122,15 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			return instruction, err
 		}
 		state.EIP = next
+	case OpPushMem:
+		value, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		if err := push(state, value); err != nil {
+			return instruction, err
+		}
+		state.EIP = next
 	case OpPopReg:
 		value, err := pop(state)
 		if err != nil {
@@ -115,6 +148,15 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 			return instruction, err
 		}
 		state.EIP = uint32(int64(next) + int64(instruction.Rel))
+	case OpCallOperand:
+		target, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		if err := push(state, next); err != nil {
+			return instruction, err
+		}
+		state.EIP = target
 	case OpRet:
 		value, err := pop(state)
 		if err != nil {
@@ -123,6 +165,12 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		state.EIP = value
 	case OpJmpRel:
 		state.EIP = uint32(int64(next) + int64(instruction.Rel))
+	case OpJmpOperand:
+		target, err := loadOperand(state, instruction.Src)
+		if err != nil {
+			return instruction, err
+		}
+		state.EIP = target
 	case OpJzRel:
 		if state.Flag(FlagZF) {
 			state.EIP = uint32(int64(next) + int64(instruction.Rel))
@@ -188,6 +236,49 @@ func (e *Executor) Run(state *MachineState, maxSteps int) error {
 		return nil
 	}
 	return ErrStepLimit
+}
+
+func effectiveAddress(state *MachineState, operand Operand) (Address, error) {
+	if !operand.IsMem {
+		return 0, ErrUnsupportedAddressing
+	}
+	memory := operand.Memory
+	var address uint32
+	if memory.HasBase {
+		address += state.Get(memory.Base)
+	}
+	if memory.HasIndex {
+		address += state.Get(memory.Index) * uint32(memory.Scale)
+	}
+	address += uint32(memory.Disp)
+	return Address(address), nil
+}
+
+func loadOperand(state *MachineState, operand Operand) (uint32, error) {
+	if !operand.IsMem {
+		return state.Get(operand.Reg), nil
+	}
+	address, err := effectiveAddress(state, operand)
+	if err != nil {
+		return 0, err
+	}
+	var raw [4]byte
+	if err := state.Memory.Read(address, raw[:]); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(raw[:]), nil
+}
+
+func storeOperand(state *MachineState, operand Operand, value uint32) error {
+	if !operand.IsMem {
+		state.Set(operand.Reg, value)
+		return nil
+	}
+	address, err := effectiveAddress(state, operand)
+	if err != nil {
+		return err
+	}
+	return state.Memory.Write(address, uint32Bytes(value))
 }
 
 func (e *Executor) add(state *MachineState, left, right uint32) uint32 {

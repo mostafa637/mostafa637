@@ -96,3 +96,32 @@ func TestProcessStopsOnGuestExit(t *testing.T) {
 		t.Fatalf("exit state: exited=%v code=%d", exited, code)
 	}
 }
+
+func TestProcessRunsGuestMemoryInstructions(t *testing.T) {
+	process := NewProcess(123, nil)
+	defer process.Close()
+	if err := process.Memory.Map(1, 1, 1|2|4); err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Memory.Map(2, 1, 1|2); err != nil {
+		t.Fatal(err)
+	}
+	code := []byte{
+		0xBF, 0x00, 0x20, 0x00, 0x00, // mov edi, 0x2000
+		0xBE, 0x02, 0x00, 0x00, 0x00, // mov esi, 2
+		0xB8, 0xEF, 0xBE, 0xAD, 0xDE, // mov eax, 0xdeadbeef
+		0x89, 0x84, 0xB7, 0x10, 0x00, 0x00, 0x00, // mov [edi+esi*4+0x10], eax
+		0x8B, 0x8C, 0xB7, 0x10, 0x00, 0x00, 0x00, // mov ecx, [edi+esi*4+0x10]
+		0xF4,
+	}
+	if err := process.Memory.Write(4096, code); err != nil {
+		t.Fatal(err)
+	}
+	process.CPU.EIP = 4096
+	if err := process.Run(16); err != nil {
+		t.Fatal(err)
+	}
+	if process.CPU.Get(1) != 0xDEADBEEF {
+		t.Fatalf("guest ecx = %#x", process.CPU.Get(1))
+	}
+}

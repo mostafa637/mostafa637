@@ -1,6 +1,7 @@
 package cpu
 
 import (
+	"encoding/binary"
 	"testing"
 )
 
@@ -108,5 +109,64 @@ func TestExecutorPreservesCarryAcrossInc(t *testing.T) {
 	}
 	if state.Get(EAX) != 1 {
 		t.Fatalf("eax = %d", state.Get(EAX))
+	}
+}
+
+func TestExecutorMemoryOperandsAndLEA(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xBB, 0x00, 0x20, 0x00, 0x00, // mov ebx, 0x2000
+		0xB8, 0x44, 0x33, 0x22, 0x11, // mov eax, 0x11223344
+		0x89, 0x43, 0x04, // mov [ebx+4], eax
+		0x8B, 0x4B, 0x04, // mov ecx, [ebx+4]
+		0x89, 0x4B, 0x08, // mov [ebx+8], ecx
+		0x8D, 0x53, 0x08, // lea edx, [ebx+8]
+		0x8B, 0x02, // mov eax, [edx]
+		0xC7, 0x43, 0x0C, 0x78, 0x56, 0x34, 0x12, // mov dword [ebx+12], 0x12345678
+		0xF4,
+	})
+	executor := NewExecutor(nil)
+	if err := executor.Run(state, 32); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(EAX) != 0x11223344 {
+		t.Fatalf("eax = %#x", state.Get(EAX))
+	}
+	if state.Get(ECX) != 0x11223344 {
+		t.Fatalf("ecx = %#x", state.Get(ECX))
+	}
+	if state.Get(EDX) != 0x2008 {
+		t.Fatalf("edx = %#x", state.Get(EDX))
+	}
+	var raw [4]byte
+	if err := state.Memory.Read(0x200c, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 0x12345678 {
+		t.Fatalf("stored immediate = %#x", got)
+	}
+}
+
+func TestExecutorSIBAddressing(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xBF, 0x00, 0x20, 0x00, 0x00, // mov edi, 0x2000
+		0xBE, 0x02, 0x00, 0x00, 0x00, // mov esi, 2
+		0xB8, 0xEF, 0xBE, 0xAD, 0xDE, // mov eax, 0xdeadbeef
+		0x89, 0x84, 0xB7, 0x10, 0x00, 0x00, 0x00, // mov [edi+esi*4+0x10], eax
+		0x8B, 0x8C, 0xB7, 0x10, 0x00, 0x00, 0x00, // mov ecx, [edi+esi*4+0x10]
+		0xF4,
+	})
+	executor := NewExecutor(nil)
+	if err := executor.Run(state, 32); err != nil {
+		t.Fatal(err)
+	}
+	if state.Get(ECX) != 0xDEADBEEF {
+		t.Fatalf("ecx = %#x", state.Get(ECX))
+	}
+	var raw [4]byte
+	if err := state.Memory.Read(0x2018, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(raw[:]); got != 0xDEADBEEF {
+		t.Fatalf("SIB stored value = %#x", got)
 	}
 }
