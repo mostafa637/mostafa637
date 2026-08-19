@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"sync"
 	"time"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
@@ -48,6 +49,7 @@ const (
 	Sys64Dup           Number64 = 32
 	Sys64Dup2          Number64 = 33
 	Sys64Nanosleep     Number64 = 35
+	Sys64Pause         Number64 = 34
 	Sys64GetPID        Number64 = 39
 	Sys64Sendfile      Number64 = 40
 	Sys64Chown         Number64 = 92
@@ -62,11 +64,14 @@ const (
 	Sys64Statfs        Number64 = 137
 	Sys64Fstatfs       Number64 = 138
 
-	Sys64GetRlimit  Number64 = 97
-	Sys64Prctl      Number64 = 157
-	Sys64Fchownat   Number64 = 260
-	Sys64Fchmodat   Number64 = 268
-	Sys64Faccessat2 Number64 = 439
+	Sys64GetRlimit      Number64 = 97
+	Sys64RtSigpending   Number64 = 127
+	Sys64RtSigtimedwait Number64 = 128
+	Sys64RtSigsuspend   Number64 = 130
+	Sys64Prctl          Number64 = 157
+	Sys64Fchownat       Number64 = 260
+	Sys64Fchmodat       Number64 = 268
+	Sys64Faccessat2     Number64 = 439
 
 	Sys64GetRUsage Number64 = 98
 	Sys64GetGroups Number64 = 115
@@ -177,6 +182,10 @@ type Context64 struct {
 	Groups         []uint32
 	SignalMask     uint64
 	SignalActions  map[uint64][32]byte
+	SignalMu       sync.Mutex
+	SignalCond     *sync.Cond
+	SignalWake     chan struct{}
+	PendingSignals uint64
 	StartTime      time.Time
 	FSBase         uint64
 	GSBase         uint64
@@ -203,7 +212,10 @@ type Dispatcher64 struct {
 }
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
-	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), SignalActions: make(map[uint64][32]byte), StartTime: time.Now(), CPUIDEnabled: true, Dumpable: true, AffinityMask: ^uint64(0), Umask: 0o022, signalFDs: make(map[*signalFD64]struct{})}
+	ctx := &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), SignalActions: make(map[uint64][32]byte), StartTime: time.Now(), CPUIDEnabled: true, Dumpable: true, AffinityMask: ^uint64(0), Umask: 0o022, signalFDs: make(map[*signalFD64]struct{})}
+	ctx.SignalCond = sync.NewCond(&ctx.SignalMu)
+	ctx.SignalWake = make(chan struct{})
+	return ctx
 }
 
 const maxFD64 = uint64(^uint32(0) >> 1)
@@ -253,12 +265,16 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64ClockGetres, clockGetres64)
 	d.Register(Sys64GetRUsage, getrusage64)
 	d.Register(Sys64Times, times64)
+	d.Register(Sys64Pause, pause64)
 	d.Register(Sys64GetRlimit, getrlimit64)
 	d.Register(Sys64SetRlimit, setrlimit64)
 	d.Register(Sys64GetGroups, getgroups64)
 	d.Register(Sys64SetGroups, setgroups64)
 	d.Register(Sys64RtSigaction, rtSigaction64)
 	d.Register(Sys64RtSigprocmask, rtSigprocmask64)
+	d.Register(Sys64RtSigpending, rtSigpending64)
+	d.Register(Sys64RtSigtimedwait, rtSigtimedwait64)
+	d.Register(Sys64RtSigsuspend, rtSigsuspend64)
 	d.Register(Sys64RtSigreturn, signalStub64)
 	d.Register(Sys64Tkill, tkill64)
 	d.Register(Sys64Tgkill, tgkill64)

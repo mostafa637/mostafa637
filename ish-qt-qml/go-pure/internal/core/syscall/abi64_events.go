@@ -681,6 +681,7 @@ func kill64(ctx *Context64, args [6]uint64) int64 {
 	if args[1] == 0 {
 		return 0
 	}
+	queueSignal64(ctx, args[1])
 	for handle := range ctx.signalFDs {
 		handle.enqueue(uint32(args[1]), uint32(ctx.PID), 0)
 	}
