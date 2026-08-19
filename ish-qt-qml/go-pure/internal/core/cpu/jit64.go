@@ -512,6 +512,16 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("BSWAP destination: %v", err)
 		}
 		return makeBSWAP64(address, uint8(inst.Len), destination), false, nil
+	case x86asm.LZCNT, x86asm.TZCNT:
+		destination, err := operand64FromArg(arg(0), 0)
+		if err != nil || destination.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), destination.Width)
+		if err != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeCountZeros64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
 	case x86asm.BSF, x86asm.BSR:
 		destination, err := operand64FromArg(arg(0), 0)
 		if err != nil || destination.Kind != operand64Reg {
@@ -768,6 +778,8 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		x86asm.PADDB, x86asm.PADDW, x86asm.PADDD, x86asm.PADDQ,
 		x86asm.PSUBB, x86asm.PSUBW, x86asm.PSUBD, x86asm.PSUBQ,
 		x86asm.PCMPEQB, x86asm.PCMPEQW, x86asm.PCMPEQD, x86asm.PCMPEQQ,
+		x86asm.PCMPGTB, x86asm.PCMPGTW, x86asm.PCMPGTD,
+
 		x86asm.PAVGB, x86asm.PAVGW,
 		x86asm.PMINUB, x86asm.PMAXUB, x86asm.PMINUW, x86asm.PMAXUW,
 		x86asm.PMINUD, x86asm.PMAXUD, x86asm.PMINSB, x86asm.PMAXSB,
@@ -782,8 +794,57 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("SSE ALU source: %v", err)
 		}
 		return makeSSEBinary64(address, uint8(inst.Len), inst.Op, left, right), false, nil
+	case x86asm.PALIGNR:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("PALIGNR destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("PALIGNR source: %v", err)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, errors.New("PALIGNR requires an immediate count")
+		}
+		return makeSSEAlignRight64(address, uint8(inst.Len), destination, source, uint8(immediate)), false, nil
+	case x86asm.PBLENDW:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("PBLENDW destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("PBLENDW source: %v", err)
+		}
+		immediate, ok := arg(2).(x86asm.Imm)
+		if !ok {
+			return microOp64{}, false, errors.New("PBLENDW requires an immediate mask")
+		}
+		return makeSSEBlendW64(address, uint8(inst.Len), destination, source, uint8(immediate)), false, nil
+	case x86asm.PTEST:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("PTEST destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("PTEST source: %v", err)
+		}
+		return makeSSETest64(address, uint8(inst.Len), destination, source), false, nil
+	case x86asm.MOVDDUP:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("MOVDDUP destination: %v", err)
+		}
+		source, err := operand64ScalarSSEFromArg(arg(1), 8)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("MOVDDUP source: %v", err)
+		}
+		return makeMOVDDUP64(address, uint8(inst.Len), destination, source), false, nil
 
 	case x86asm.PSLLW, x86asm.PSLLD, x86asm.PSLLQ,
+
 		x86asm.PSRLW, x86asm.PSRLD, x86asm.PSRLQ,
 		x86asm.PSRAW, x86asm.PSRAD, x86asm.PSLLDQ, x86asm.PSRLDQ:
 		destination, err := operand64FromArg(arg(0), 16)
@@ -1923,17 +1984,126 @@ func makeSSEMove64(address uint64, size uint8, dst, src operand64) microOp64 {
 	}}
 }
 
+func makeSSEAlignRight64(address uint64, size uint8, destination, source operand64, immediate uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var combined [32]byte
+		copy(combined[:16], right[:])
+		copy(combined[16:], left[:])
+		var result [16]byte
+		count := int(immediate)
+		if count < len(combined) {
+			copy(result[:], combined[count:count+len(result)])
+		}
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEBlendW64(address uint64, size uint8, destination, source operand64, immediate uint8) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var result [16]byte
+		copy(result[:], left[:])
+		for lane := 0; lane < 8; lane++ {
+			if immediate&(1<<uint(lane)) != 0 {
+				copy(result[lane*2:lane*2+2], right[lane*2:lane*2+2])
+			}
+		}
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSETest64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		andZero := true
+		andNotZero := true
+		for i := range left {
+			if left[i]&right[i] != 0 {
+				andZero = false
+			}
+			if (^left[i])&right[i] != 0 {
+				andNotZero = false
+			}
+		}
+		state.CollapseFlags()
+		var flags uint64
+		if andNotZero {
+			flags |= Flag64CF
+		}
+		if andZero {
+			flags |= Flag64ZF
+		}
+		state.RFLAGS = (state.RFLAGS &^ (Flag64CF | Flag64PF | Flag64AF | Flag64ZF | Flag64SF | Flag64OF)) | flags
+		state.CF = boolByte64(flags&Flag64CF != 0)
+		state.OF = 0
+		state.Lazy = 0
+		state.LazyWidth = 0
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeMOVDDUP64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readScalarSSE64(state, source, 8, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		raw := math.Float64bits(value)
+		var result [16]byte
+		for i := 0; i < 8; i++ {
+			result[i] = byte(raw >> (8 * i))
+			result[i+8] = result[i]
+		}
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
 func sseLaneWidth64(op x86asm.Op) (int, bool) {
 	switch op {
-	case x86asm.PADDB, x86asm.PSUBB, x86asm.PCMPEQB,
+	case x86asm.PADDB, x86asm.PSUBB, x86asm.PCMPEQB, x86asm.PCMPGTB,
 		x86asm.PAVGB, x86asm.PMINUB, x86asm.PMAXUB,
 		x86asm.PMINSB, x86asm.PMAXSB:
 		return 1, true
-	case x86asm.PADDW, x86asm.PSUBW, x86asm.PCMPEQW,
+	case x86asm.PADDW, x86asm.PSUBW, x86asm.PCMPEQW, x86asm.PCMPGTW,
 		x86asm.PAVGW, x86asm.PMINUW, x86asm.PMAXUW,
 		x86asm.PMINSW, x86asm.PMAXSW:
 		return 2, true
-	case x86asm.PADDD, x86asm.PSUBD, x86asm.PCMPEQD,
+	case x86asm.PADDD, x86asm.PSUBD, x86asm.PCMPEQD, x86asm.PCMPGTD,
 		x86asm.PMINUD, x86asm.PMAXUD, x86asm.PMINSD, x86asm.PMAXSD:
 		return 4, true
 	case x86asm.PADDQ, x86asm.PSUBQ, x86asm.PCMPEQQ:
@@ -1985,10 +2155,14 @@ func makeSSEBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand6
 					result = l - r
 				case x86asm.PCMPEQB, x86asm.PCMPEQW, x86asm.PCMPEQD, x86asm.PCMPEQQ:
 					if l == r {
-
+						result = (uint64(1) << (8 * lane)) - 1
+					}
+				case x86asm.PCMPGTB, x86asm.PCMPGTW, x86asm.PCMPGTD:
+					if signExtendLane64(l, lane) > signExtendLane64(r, lane) {
 						result = (uint64(1) << (8 * lane)) - 1
 					}
 				case x86asm.PAVGB, x86asm.PAVGW:
+
 					result = (l + r + 1) / 2
 				case x86asm.PMINUB, x86asm.PMAXUB, x86asm.PMINUW, x86asm.PMAXUW,
 					x86asm.PMINUD, x86asm.PMAXUD:
@@ -2402,6 +2576,53 @@ func makeBSWAP64(address uint64, size uint8, destination operand64) microOp64 {
 			return Flow64Stop, ErrUnsupported64
 		}
 		writeReg64(state, destination, value)
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeCountZeros64(address uint64, size uint8, op x86asm.Op, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readOperand64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var count uint
+		switch destination.Width {
+		case 8:
+			if op == x86asm.LZCNT {
+				count = uint(bits.LeadingZeros64(value))
+			} else {
+				count = uint(bits.TrailingZeros64(value))
+			}
+		case 4:
+			value = uint64(uint32(value))
+			if op == x86asm.LZCNT {
+				count = uint(bits.LeadingZeros32(uint32(value)))
+			} else {
+				count = uint(bits.TrailingZeros32(uint32(value)))
+			}
+		case 2:
+			value = uint64(uint16(value))
+			if op == x86asm.LZCNT {
+				count = uint(bits.LeadingZeros16(uint16(value)))
+			} else {
+				count = uint(bits.TrailingZeros16(uint16(value)))
+			}
+		default:
+			return Flow64Stop, ErrUnsupported64
+		}
+		writeReg64(state, destination, uint64(count))
+		state.CollapseFlags()
+		const arithmetic = Flag64CF | Flag64PF | Flag64AF | Flag64ZF | Flag64SF | Flag64OF
+		state.RFLAGS &^= arithmetic
+		if value == 0 {
+			state.RFLAGS |= Flag64CF
+		}
+		if count == 0 {
+			state.RFLAGS |= Flag64ZF
+		}
+		state.ExpandFlags()
 		state.RIP = next
 		return Flow64Continue, nil
 	}}

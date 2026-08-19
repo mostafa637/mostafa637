@@ -1,6 +1,7 @@
 package cpu
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"testing"
@@ -1433,6 +1434,231 @@ func TestJIT64ScalarSSEConversions(t *testing.T) {
 		}, state)
 		if got := state.Get(RCX); got != 0x80000000 {
 			t.Fatalf("NaN cvtsd2si=%#x, want 0x80000000", got)
+		}
+	}
+}
+
+func TestJIT64SSE2AndBitCountExtensions(t *testing.T) {
+	setVector := func(state *MachineState64, xmm uint8, value []byte) {
+		t.Helper()
+		if len(value) != 16 {
+			t.Fatalf("vector length=%d, want 16", len(value))
+		}
+		copy(state.XMM[xmm][:], value)
+	}
+	checkRun := func(t *testing.T, code []byte, state *MachineState64) {
+		t.Helper()
+		const codeAddress Address64 = 0x1c000
+		if err := state.Memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.Memory.Write(codeAddress, code); err != nil {
+			t.Fatal(err)
+		}
+		state.RIP = uint64(codeAddress)
+		trap := NewJIT64(state.Memory).RunToInterrupt(state)
+		if trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		left := make([]byte, 16)
+		right := make([]byte, 16)
+		for i := range left {
+			left[i] = byte(i)
+			right[i] = byte(0x10 + i)
+		}
+		setVector(state, 0, left)
+		setVector(state, 1, right)
+		checkRun(t, []byte{
+			0x66, 0x0f, 0x3a, 0x0f, 0xc1, 0x08, // palignr xmm0, xmm1, 8
+			0xf4,
+		}, state)
+		want := append(append([]byte{}, right[8:]...), left[:8]...)
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("palignr=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		var left, right [16]byte
+		for lane := 0; lane < 8; lane++ {
+			binary.LittleEndian.PutUint16(left[lane*2:], uint16(0x1000+lane))
+			binary.LittleEndian.PutUint16(right[lane*2:], uint16(0x2000+lane))
+		}
+		setVector(state, 0, left[:])
+		setVector(state, 1, right[:])
+		checkRun(t, []byte{
+			0x66, 0x0f, 0x3a, 0x0e, 0xc1, 0x55, // pblendw xmm0, xmm1, 0x55
+			0xf4,
+		}, state)
+		for lane := 0; lane < 8; lane++ {
+			got := binary.LittleEndian.Uint16(state.XMM[0][lane*2:])
+			want := binary.LittleEndian.Uint16(left[lane*2:])
+			if lane%2 == 0 {
+				want = binary.LittleEndian.Uint16(right[lane*2:])
+			}
+			if got != want {
+				t.Fatalf("pblendw lane %d=%#x, want %#x", lane, got, want)
+			}
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		setVector(state, 0, []byte{0x7f, 0x80, 0x01, 0xff, 0x10, 0xf0, 0x00, 0x80, 0x7f, 0x01, 0x80, 0x02, 0x03, 0x04, 0xfb, 0xfc})
+		setVector(state, 1, []byte{0x01, 0x7f, 0x00, 0x01, 0x20, 0x0f, 0x00, 0x7f, 0x80, 0x02, 0x7f, 0x01, 0x04, 0x03, 0xfa, 0xfd})
+		want := [16]byte{}
+		for i := range want {
+			if int8(state.XMM[0][i]) > int8(state.XMM[1][i]) {
+				want[i] = 0xff
+			}
+		}
+		checkRun(t, []byte{0x66, 0x0f, 0x64, 0xc1, 0xf4}, state) // pcmpgtb xmm0, xmm1
+		if !bytes.Equal(state.XMM[0][:], want[:]) {
+			t.Fatalf("pcmpgtb=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		var left, right [16]byte
+		for lane := 0; lane < 8; lane++ {
+			binary.LittleEndian.PutUint16(left[lane*2:], uint16(int16(lane)-3))
+			binary.LittleEndian.PutUint16(right[lane*2:], uint16(int16(lane)-4))
+		}
+		setVector(state, 0, left[:])
+		setVector(state, 1, right[:])
+		checkRun(t, []byte{0x66, 0x0f, 0x65, 0xc1, 0xf4}, state) // pcmpgtw xmm0, xmm1
+		for lane := 0; lane < 8; lane++ {
+			if binary.LittleEndian.Uint16(state.XMM[0][lane*2:]) != 0xffff {
+				t.Fatalf("pcmpgtw lane %d=%#x, want 0xffff", lane, binary.LittleEndian.Uint16(state.XMM[0][lane*2:]))
+			}
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		var left, right [16]byte
+		binary.LittleEndian.PutUint32(left[0:], uint32(0xffffffff))
+		binary.LittleEndian.PutUint32(right[0:], uint32(0xfffffffe))
+		binary.LittleEndian.PutUint32(left[4:], 5)
+		binary.LittleEndian.PutUint32(right[4:], 5)
+		binary.LittleEndian.PutUint32(left[8:], 7)
+		binary.LittleEndian.PutUint32(right[8:], 8)
+		binary.LittleEndian.PutUint32(left[12:], uint32(0xfffffff8))
+		binary.LittleEndian.PutUint32(right[12:], uint32(int32(7)))
+		setVector(state, 0, left[:])
+		setVector(state, 1, right[:])
+		checkRun(t, []byte{0x66, 0x0f, 0x66, 0xc1, 0xf4}, state) // pcmpgtd xmm0, xmm1
+		if got := binary.LittleEndian.Uint32(state.XMM[0][0:4]); got != 0xffffffff {
+			t.Fatalf("pcmpgtd lane0=%#x, want 0xffffffff", got)
+		}
+		if got := binary.LittleEndian.Uint32(state.XMM[0][4:8]); got != 0 {
+			t.Fatalf("pcmpgtd lane1=%#x, want 0", got)
+		}
+		if got := binary.LittleEndian.Uint32(state.XMM[0][8:12]); got != 0 {
+			t.Fatalf("pcmpgtd lane2=%#x, want 0", got)
+		}
+		if got := binary.LittleEndian.Uint32(state.XMM[0][12:16]); got != 0 {
+			t.Fatalf("pcmpgtd lane3=%#x, want 0", got)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		setVector(state, 0, []byte{0x0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+		setVector(state, 1, []byte{0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+		checkRun(t, []byte{0x66, 0x0f, 0x38, 0x17, 0xc1, 0xf4}, state) // ptest xmm0, xmm1
+		if state.Flag(Flag64ZF) || !state.Flag(Flag64CF) {
+			t.Fatalf("ptest flags zf=%v cf=%v, want false/true", state.Flag(Flag64ZF), state.Flag(Flag64CF))
+		}
+	}
+	{
+		state := NewMachineState64(NewMemory64())
+		setVector(state, 0, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+		setVector(state, 1, []byte{0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+		checkRun(t, []byte{0x66, 0x0f, 0x38, 0x17, 0xc1, 0xf4}, state)
+		if !state.Flag(Flag64ZF) || state.Flag(Flag64CF) {
+			t.Fatalf("ptest zero flags zf=%v cf=%v, want true/false", state.Flag(Flag64ZF), state.Flag(Flag64CF))
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		var source [16]byte
+		for i := range source {
+			source[i] = byte(0xa0 + i)
+		}
+		setVector(state, 1, source[:])
+		checkRun(t, []byte{0xf2, 0x0f, 0x12, 0xc1, 0xf4}, state) // movddup xmm0, xmm1
+		if !bytes.Equal(state.XMM[0][0:8], source[0:8]) || !bytes.Equal(state.XMM[0][8:16], source[0:8]) {
+			t.Fatalf("movddup=%x, want %x duplicated", state.XMM[0], source[0:8])
+		}
+	}
+
+	{
+		memory := NewMemory64()
+		const dataAddress Address64 = 0x1d000
+		if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+			t.Fatal(err)
+		}
+		var source [8]byte
+		for i := range source {
+			source[i] = byte(0xb0 + i)
+		}
+		if err := memory.Write(dataAddress, source[:]); err != nil {
+			t.Fatal(err)
+		}
+		state := NewMachineState64(memory)
+		state.Set(RDI, uint64(dataAddress))
+		checkRun(t, []byte{0xf2, 0x0f, 0x12, 0x07, 0xf4}, state) // movddup xmm0, qword ptr [rdi]
+		if !bytes.Equal(state.XMM[0][0:8], source[:]) || !bytes.Equal(state.XMM[0][8:16], source[:]) {
+			t.Fatalf("memory movddup=%x, want %x duplicated", state.XMM[0], source)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		state.Set(RCX, 0x00100000)
+		checkRun(t, []byte{0xf3, 0x0f, 0xbd, 0xc1, 0xf4}, state) // lzcnt eax, ecx = 11
+		if got := state.Get(RAX); got != 11 || state.Flag(Flag64CF) || state.Flag(Flag64ZF) {
+			t.Fatalf("lzcnt value=%d cf=%v zf=%v, want 11/false/false", got, state.Flag(Flag64CF), state.Flag(Flag64ZF))
+		}
+	}
+	{
+		state := NewMachineState64(NewMemory64())
+		state.Set(RCX, 0)
+		checkRun(t, []byte{0xf3, 0x0f, 0xbd, 0xc1, 0xf4}, state) // lzcnt eax, ecx = 32
+		if got := state.Get(RAX); got != 32 || !state.Flag(Flag64CF) || state.Flag(Flag64ZF) {
+			t.Fatalf("lzcnt zero value=%d cf=%v zf=%v, want 32/true/false", got, state.Flag(Flag64CF), state.Flag(Flag64ZF))
+		}
+	}
+	{
+		state := NewMachineState64(NewMemory64())
+		state.Set(RCX, 0x10)
+		checkRun(t, []byte{0xf3, 0x0f, 0xbc, 0xc1, 0xf4}, state) // tzcnt eax, ecx = 4
+		if got := state.Get(RAX); got != 4 || state.Flag(Flag64CF) || state.Flag(Flag64ZF) {
+			t.Fatalf("tzcnt value=%d cf=%v zf=%v, want 4/false/false", got, state.Flag(Flag64CF), state.Flag(Flag64ZF))
+		}
+	}
+	{
+		state := NewMachineState64(NewMemory64())
+		state.Set(RCX, 1)
+		checkRun(t, []byte{0xf3, 0x48, 0x0f, 0xbd, 0xc1, 0xf4}, state) // lzcnt rax, rcx = 63
+		if got := state.Get(RAX); got != 63 || state.Flag(Flag64CF) || state.Flag(Flag64ZF) {
+			t.Fatalf("64-bit lzcnt value=%d cf=%v zf=%v, want 63/false/false", got, state.Flag(Flag64CF), state.Flag(Flag64ZF))
+		}
+	}
+	{
+		state := NewMachineState64(NewMemory64())
+		state.Set(RCX, 1)
+		checkRun(t, []byte{0xf3, 0x0f, 0xbc, 0xc1, 0xf4}, state) // tzcnt eax, ecx = 0
+		if got := state.Get(RAX); got != 0 || state.Flag(Flag64CF) || !state.Flag(Flag64ZF) {
+			t.Fatalf("tzcnt low-bit value=%d cf=%v zf=%v, want 0/false/true", got, state.Flag(Flag64CF), state.Flag(Flag64ZF))
 		}
 	}
 }
