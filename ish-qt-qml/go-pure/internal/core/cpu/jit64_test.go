@@ -4366,3 +4366,99 @@ func TestJIT64SSE3HorizontalArithmeticAndMasks(t *testing.T) {
 		t.Fatalf("ptest flags rflags=%#x, want ZF=1 and all other arithmetic flags clear", maskState.RFLAGS)
 	}
 }
+
+func TestJIT64PMULLDPMULDQ(t *testing.T) {
+	memory := NewMemory64()
+	const dataAddress Address64 = 0x66000
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	var memoryVector [32]byte
+	for lane, value := range []int32{2, -3, 0x7fffffff, -0x80000000} {
+		binary.LittleEndian.PutUint32(memoryVector[lane*4:], uint32(value))
+		binary.LittleEndian.PutUint32(memoryVector[16+lane*4:], uint32(value+1))
+	}
+	if err := memory.Write(dataAddress, memoryVector[:]); err != nil {
+		t.Fatal(err)
+	}
+
+	state := NewMachineState64(memory)
+	state.RIP = 0x65000
+	state.Set(RDI, uint64(dataAddress))
+	for xmm, values := range map[uint8][]int32{
+		0:  {2, -3, 0x7fffffff, -0x80000000},
+		1:  {-5, 7, 2, -1},
+		2:  {2, 123, 0x7fffffff, -456},
+		3:  {3, -9, -2, 777},
+		8:  {-0x80000000, 11, 0x40000000, -7},
+		9:  {2, -13, 3, -2},
+		10: {9, 101, -0x80000000, 202},
+		11: {-3, 303, -1, 404},
+		12: {2, -3, 0x7fffffff, -0x80000000},
+		13: {2, 0, 0x7fffffff, 0},
+	} {
+		for lane, value := range values {
+			binary.LittleEndian.PutUint32(state.XMM[xmm][lane*4:], uint32(value))
+		}
+	}
+	code := []byte{
+		0x66, 0x0f, 0x38, 0x40, 0xc1, // pmulld xmm0, xmm1
+		0x66, 0x0f, 0x38, 0x28, 0xd3, // pmuldq xmm2, xmm3
+		0x66, 0x45, 0x0f, 0x38, 0x40, 0xc1, // pmulld xmm8, xmm9
+		0x66, 0x45, 0x0f, 0x38, 0x28, 0xd3, // pmuldq xmm10, xmm11
+		0x66, 0x44, 0x0f, 0x38, 0x40, 0x27, // pmulld xmm12, [rdi]
+		0x66, 0x44, 0x0f, 0x38, 0x28, 0x6f, 0x10, // pmuldq xmm13, [rdi+16]
+		0xf4,
+	}
+	if err := memory.Map(0x65000, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(0x65000, code); err != nil {
+		t.Fatal(err)
+	}
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("PMULLD/PMULDQ run trap=%#x halted=%v", trap, state.Halted)
+	}
+
+	for lane, want := range []uint32{0xfffffff6, 0xffffffeb, 0xfffffffe, 0x80000000} {
+		if got := binary.LittleEndian.Uint32(state.XMM[0][lane*4:]); got != want {
+			t.Fatalf("PMULLD xmm0 lane %d=%#x, want %#x", lane, got, want)
+		}
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[2][0:]); got != 6 {
+		t.Fatalf("PMULDQ xmm2 low=%#x, want 6", got)
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[2][8:]); got != 0xffffffff00000002 {
+		t.Fatalf("PMULDQ xmm2 high=%#x, want %#x", got, uint64(0xffffffff00000002))
+	}
+	if got := binary.LittleEndian.Uint32(state.XMM[8][0:]); got != 0 {
+		t.Fatalf("PMULLD xmm8 lane0=%#x, want 0", got)
+	}
+	if got := binary.LittleEndian.Uint32(state.XMM[8][4:]); got != 0xffffff71 {
+		t.Fatalf("PMULLD xmm8 lane1=%#x, want %#x", got, uint32(0xffffff71))
+	}
+	if got := binary.LittleEndian.Uint32(state.XMM[8][8:]); got != 0xc0000000 {
+		t.Fatalf("PMULLD xmm8 lane2=%#x, want %#x", got, uint32(0xc0000000))
+	}
+	if got := binary.LittleEndian.Uint32(state.XMM[8][12:]); got != 14 {
+		t.Fatalf("PMULLD xmm8 lane3=%#x, want 14", got)
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[10][0:]); got != 0xffffffffffffffe5 {
+		t.Fatalf("PMULDQ xmm10 low=%#x, want %#x", got, uint64(0xffffffffffffffe5))
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[10][8:]); got != 0x80000000 {
+		t.Fatalf("PMULDQ xmm10 high=%#x, want 0x80000000", got)
+	}
+	for lane, want := range []uint32{4, 9, 1, 0} {
+		if got := binary.LittleEndian.Uint32(state.XMM[12][lane*4:]); got != want {
+			t.Fatalf("PMULLD memory lane %d=%#x, want %#x", lane, got, want)
+		}
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[13][0:]); got != 6 {
+		t.Fatalf("PMULDQ memory low=%#x, want 6", got)
+	}
+	if got := binary.LittleEndian.Uint64(state.XMM[13][8:]); got != 0xc000000080000000 {
+		t.Fatalf("PMULDQ memory high=%#x, want %#x", got, uint64(0xc000000080000000))
+	}
+}

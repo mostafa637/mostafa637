@@ -1124,7 +1124,7 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s requires an immediate index", inst.Op)
 		}
 		return makeSSEExtract64(address, uint8(inst.Len), inst.Op, destination, source, uint8(immediate)), false, nil
-	case x86asm.PMULUDQ, x86asm.PMULHUW, x86asm.PMULLW, x86asm.PMULHW, x86asm.PSADBW,
+	case x86asm.PMULUDQ, x86asm.PMULLD, x86asm.PMULDQ, x86asm.PMULHUW, x86asm.PMULLW, x86asm.PMULHW, x86asm.PSADBW,
 		x86asm.PMADDWD, x86asm.PMADDUBSW, x86asm.PMULHRSW,
 		x86asm.PHADDW, x86asm.PHADDSW, x86asm.PHADDD,
 		x86asm.PHSUBW, x86asm.PHSUBSW, x86asm.PHSUBD,
@@ -3214,6 +3214,18 @@ func makeSSESpecialBinary64(address uint64, size uint8, op x86asm.Op, dst, src o
 				l := uint64(binary.LittleEndian.Uint32(left[offset:]))
 				r := uint64(binary.LittleEndian.Uint32(right[offset:]))
 				binary.LittleEndian.PutUint64(result[offset:], l*r)
+			}
+		case x86asm.PMULLD:
+			for offset := 0; offset < 16; offset += 4 {
+				l := int64(int32(binary.LittleEndian.Uint32(left[offset:])))
+				r := int64(int32(binary.LittleEndian.Uint32(right[offset:])))
+				binary.LittleEndian.PutUint32(result[offset:], uint32(l*r))
+			}
+		case x86asm.PMULDQ:
+			for _, offset := range []int{0, 8} {
+				l := int64(int32(binary.LittleEndian.Uint32(left[offset:])))
+				r := int64(int32(binary.LittleEndian.Uint32(right[offset:])))
+				binary.LittleEndian.PutUint64(result[offset:], uint64(l*r))
 			}
 		case x86asm.PMULHUW:
 			for offset := 0; offset < 16; offset += 2 {
