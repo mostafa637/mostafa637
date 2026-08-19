@@ -4686,3 +4686,123 @@ func TestJIT64MOVNTDQAFromMemory(t *testing.T) {
 		t.Fatalf("MOVNTDQA modified source=%x, want %x", sourceAfter, input)
 	}
 }
+
+func TestJIT64HalfRegisterMoves(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x62000
+		dataAddress Address64 = 0x63000
+	)
+	memory := NewMemory64()
+	code := []byte{
+		0x0f, 0x12, 0xc1, // movhlps xmm0,xmm1
+		0x0f, 0x16, 0xc2, // movlhps xmm0,xmm2
+		0x0f, 0x16, 0x5f, 0x10, // movhps xmm3,[rdi+0x10]
+		0x0f, 0x12, 0x67, 0x18, // movlps xmm4,[rdi+0x18]
+		0x66, 0x0f, 0x16, 0x6f, 0x20, // movhpd xmm5,[rdi+0x20]
+		0x66, 0x0f, 0x12, 0x77, 0x28, // movlpd xmm6,[rdi+0x28]
+		0x0f, 0x17, 0x47, 0x30, // movhps [rdi+0x30],xmm0
+		0x0f, 0x13, 0x4f, 0x38, // movlps [rdi+0x38],xmm1
+		0x66, 0x0f, 0x17, 0x57, 0x40, // movhpd [rdi+0x40],xmm2
+		0x66, 0x0f, 0x13, 0x5f, 0x48, // movlpd [rdi+0x48],xmm3
+		0x44, 0x0f, 0x16, 0x07, // movhps xmm8,[rdi] (REX.R)
+		0x44, 0x0f, 0x12, 0x4f, 0x08, // movlps xmm9,[rdi+8] (REX.R)
+		0x45, 0x0f, 0x12, 0xca, // movhlps xmm9,xmm10 (REX.R+B)
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	var data [128]byte
+	for i := range data {
+		data[i] = byte(0xa0 + i)
+	}
+	if err := memory.Write(dataAddress, data[:]); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	for register := 0; register <= 10; register++ {
+		for lane := range state.XMM[register] {
+			state.XMM[register][lane] = byte(register*0x10 + lane)
+		}
+	}
+	state.RFLAGS = Flag64IF | Flag64CF | Flag64ZF | Flag64SF
+	flagsBefore := state.RFLAGS
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("half-register moves changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+
+	var want0 [16]byte
+	copy(want0[:], []byte{0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27})
+	if state.XMM[0] != want0 {
+		t.Fatalf("MOVHLPS/MOVLHPS xmm0=%x, want %x", state.XMM[0], want0)
+	}
+	var want3 [16]byte
+	for i := 0; i < 8; i++ {
+		want3[i] = byte(0x30 + i)
+		want3[8+i] = byte(0xb0 + i)
+	}
+	if state.XMM[3] != want3 {
+		t.Fatalf("MOVHPS xmm3=%x, want %x", state.XMM[3], want3)
+	}
+	var want4 [16]byte
+	for i := 0; i < 8; i++ {
+		want4[i] = byte(0xb8 + i)
+		want4[8+i] = byte(0x48 + i)
+	}
+	if state.XMM[4] != want4 {
+		t.Fatalf("MOVLPS xmm4=%x, want %x", state.XMM[4], want4)
+	}
+	var want5 [16]byte
+	for i := 0; i < 8; i++ {
+		want5[i] = byte(0x50 + i)
+		want5[8+i] = byte(0xc0 + i)
+	}
+	if state.XMM[5] != want5 {
+		t.Fatalf("MOVHPD xmm5=%x, want %x", state.XMM[5], want5)
+	}
+	var want6 [16]byte
+	for i := 0; i < 8; i++ {
+		want6[i] = byte(0xc8 + i)
+		want6[8+i] = byte(0x68 + i)
+	}
+	if state.XMM[6] != want6 {
+		t.Fatalf("MOVLPD xmm6=%x, want %x", state.XMM[6], want6)
+	}
+	for offset, want := range map[int][]byte{
+		0x30: {0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27},
+		0x38: {0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17},
+		0x40: {0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f},
+		0x48: {0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37},
+	} {
+		got := make([]byte, 8)
+		if err := memory.Read(dataAddress+Address64(offset), got); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("half move store at %#x=%x, want %x", offset, got, want)
+		}
+	}
+	var want8 [16]byte
+	for i := 0; i < 8; i++ {
+		want8[i] = byte(0x80 + i)
+		want8[8+i] = byte(0xa0 + i)
+	}
+	if state.XMM[8] != want8 {
+		t.Fatalf("REX.R MOVHPS xmm8=%x, want %x", state.XMM[8], want8)
+	}
+	var want9 [16]byte
+	for i := 0; i < 8; i++ {
+		want9[i] = byte(0xa8 + i)
+		want9[8+i] = byte(0x98 + i)
+	}
+	if state.XMM[9] != want9 {
+		t.Fatalf("REX.R/B MOVLPS/MOVHLPS xmm9=%x, want %x", state.XMM[9], want9)
+	}
+}

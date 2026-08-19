@@ -712,6 +712,37 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 		return makeCarryBinary64(address, uint8(inst.Len), inst.Op, left, right), false, nil
 	case x86asm.LAHF, x86asm.SAHF:
 		return makeLAHFSAHF64(address, uint8(inst.Len), inst.Op), false, nil
+	case x86asm.MOVHLPS, x86asm.MOVLHPS:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || source.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s requires an XMM source: %v", inst.Op, err)
+		}
+		return makeSSEHalfMove64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.MOVHPD, x86asm.MOVHPS, x86asm.MOVLPD, x86asm.MOVLPS:
+		if _, ok := arg(0).(x86asm.Mem); ok {
+			destination, err := operand64FromArg(arg(0), 8)
+			if err != nil || destination.Kind != operand64Mem {
+				return microOp64{}, false, fmt.Errorf("%s memory destination: %v", inst.Op, err)
+			}
+			source, err := operand64FromArg(arg(1), 16)
+			if err != nil || source.Kind != operand64XMM {
+				return microOp64{}, false, fmt.Errorf("%s requires an XMM source: %v", inst.Op, err)
+			}
+			return makeSSEHalfMove64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+		}
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s XMM destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 8)
+		if err != nil || source.Kind != operand64Mem {
+			return microOp64{}, false, fmt.Errorf("%s requires a memory source: %v", inst.Op, err)
+		}
+		return makeSSEHalfMove64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
 	case x86asm.MOVSS, x86asm.MOVSD_XMM:
 		width := uint8(4)
 		if inst.Op == x86asm.MOVSD_XMM {
@@ -3094,6 +3125,54 @@ func makeSSEWiden64(address uint64, size uint8, op x86asm.Op, destination, sourc
 		}
 		if err := writeVector64(state, destination, next, result); err != nil {
 			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEHalfMove64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if dst.Kind == operand64XMM {
+			value, err := readVector64(state, dst, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			source, err := readVectorWidth64(state, src, next, 8)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			switch op {
+			case x86asm.MOVHLPS:
+				copy(value[:8], source[8:16])
+			case x86asm.MOVLHPS:
+				copy(value[8:16], source[:8])
+			case x86asm.MOVHPD, x86asm.MOVHPS:
+				copy(value[8:16], source[:8])
+			case x86asm.MOVLPD, x86asm.MOVLPS:
+				copy(value[:8], source[:8])
+			default:
+				return Flow64Stop, ErrUnsupported64
+			}
+			if err := writeVector64(state, dst, next, value); err != nil {
+				return Flow64Stop, err
+			}
+		} else {
+			source, err := readVector64(state, src, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			address, err := effectiveAddress64(state, dst.Mem, next)
+			if err != nil {
+				return Flow64Stop, err
+			}
+			offset := 0
+			if op == x86asm.MOVHPD || op == x86asm.MOVHPS {
+				offset = 8
+			}
+			if err := state.Memory.Write(address, source[offset:offset+8]); err != nil {
+				return Flow64Stop, err
+			}
 		}
 		state.RIP = next
 		return Flow64Continue, nil
