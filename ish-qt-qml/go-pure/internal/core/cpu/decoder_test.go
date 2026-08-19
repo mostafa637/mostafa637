@@ -753,3 +753,45 @@ func TestDecodeX86FPUMemory(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeX87IntegerMemory(t *testing.T) {
+	tests := []struct {
+		name  string
+		code  []byte
+		group uint8
+		width uint8
+		base  Reg32
+		index Reg32
+		disp  int32
+	}{
+		{name: "fild m16", code: []byte{0xDF, 0x05, 0x00, 0x20, 0x00, 0x00}, group: fpuStackLoadInt, width: 2, base: RegNone, index: RegNone, disp: 0x2000},
+		{name: "fild m32", code: []byte{0xDB, 0x05, 0x00, 0x20, 0x00, 0x00}, group: fpuStackLoadInt, width: 4, base: RegNone, index: RegNone, disp: 0x2000},
+		{name: "fild m64", code: []byte{0xDF, 0x2D, 0x00, 0x20, 0x00, 0x00}, group: fpuStackLoadInt, width: 8, base: RegNone, index: RegNone, disp: 0x2000},
+		{name: "fist m16", code: []byte{0xDF, 0x15, 0x00, 0x20, 0x00, 0x00}, group: fpuStackStoreInt, width: 2, base: RegNone, index: RegNone, disp: 0x2000},
+		{name: "fistp m32", code: []byte{0xDB, 0x1D, 0x00, 0x20, 0x00, 0x00}, group: fpuStackStoreIntPop, width: 4, base: RegNone, index: RegNone, disp: 0x2000},
+		{name: "fistp m64", code: []byte{0xDF, 0x3D, 0x00, 0x20, 0x00, 0x00}, group: fpuStackStoreIntPop, width: 8, base: RegNone, index: RegNone, disp: 0x2000},
+		{name: "fisttp m16", code: []byte{0xDF, 0x0D, 0x00, 0x20, 0x00, 0x00}, group: fpuStackStoreIntTruncPop, width: 2, base: RegNone, index: RegNone, disp: 0x2000},
+		{name: "fild m32 sib", code: []byte{0xDB, 0x44, 0xB3, 0x04}, group: fpuStackLoadInt, width: 4, base: EBX, index: ESI, disp: 4},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memory, _ := mappedCode(t, test.code)
+			instruction, err := Decode(memory, PageSize)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if instruction.Op != OpFPUStack || instruction.Group != test.group || instruction.FPUMemWidth != test.width || instruction.Len != uint32(len(test.code)) {
+				t.Fatalf("instruction = %#v, want FPU integer group=%d width=%d len=%d", instruction, test.group, test.width, len(test.code))
+			}
+			if !instruction.Dst.IsMem || instruction.Dst.Memory.Disp != test.disp {
+				t.Fatalf("destination memory = %#v, want disp %#x", instruction.Dst, test.disp)
+			}
+			if test.base != RegNone && (!instruction.Dst.Memory.HasBase || instruction.Dst.Memory.Base != test.base) {
+				t.Fatalf("memory base = %#v, want %s", instruction.Dst.Memory, test.base)
+			}
+			if test.index != RegNone && (!instruction.Dst.Memory.HasIndex || instruction.Dst.Memory.Index != test.index || instruction.Dst.Memory.Scale != 4) {
+				t.Fatalf("memory index = %#v, want %s*4", instruction.Dst.Memory, test.index)
+			}
+		})
+	}
+}

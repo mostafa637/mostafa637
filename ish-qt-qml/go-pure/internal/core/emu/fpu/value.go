@@ -3,7 +3,11 @@
 // or filesystem code.
 package fpu
 
-import x80 "github.com/jenska/float"
+import (
+	"math"
+
+	x80 "github.com/jenska/float"
+)
 
 // Value is an emulator-facing wrapper around jenska/float's IEEE 754
 // extended-precision X80 value. Keeping the third-party type behind this
@@ -35,6 +39,17 @@ func (v Value) ToFloat64() float64 {
 
 func (v Value) ToInt64() int64 {
 	return v.raw.ToInt64()
+}
+
+func (v Value) ToInt64RoundZero() int64 {
+	value := v.ToFloat64()
+	if math.IsNaN(value) || value >= float64(math.MaxInt64) {
+		return math.MaxInt64
+	}
+	if value <= float64(math.MinInt64) {
+		return math.MinInt64
+	}
+	return int64(math.Trunc(value))
 }
 
 func (v Value) String() string {

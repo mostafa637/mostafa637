@@ -71,7 +71,10 @@ func executeFPU(state *MachineState, instruction Instruction) error {
 			}
 			state.SetFPAt(instruction.FPUReg, state.FPAt(0))
 			state.PopFP()
+		case fpuStackLoadInt, fpuStackStoreInt, fpuStackStoreIntPop, fpuStackStoreIntTruncPop:
+			return executeFPUMemory(state, instruction)
 		}
+
 	case OpFPUBinary:
 		dst := state.FPAt(instruction.FPUReg)
 		src := state.FPAt(instruction.FPUReg2)
@@ -105,6 +108,54 @@ func executeFPUMemory(state *MachineState, instruction Instruction) error {
 	}
 	value := state.FPAt(0).ToFloat64()
 	switch instruction.Group {
+	case fpuStackLoadInt:
+		var raw [8]byte
+		if instruction.FPUMemWidth != 2 && instruction.FPUMemWidth != 4 && instruction.FPUMemWidth != 8 {
+			return ErrUnsupportedAddressing
+		}
+		if err := state.Memory.Read(address, raw[:instruction.FPUMemWidth]); err != nil {
+			return err
+		}
+		var integer int64
+		switch instruction.FPUMemWidth {
+		case 2:
+			integer = int64(int16(binary.LittleEndian.Uint16(raw[:2])))
+		case 4:
+			integer = int64(int32(binary.LittleEndian.Uint32(raw[:4])))
+		case 8:
+			integer = int64(binary.LittleEndian.Uint64(raw[:8]))
+		}
+		state.PushFP(fpu.FromInt64(integer))
+		return nil
+	case fpuStackStoreInt, fpuStackStoreIntPop, fpuStackStoreIntTruncPop:
+		var raw [8]byte
+		integer := state.FPAt(0).ToInt64()
+		if instruction.Group == fpuStackStoreIntTruncPop {
+			integer = state.FPAt(0).ToInt64RoundZero()
+		}
+		switch instruction.FPUMemWidth {
+		case 2:
+			if integer < -1<<15 || integer > 1<<15-1 {
+				integer = -1 << 15
+			}
+			binary.LittleEndian.PutUint16(raw[:2], uint16(int16(integer)))
+		case 4:
+			if integer < -1<<31 || integer > 1<<31-1 {
+				integer = -1 << 31
+			}
+			binary.LittleEndian.PutUint32(raw[:4], uint32(int32(integer)))
+		case 8:
+			binary.LittleEndian.PutUint64(raw[:8], uint64(integer))
+		default:
+			return ErrUnsupportedAddressing
+		}
+		if err := state.Memory.Write(address, raw[:instruction.FPUMemWidth]); err != nil {
+			return err
+		}
+		if instruction.Group == fpuStackStoreIntPop || instruction.Group == fpuStackStoreIntTruncPop {
+			state.PopFP()
+		}
+		return nil
 	case fpuStackLoad:
 		var raw [8]byte
 		if instruction.FPUMemWidth == 4 {
@@ -153,6 +204,10 @@ const (
 	fpuStackLoad
 	fpuStackStore
 	fpuStackStorePop
+	fpuStackLoadInt
+	fpuStackStoreInt
+	fpuStackStoreIntPop
+	fpuStackStoreIntTruncPop
 )
 
 func (e *Executor) Step(state *MachineState) (Instruction, error) {

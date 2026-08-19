@@ -2059,3 +2059,106 @@ func TestExecutorFPUMemorySIB(t *testing.T) {
 		t.Fatalf("FPU TOP = %d, want 0 after SIB FLD/FSTP", state.FPUTop())
 	}
 }
+
+func TestExecutorX87IntegerMemory(t *testing.T) {
+	code := []byte{
+		0xDF, 0x05, 0x00, 0x21, 0x00, 0x00, // fild word ptr [0x2100]
+		0xDF, 0x15, 0x08, 0x21, 0x00, 0x00, // fist word ptr [0x2108]
+		0xDF, 0x1D, 0x0A, 0x21, 0x00, 0x00, // fistp word ptr [0x210a]
+		0xDD, 0x05, 0x00, 0x22, 0x00, 0x00, // fld qword ptr [0x2200]
+		0xDF, 0x0D, 0x08, 0x22, 0x00, 0x00, // fisttp word ptr [0x2208]
+		0xDD, 0x05, 0x10, 0x22, 0x00, 0x00, // fld qword ptr [0x2210]
+		0xDF, 0x1D, 0x18, 0x22, 0x00, 0x00, // fistp word ptr [0x2218]
+		0xF4,
+	}
+	memory, state := mappedCode(t, code)
+	var word [2]byte
+	negativeWord := int16(-123)
+	binary.LittleEndian.PutUint16(word[:], uint16(negativeWord))
+	if err := memory.Write(0x2100, word[:]); err != nil {
+		t.Fatal(err)
+	}
+	var value [8]byte
+	binary.LittleEndian.PutUint64(value[:], math.Float64bits(3.5))
+	if err := memory.Write(0x2200, value[:]); err != nil {
+		t.Fatal(err)
+	}
+	binary.LittleEndian.PutUint64(value[:], math.Float64bits(40000))
+	if err := memory.Write(0x2210, value[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewExecutor(nil).Run(state, 8); err != nil {
+		t.Fatal(err)
+	}
+	var output [2]byte
+	if err := memory.Read(0x2108, output[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := int16(binary.LittleEndian.Uint16(output[:])); got != -123 {
+		t.Fatalf("FIST m16 = %d, want -123", got)
+	}
+	if err := memory.Read(0x210A, output[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := int16(binary.LittleEndian.Uint16(output[:])); got != -123 {
+		t.Fatalf("FISTP m16 = %d, want -123", got)
+	}
+	if err := memory.Read(0x2208, output[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := int16(binary.LittleEndian.Uint16(output[:])); got != 3 {
+		t.Fatalf("FISTTP m16 = %d, want 3", got)
+	}
+	if err := memory.Read(0x2218, output[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := int16(binary.LittleEndian.Uint16(output[:])); got != -32768 {
+		t.Fatalf("out-of-range FISTP m16 = %d, want -32768", got)
+	}
+	if state.FPUTop() != 0 {
+		t.Fatalf("FPU TOP = %d, want 0 after integer stores", state.FPUTop())
+	}
+}
+
+func TestExecutorX87IntegerMemorySIBAndM64(t *testing.T) {
+	code := []byte{
+		0xBB, 0x00, 0x24, 0x00, 0x00, // mov ebx, 0x2400
+		0xBE, 0x10, 0x00, 0x00, 0x00, // mov esi, 0x10
+		0xDB, 0x44, 0xB3, 0x04, // fild dword ptr [ebx+esi*4+4]
+		0xDF, 0x2D, 0x20, 0x24, 0x00, 0x00, // fild qword ptr [0x2420]
+		0xDF, 0x3D, 0x28, 0x24, 0x00, 0x00, // fistp qword ptr [0x2428]
+		0xDB, 0x1D, 0x30, 0x24, 0x00, 0x00, // fistp dword ptr [0x2430]
+		0xF4,
+	}
+	memory, state := mappedCode(t, code)
+	var input32 [4]byte
+	negativeDword := int32(-16)
+	binary.LittleEndian.PutUint32(input32[:], uint32(negativeDword))
+	if err := memory.Write(0x2444, input32[:]); err != nil {
+		t.Fatal(err)
+	}
+	var input64 [8]byte
+	negativeQword := int64(-1 << 40)
+	binary.LittleEndian.PutUint64(input64[:], uint64(negativeQword))
+	if err := memory.Write(0x2420, input64[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewExecutor(nil).Run(state, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Read(0x2428, input64[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := int64(binary.LittleEndian.Uint64(input64[:])); got != negativeQword {
+		t.Fatalf("FISTP m64 = %d, want %d", got, -1<<40)
+	}
+	if err := memory.Read(0x2430, input32[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got := int32(binary.LittleEndian.Uint32(input32[:])); got != -16 {
+		t.Fatalf("SIB FISTP m32 = %d, want -16", got)
+	}
+	if state.FPUTop() != 0 {
+		t.Fatalf("FPU TOP = %d, want 0 after SIB and m64 operations", state.FPUTop())
+	}
+}

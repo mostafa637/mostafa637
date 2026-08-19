@@ -1942,6 +1942,34 @@ func decodeX86FPU(inst x86asm.Inst) (Instruction, bool, error) {
 			group = 1
 		}
 		return Instruction{Op: OpFPUUnary, Len: uint32(inst.Len), Group: group}, true, nil
+	case x86asm.FILD, x86asm.FIST, x86asm.FISTP, x86asm.FISTTP:
+		if len(inst.Args) == 0 || inst.Args[0] == nil {
+			return unsupported("requires integer memory operand")
+		}
+		if _, isMemory := inst.Args[0].(x86asm.Mem); !isMemory {
+			return unsupported("requires integer memory operand")
+		}
+		operand, ok, err := x86Operand32(inst.Args[0])
+		if err != nil {
+			return Instruction{}, true, err
+		}
+		if !ok || !operand.IsMem {
+			return unsupported("requires integer memory operand")
+		}
+		if inst.MemBytes != 2 && inst.MemBytes != 4 && inst.MemBytes != 8 {
+			return unsupported(fmt.Sprintf("unsupported integer memory width %d", inst.MemBytes))
+		}
+		group := fpuStackLoadInt
+		switch inst.Op {
+		case x86asm.FIST:
+			group = fpuStackStoreInt
+		case x86asm.FISTP:
+			group = fpuStackStoreIntPop
+		case x86asm.FISTTP:
+			group = fpuStackStoreIntTruncPop
+		}
+		operand.Width = uint8(inst.MemBytes)
+		return Instruction{Op: OpFPUStack, Len: uint32(inst.Len), Group: group, Dst: operand, FPUMemWidth: uint8(inst.MemBytes)}, true, nil
 	case x86asm.FLD, x86asm.FST, x86asm.FSTP:
 		if len(inst.Args) == 0 || inst.Args[0] == nil {
 			return unsupported("requires ST(i) register or m32/m64 memory")
