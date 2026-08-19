@@ -600,6 +600,20 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s count: %v", inst.Op, err)
 		}
 		return makeShift64(address, uint8(inst.Len), inst.Op, destination, count), false, nil
+	case x86asm.CMPXCHG8B, x86asm.CMPXCHG16B:
+		memoryArg, ok := arg(0).(x86asm.Mem)
+		if !ok {
+			return microOp64{}, false, fmt.Errorf("%s requires a memory operand", inst.Op)
+		}
+		memoryWidth := uint8(8)
+		if inst.Op == x86asm.CMPXCHG16B {
+			memoryWidth = 16
+		}
+		destination, err := operand64FromArg(memoryArg, memoryWidth)
+		if err != nil {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		return makeCmpxchgB64(address, uint8(inst.Len), inst.Op, destination), false, nil
 	case x86asm.MUL, x86asm.DIV, x86asm.IDIV:
 		if arg(0) == nil || arg(1) != nil {
 			return microOp64{}, false, fmt.Errorf("%s requires one operand", inst.Op)
@@ -2694,6 +2708,42 @@ func makeXCR64(address uint64, size uint8, op x86asm.Op) microOp64 {
 			}
 			state.XCR0 = value
 		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeCmpxchgB64(address uint64, size uint8, op x86asm.Op, destination operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		memoryAddress, err := effectiveAddress64(state, destination.Mem, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var oldLo, oldHi uint64
+		var exchanged bool
+		if op == x86asm.CMPXCHG8B {
+			expected := uint64(uint32(state.Get(RAX))) | uint64(uint32(state.Get(RDX)))<<32
+			replacement := uint64(uint32(state.Get(RBX))) | uint64(uint32(state.Get(RCX)))<<32
+			old, atomicErr := state.Memory.AtomicCompareExchange(memoryAddress, 8, expected, replacement)
+			if atomicErr != nil {
+				return Flow64Stop, atomicErr
+			}
+			oldLo, oldHi = uint64(uint32(old)), uint64(uint32(old>>32))
+			exchanged = old == expected
+		} else {
+			oldLo, oldHi, exchanged, err = state.Memory.AtomicCompareExchange128(memoryAddress, state.Get(RAX), state.Get(RDX), state.Get(RBX), state.Get(RCX))
+			if err != nil {
+				return Flow64Stop, err
+			}
+		}
+		if exchanged {
+			state.RFLAGS |= Flag64ZF
+		} else {
+			state.RFLAGS &^= Flag64ZF
+			state.Set(RAX, oldLo)
+			state.Set(RDX, oldHi)
+		}
+		state.ExpandFlags()
 		state.RIP = next
 		return Flow64Continue, nil
 	}}

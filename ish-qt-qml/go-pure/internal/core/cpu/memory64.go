@@ -333,3 +333,53 @@ func (m *Memory64) AtomicCompareExchange(addr Address64, width uint8, expected, 
 		return old
 	})
 }
+
+// AtomicCompareExchange128 performs the guest CMPXCHG16B operation on a
+// naturally aligned 16-byte memory value. It returns the observed low/high
+// halves and whether the compare matched.
+func (m *Memory64) AtomicCompareExchange128(addr Address64, expectedLo, expectedHi, replacementLo, replacementHi uint64) (oldLo, oldHi uint64, exchanged bool, err error) {
+	if m == nil || uint64(addr)&15 != 0 || !range64Valid(addr, 16) {
+		return 0, 0, false, ErrRange
+	}
+	first, end, ok := page64Range(addr, 16)
+	if !ok {
+		return 0, 0, false, ErrRange
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for page := first; page < end; page++ {
+		entry := m.pages[page]
+		if entry == nil {
+			return 0, 0, false, ErrUnmapped
+		}
+		if entry.flags&(PRead|PWrite) != (PRead | PWrite) {
+			return 0, 0, false, ErrProtection
+		}
+	}
+	var raw [16]byte
+	for i := uint64(0); i < 16; i++ {
+		guest := uint64(addr) + i
+		page := Page64(guest >> Page64Bits)
+		offset := guest & (Page64Size - 1)
+		raw[i] = m.pages[page].data[offset]
+	}
+	oldLo = binary.LittleEndian.Uint64(raw[0:8])
+	oldHi = binary.LittleEndian.Uint64(raw[8:16])
+	if oldLo != expectedLo || oldHi != expectedHi {
+		return oldLo, oldHi, false, nil
+	}
+	binary.LittleEndian.PutUint64(raw[0:8], replacementLo)
+	binary.LittleEndian.PutUint64(raw[8:16], replacementHi)
+	for i := uint64(0); i < 16; i++ {
+		guest := uint64(addr) + i
+		page := Page64(guest >> Page64Bits)
+		offset := guest & (Page64Size - 1)
+		m.pages[page].data[offset] = raw[i]
+	}
+	for page := first; page < end; page++ {
+		m.gens[page]++
+		m.pages[page].gen = m.gens[page]
+	}
+	m.changes++
+	return oldLo, oldHi, true, nil
+}

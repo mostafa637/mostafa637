@@ -874,3 +874,72 @@ func TestJIT64FSBaseGSBaseAndXCR(t *testing.T) {
 		t.Fatalf("invalid xgetbv trap=%#x trapNo=%#x, want %#x", trap, invalidState.TrapNo, Trap64GeneralFault)
 	}
 }
+
+func TestJIT64Cmpxchg8BAnd16B(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x1a000
+	const dataAddress Address64 = 0x2a000
+	code := []byte{
+		0xb8, 0x88, 0x77, 0x66, 0x55, // mov eax, 0x55667788
+		0xba, 0x11, 0x22, 0x33, 0x44, // mov edx, 0x44332211
+		0xbb, 0xef, 0xbe, 0xad, 0xde, // mov ebx, 0xdeadbeef
+		0xb9, 0xbe, 0xba, 0xfe, 0xca, // mov ecx, 0xcafebabe
+		0x0f, 0xc7, 0x0f, // cmpxchg8b [rdi]
+		0x48, 0xb8, 0xef, 0xbe, 0xad, 0xde, 0xbe, 0xba, 0xfe, 0xca, // mov rax, 0xcafebabedeadbeef
+		0x48, 0xba, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11, // mov rdx, 0x1112131415161718
+		0x48, 0xbb, 0x11, 0x00, 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, // mov rbx, 0xaabbccddeeff0011
+		0x48, 0xb9, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, // mov rcx, 0x2233445566778899
+		0x48, 0x0f, 0xc7, 0x0f, // cmpxchg16b [rdi]
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.WriteUint64(dataAddress, 0x4433221155667788); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.WriteUint64(dataAddress+8, 0x1112131415161718); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("cmpxchg success trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if got, err := memory.ReadUint64(dataAddress); err != nil || got != 0xaabbccddeeff0011 {
+		t.Fatalf("cmpxchg16b low=%#x err=%v", got, err)
+	}
+	if got, err := memory.ReadUint64(dataAddress + 8); err != nil || got != 0x2233445566778899 {
+		t.Fatalf("cmpxchg16b high=%#x err=%v", got, err)
+	}
+	if !state.Flag(Flag64ZF) {
+		t.Fatal("cmpxchg16b success did not set ZF")
+	}
+
+	mismatchMemory := NewMemory64()
+	const mismatchCode Address64 = 0x1b000
+	const mismatchData Address64 = 0x2b000
+	mapExecutable64(t, mismatchMemory, mismatchCode, []byte{
+		0xb8, 0x11, 0x11, 0x11, 0x11, // mov eax, 0x11111111
+		0xba, 0x22, 0x22, 0x22, 0x22, // mov edx, 0x22222222
+		0x0f, 0xc7, 0x0f, // cmpxchg8b [rdi]
+		0xf4, // hlt
+	})
+	if err := mismatchMemory.Map(mismatchData, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := mismatchMemory.WriteUint64(mismatchData, 0x88776655ccbbaa99); err != nil {
+		t.Fatal(err)
+	}
+	mismatchState := NewMachineState64(mismatchMemory)
+	mismatchState.RIP = uint64(mismatchCode)
+	mismatchState.Set(RDI, uint64(mismatchData))
+	if trap := NewJIT64(mismatchMemory).RunToInterrupt(mismatchState); trap != Trap64Timer || !mismatchState.Halted {
+		t.Fatalf("cmpxchg mismatch trap=%#x halted=%v", trap, mismatchState.Halted)
+	}
+	if mismatchState.Get(RAX) != 0xccbbaa99 || mismatchState.Get(RDX) != 0x88776655 || mismatchState.Flag(Flag64ZF) {
+		t.Fatalf("cmpxchg8b mismatch rax=%#x rdx=%#x zf=%v", mismatchState.Get(RAX), mismatchState.Get(RDX), mismatchState.Flag(Flag64ZF))
+	}
+}
