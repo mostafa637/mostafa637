@@ -22,6 +22,7 @@ type Process struct {
 
 	Context  *coresyscall.Context
 	Syscalls *coresyscall.Dispatcher
+	Executor *corecpu.Executor
 	closed   bool
 }
 
@@ -30,13 +31,23 @@ func NewProcess(pid uint32, fake *corefs.FS) *Process {
 	state := corecpu.NewMachineState(memory)
 	context := coresyscall.NewContext(memory)
 	context.PID = pid
+	dispatcher := coresyscall.NewDispatcher(context)
+	var executor *corecpu.Executor
+	executor = corecpu.NewExecutor(func(machine *corecpu.MachineState) int32 {
+		result := dispatcher.DispatchState(machine)
+		if context.Exited {
+			executor.Halted = true
+		}
+		return result
+	})
 	return &Process{
 		PID:      pid,
 		Memory:   memory,
 		CPU:      state,
 		FS:       fake,
 		Context:  context,
-		Syscalls: coresyscall.NewDispatcher(context),
+		Syscalls: dispatcher,
+		Executor: executor,
 	}
 }
 
@@ -66,6 +77,24 @@ func (p *Process) SyscallFromRegisters() int32 {
 		return coresyscall.EFAULT
 	}
 	return p.Syscalls.DispatchState(p.CPU)
+}
+
+func (p *Process) Step() (corecpu.Instruction, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return corecpu.Instruction{}, ErrClosed
+	}
+	return p.Executor.Step(p.CPU)
+}
+
+func (p *Process) Run(maxSteps int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return ErrClosed
+	}
+	return p.Executor.Run(p.CPU, maxSteps)
 }
 
 func (p *Process) ExitCode() (int32, bool) {

@@ -36,7 +36,7 @@ go-pure/
 
 ## ترتيب النقل
 
-يبدأ العمل بمكوّنات لا تعتمد على نظام التشغيل: أنواع السجلات والذاكرة، ثم syscall ABI واختبارات المقارنة. أُنجزت الآن ذاكرة sparse مع page mapping وCOW وgrows-down، وMachineState، وdispatcher أولي لـmmap/munmap/mprotect/brk/read/write/exit. بعد ذلك تُنقل instruction decoder/executor، ثم ELF وtask وsignal وfd/tty. تبقى session وboot مرتبطة مؤقتًا بـPTY المضيف حتى يكتمل executor.
+يبدأ العمل بمكوّنات لا تعتمد على نظام التشغيل: أنواع السجلات والذاكرة، ثم syscall ABI واختبارات المقارنة. أُنجزت الآن ذاكرة sparse مع page mapping وCOW وgrows-down، وMachineState، وdispatcher أولي لـmmap/munmap/mprotect/brk/read/write/exit، وdecoder/executor أولي لـMOV وALU وstack وbranches وINT 0x80 وHLT. بعد ذلك تُنقل مجموعة التعليمات الأوسع وELF loader ثم task وsignal وfd/tty. تبقى session وboot مرتبطة مؤقتًا بـPTY المضيف حتى يكتمل guest execution.
 
 كل مرحلة يجب أن تملك اختبارات Go مستقلة، واختبار مقارنة مع النسخة C عندما يكون الناتج قابلًا للرصد. لا يجوز حذف C core قبل أن ينجح shell smoke وrootfs وPTY وPython في النسختين.
 
