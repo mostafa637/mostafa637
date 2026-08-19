@@ -20,49 +20,51 @@ import (
 type Number64 uint64
 
 const (
-	Sys64Read          Number64 = 0
-	Sys64Write         Number64 = 1
-	Sys64Poll          Number64 = 7
-	Sys64Select        Number64 = 23
-	Sys64Open          Number64 = 2
-	Sys64Close         Number64 = 3
-	Sys64Stat          Number64 = 4
-	Sys64Fstat         Number64 = 5
-	Sys64Mmap          Number64 = 9
-	Sys64Mprotect      Number64 = 10
-	Sys64Munmap        Number64 = 11
-	Sys64Brk           Number64 = 12
-	Sys64Mremap        Number64 = 25
-	Sys64Madvise       Number64 = 28
-	Sys64Gettimeofday  Number64 = 96
-	Sys64Times         Number64 = 100
-	Sys64Lseek         Number64 = 8
-	Sys64Ioctl         Number64 = 16
-	Sys64RtSigaction   Number64 = 13
-	Sys64RtSigprocmask Number64 = 14
-	Sys64RtSigreturn   Number64 = 15
-	Sys64Readv         Number64 = 19
-	Sys64Writev        Number64 = 20
-	Sys64SchedYield    Number64 = 24
-	Sys64Pselect6      Number64 = 270
-	Sys64Ppoll         Number64 = 271
-	Sys64Dup           Number64 = 32
-	Sys64Dup2          Number64 = 33
-	Sys64Nanosleep     Number64 = 35
-	Sys64Pause         Number64 = 34
-	Sys64GetPID        Number64 = 39
-	Sys64Sendfile      Number64 = 40
-	Sys64Chown         Number64 = 92
-	Sys64Fchown        Number64 = 93
-	Sys64Lchown        Number64 = 94
-	Sys64Umask         Number64 = 95
-	Sys64Fchmod        Number64 = 91
-	Sys64Fsync         Number64 = 74
-	Sys64Fdatasync     Number64 = 75
-	Sys64Truncate      Number64 = 76
-	Sys64Ftruncate     Number64 = 77
-	Sys64Statfs        Number64 = 137
-	Sys64Fstatfs       Number64 = 138
+	Sys64Read           Number64 = 0
+	Sys64Write          Number64 = 1
+	Sys64Poll           Number64 = 7
+	Sys64Select         Number64 = 23
+	Sys64Open           Number64 = 2
+	Sys64Close          Number64 = 3
+	Sys64Stat           Number64 = 4
+	Sys64Fstat          Number64 = 5
+	Sys64Mmap           Number64 = 9
+	Sys64Mprotect       Number64 = 10
+	Sys64Munmap         Number64 = 11
+	Sys64Brk            Number64 = 12
+	Sys64Mremap         Number64 = 25
+	Sys64Madvise        Number64 = 28
+	Sys64Gettimeofday   Number64 = 96
+	Sys64Times          Number64 = 100
+	Sys64Lseek          Number64 = 8
+	Sys64Ioctl          Number64 = 16
+	Sys64RtSigaction    Number64 = 13
+	Sys64RtSigprocmask  Number64 = 14
+	Sys64RtSigreturn    Number64 = 15
+	Sys64Readv          Number64 = 19
+	Sys64Writev         Number64 = 20
+	Sys64SchedYield     Number64 = 24
+	Sys64Pselect6       Number64 = 270
+	Sys64Ppoll          Number64 = 271
+	Sys64Dup            Number64 = 32
+	Sys64Dup2           Number64 = 33
+	Sys64Nanosleep      Number64 = 35
+	Sys64ClockNanosleep Number64 = 230
+	Sys64Pause          Number64 = 34
+
+	Sys64GetPID    Number64 = 39
+	Sys64Sendfile  Number64 = 40
+	Sys64Chown     Number64 = 92
+	Sys64Fchown    Number64 = 93
+	Sys64Lchown    Number64 = 94
+	Sys64Umask     Number64 = 95
+	Sys64Fchmod    Number64 = 91
+	Sys64Fsync     Number64 = 74
+	Sys64Fdatasync Number64 = 75
+	Sys64Truncate  Number64 = 76
+	Sys64Ftruncate Number64 = 77
+	Sys64Statfs    Number64 = 137
+	Sys64Fstatfs   Number64 = 138
 
 	Sys64GetRlimit      Number64 = 97
 	Sys64RtSigpending   Number64 = 127
@@ -73,17 +75,18 @@ const (
 	Sys64Fchmodat       Number64 = 268
 	Sys64Faccessat2     Number64 = 439
 
-	Sys64GetRUsage Number64 = 98
-	Sys64GetGroups Number64 = 115
-	Sys64SetGroups Number64 = 116
-	Sys64Socket    Number64 = 41
-	Sys64Connect   Number64 = 42
-	Sys64Accept    Number64 = 43
-	Sys64Sendto    Number64 = 44
-	Sys64Recvfrom  Number64 = 45
-	Sys64Sendmsg   Number64 = 46
-	Sys64Recvmsg   Number64 = 47
-	Sys64Shutdown  Number64 = 48
+	Sys64GetRUsage   Number64 = 98
+	Sys64GetGroups   Number64 = 115
+	Sys64SetGroups   Number64 = 116
+	Sys64Socket      Number64 = 41
+	Sys64Connect     Number64 = 42
+	Sys64Getpeername Number64 = 52
+	Sys64Accept      Number64 = 43
+	Sys64Sendto      Number64 = 44
+	Sys64Recvfrom    Number64 = 45
+	Sys64Sendmsg     Number64 = 46
+	Sys64Recvmsg     Number64 = 47
+	Sys64Shutdown    Number64 = 48
 
 	Sys64Bind        Number64 = 49
 	Sys64Listen      Number64 = 50
@@ -341,6 +344,7 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64GetCPU, getcpu64)
 	d.Register(Sys64Ioctl, ioctl64)
 	d.Register(Sys64Nanosleep, nanosleep64)
+	d.Register(Sys64ClockNanosleep, clockNanosleep64)
 	d.Register(Sys64Futex, futex64)
 	d.Register(Sys64Rseq, rseq64)
 	d.Register(Sys64SchedYield, func(ctx *Context64, args [6]uint64) int64 {
@@ -397,6 +401,7 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Bind, bind64)
 	d.Register(Sys64Listen, listen64)
 	d.Register(Sys64Connect, connect64)
+	d.Register(Sys64Getpeername, getpeername64)
 	d.Register(Sys64Accept, accept64)
 	d.Register(Sys64Accept4, accept464)
 	d.Register(Sys64Getsockname, getsockname64)

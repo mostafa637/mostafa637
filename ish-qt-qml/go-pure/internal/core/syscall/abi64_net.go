@@ -433,6 +433,21 @@ func getsockname64(ctx *Context64, args [6]uint64) int64 {
 	return int64(writeSocketPeer64(ctx, corecpu.Address64(args[1]), corecpu.Address64(args[2]), address))
 }
 
+func getpeername64(ctx *Context64, args [6]uint64) int64 {
+	file, err := ctx.GetFile(args[0])
+	if err != nil {
+		return int64(EBADF)
+	}
+	handle, ok := socketHandleFromFile64(file)
+	if !ok {
+		return int64(ENOTSOCK)
+	}
+	if handle.conn == nil {
+		return int64(ENOTCONN)
+	}
+	return int64(writeSocketPeer64(ctx, corecpu.Address64(args[1]), corecpu.Address64(args[2]), handle.conn.RemoteAddr()))
+}
+
 func sendto64(ctx *Context64, args [6]uint64) int64 {
 	if args[4] != 0 {
 		return int64(EOPNOTSUPP)

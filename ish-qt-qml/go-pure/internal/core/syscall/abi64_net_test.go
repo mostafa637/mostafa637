@@ -175,6 +175,28 @@ func TestDispatcher64TCPAccept4(t *testing.T) {
 		t.Fatalf("accept4: resume=%v err=%v fd=%d", resume, err, int64(state.Get(corecpu.RAX)))
 	}
 	acceptedFD := uint64(state.Get(corecpu.RAX))
+	binary.LittleEndian.PutUint32(addrLen[:], uint32(len(sockaddr)))
+	if err := memory.Write(area+0x200, addrLen[:]); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(corecpu.RAX, uint64(Sys64Getpeername))
+	state.Set(corecpu.RDI, acceptedFD)
+	state.Set(corecpu.RSI, uint64(area+0x100))
+	state.Set(corecpu.RDX, uint64(area+0x200))
+	resume, err = dispatcher.Dispatch(state)
+	if err != nil || !resume || int64(state.Get(corecpu.RAX)) != 0 {
+		t.Fatalf("getpeername: resume=%v err=%v rax=%d", resume, err, int64(state.Get(corecpu.RAX)))
+	}
+	if err := memory.Read(area+0x100, sockaddr[:]); err != nil {
+		t.Fatal(err)
+	}
+	if family := binary.LittleEndian.Uint16(sockaddr[:2]); family != socketAFInet {
+		t.Fatalf("getpeername family=%d", family)
+	}
+	if peerPort := binary.BigEndian.Uint16(sockaddr[2:4]); peerPort == 0 {
+		t.Fatal("getpeername returned zero peer port")
+	}
+
 	file, err := context64.GetFile(acceptedFD)
 	if err != nil || !file.Cloexec {
 		t.Fatalf("accept4 cloexec: err=%v file=%#v", err, file)
