@@ -39,7 +39,8 @@ jobs:
             adb install -r gtk-hello-android/gtk-hello-android-release.apk
             adb shell pm clear com.example.gtkhelloworld || true
             adb shell am force-stop com.example.gtkhelloworld || true
-            adb shell am start -W -n com.example.gtkhelloworld/org.gtk.android.ToplevelActivity
+            adb logcat -c || true
+            timeout 30s adb shell am start -n com.example.gtkhelloworld/org.gtk.android.ToplevelActivity
             sleep 10
             adb logcat -d -v threadtime > gtk-hello-android/logcat.txt || true
             adb exec-out screencap -p > gtk-hello-android/emulator-screen.png || true
