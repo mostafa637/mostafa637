@@ -3084,3 +3084,89 @@ func TestJIT64PCMPEQQ(t *testing.T) {
 		t.Fatalf("xmm3 memory lane1=%#x, want zero", got)
 	}
 }
+
+func TestJIT64PackedWideningMoves(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x48000
+		dataAddress Address64 = 0x49000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	memorySource := []byte{0x80, 0x7f, 0x01, 0xff, 0x34, 0x12, 0xfe, 0x7f}
+	if err := memory.Write(dataAddress, memorySource); err != nil {
+		t.Fatal(err)
+	}
+	code := []byte{
+		0x66, 0x0f, 0x38, 0x20, 0xe0, // pmovsxbw xmm4, xmm0
+		0x66, 0x0f, 0x38, 0x21, 0xe9, // pmovsxbd xmm5, xmm1
+		0x66, 0x0f, 0x38, 0x22, 0xf2, // pmovsxbq xmm6, xmm2
+		0x66, 0x0f, 0x38, 0x23, 0xfb, // pmovsxwd xmm7, xmm3
+		0x66, 0x44, 0x0f, 0x38, 0x24, 0xc0, // pmovsxwq xmm8, xmm0
+		0x66, 0x44, 0x0f, 0x38, 0x25, 0xc9, // pmovsxdq xmm9, xmm1
+		0x66, 0x44, 0x0f, 0x38, 0x30, 0x17, // pmovzxbw xmm10, [rdi]
+		0x66, 0x44, 0x0f, 0x38, 0x31, 0x1f, // pmovzxbd xmm11, [rdi]
+		0x66, 0x44, 0x0f, 0x38, 0x32, 0x27, // pmovzxbq xmm12, [rdi]
+		0x66, 0x44, 0x0f, 0x38, 0x33, 0x2f, // pmovzxwd xmm13, [rdi]
+		0x66, 0x44, 0x0f, 0x38, 0x34, 0x37, // pmovzxwq xmm14, [rdi]
+		0x66, 0x44, 0x0f, 0x38, 0x35, 0x3f, // pmovzxdq xmm15, [rdi]
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	copy(state.XMM[0][:], []byte{0x80, 0x7f, 0x01, 0xff, 0x34, 0x12, 0xfe, 0x7f})
+	copy(state.XMM[1][:], []byte{0x01, 0x00, 0x00, 0x80, 0xff, 0xff, 0xff, 0x7f})
+	copy(state.XMM[2][:], []byte{0x80, 0xff})
+	copy(state.XMM[3][:], []byte{0x80, 0x80, 0xff, 0x7f, 0x34, 0x12, 0x00, 0x80})
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	putWords := func(values ...uint16) [16]byte {
+		var result [16]byte
+		for lane, value := range values {
+			binary.LittleEndian.PutUint16(result[lane*2:], value)
+		}
+		return result
+	}
+	putDwords := func(values ...uint32) [16]byte {
+		var result [16]byte
+		for lane, value := range values {
+			binary.LittleEndian.PutUint32(result[lane*4:], value)
+		}
+		return result
+	}
+	putQwords := func(values ...uint64) [16]byte {
+		var result [16]byte
+		for lane, value := range values {
+			binary.LittleEndian.PutUint64(result[lane*8:], value)
+		}
+		return result
+	}
+	assertXMM := func(xmm uint8, expected [16]byte) {
+		t.Helper()
+		if state.XMM[xmm] != expected {
+			t.Fatalf("xmm%d=%x, want %x", xmm, state.XMM[xmm], expected)
+		}
+	}
+	assertXMM(4, putWords(0xff80, 0x007f, 0x0001, 0xffff, 0x0034, 0x0012, 0xfffe, 0x007f))
+	assertXMM(5, putDwords(0x00000001, 0x00000000, 0x00000000, 0xffffff80))
+	assertXMM(6, putQwords(0xffffffffffffff80, 0xffffffffffffffff))
+	assertXMM(7, putDwords(0xffff8080, 0x00007fff, 0x00001234, 0xffff8000))
+	assertXMM(8, putQwords(0x0000000000007f80, 0xffffffffffffff01))
+	assertXMM(9, putQwords(0xffffffff80000001, 0x000000007fffffff))
+	assertXMM(10, putWords(0x0080, 0x007f, 0x0001, 0x00ff, 0x0034, 0x0012, 0x00fe, 0x007f))
+	assertXMM(11, putDwords(0x00000080, 0x0000007f, 0x00000001, 0x000000ff))
+	assertXMM(12, putQwords(0x0000000000000080, 0x000000000000007f))
+	assertXMM(13, putDwords(0x00007f80, 0x0000ff01, 0x00001234, 0x00007ffe))
+	assertXMM(14, putQwords(0x0000000000007f80, 0x000000000000ff01))
+	assertXMM(15, putQwords(0x00000000ff017f80, 0x000000007ffe1234))
+}

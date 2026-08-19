@@ -796,6 +796,26 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
 		}
 		return makeSSEPackedFloatUnary64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.PMOVSXBW, x86asm.PMOVSXBD, x86asm.PMOVSXBQ, x86asm.PMOVSXWD, x86asm.PMOVSXWQ, x86asm.PMOVSXDQ,
+		x86asm.PMOVZXBW, x86asm.PMOVZXBD, x86asm.PMOVZXBQ, x86asm.PMOVZXWD, x86asm.PMOVZXWQ, x86asm.PMOVZXDQ:
+		sourceWidth, _, _, _, ok := packedWidenSpec64(inst.Op)
+		if !ok {
+			return microOp64{}, false, ErrUnsupported64
+		}
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		var source operand64
+		if _, isRegister := arg(1).(x86asm.Reg); isRegister {
+			source, err = operand64FromArg(arg(1), 16)
+		} else {
+			source, err = operand64FromArg(arg(1), sourceWidth)
+		}
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeSSEWiden64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
 	case x86asm.MOVNTDQ, x86asm.MOVNTPS:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64Mem {
@@ -2304,6 +2324,78 @@ func makeSSECompare64(address uint64, size, width uint8, left, right operand64) 
 		state.OF = 0
 		state.Lazy = 0
 		state.LazyWidth = 0
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func packedWidenSpec64(op x86asm.Op) (sourceWidth, destinationWidth, lanes uint8, signed bool, ok bool) {
+	switch op {
+	case x86asm.PMOVSXBW:
+		return 1, 2, 8, true, true
+	case x86asm.PMOVSXBD:
+		return 1, 4, 4, true, true
+	case x86asm.PMOVSXBQ:
+		return 1, 8, 2, true, true
+	case x86asm.PMOVSXWD:
+		return 2, 4, 4, true, true
+	case x86asm.PMOVSXWQ:
+		return 2, 8, 2, true, true
+	case x86asm.PMOVSXDQ:
+		return 4, 8, 2, true, true
+	case x86asm.PMOVZXBW:
+		return 1, 2, 8, false, true
+	case x86asm.PMOVZXBD:
+		return 1, 4, 4, false, true
+	case x86asm.PMOVZXBQ:
+		return 1, 8, 2, false, true
+	case x86asm.PMOVZXWD:
+		return 2, 4, 4, false, true
+	case x86asm.PMOVZXWQ:
+		return 2, 8, 2, false, true
+	case x86asm.PMOVZXDQ:
+		return 4, 8, 2, false, true
+	default:
+		return 0, 0, 0, false, false
+	}
+}
+
+func makeSSEWiden64(address uint64, size uint8, op x86asm.Op, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		sourceWidth, destinationWidth, lanes, signed, ok := packedWidenSpec64(op)
+		if !ok {
+			return Flow64Stop, ErrUnsupported64
+		}
+		sourceBytes, err := readVectorWidth64(state, source, next, sourceWidth*lanes)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var result [16]byte
+		for lane := uint8(0); lane < lanes; lane++ {
+			offset := int(lane * sourceWidth)
+			var raw uint64
+			for i := uint8(0); i < sourceWidth; i++ {
+				raw |= uint64(sourceBytes[offset+int(i)]) << (8 * i)
+			}
+			value := int64(raw)
+			if signed {
+				value = signExtendLane64(raw, int(sourceWidth))
+			}
+			destinationOffset := int(lane * destinationWidth)
+			switch destinationWidth {
+			case 2:
+				binary.LittleEndian.PutUint16(result[destinationOffset:], uint16(value))
+			case 4:
+				binary.LittleEndian.PutUint32(result[destinationOffset:], uint32(value))
+			case 8:
+				binary.LittleEndian.PutUint64(result[destinationOffset:], uint64(value))
+			default:
+				return Flow64Stop, ErrUnsupported64
+			}
+		}
+		if err := writeVector64(state, destination, next, result); err != nil {
+			return Flow64Stop, err
+		}
 		state.RIP = next
 		return Flow64Continue, nil
 	}}
