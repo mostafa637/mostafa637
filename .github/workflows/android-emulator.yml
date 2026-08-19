@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   emulator-test:
@@ -57,3 +57,17 @@ jobs:
             gtk-hello-android/emulator-screen.png
             gtk-hello-android/logcat.txt
           if-no-files-found: warn
+
+      - name: Publish emulator diagnostics branch
+        if: always() && github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f gtk-hello-android/emulator-screen.png ]; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --orphan debug/emulator-latest
+          git rm -r --cached . >/dev/null 2>&1 || true
+          git add gtk-hello-android/emulator-screen.png gtk-hello-android/logcat.txt
+          git commit -m "chore: publish latest emulator diagnostics [skip ci]" || true
+          git push origin HEAD:refs/heads/debug/emulator-latest --force
