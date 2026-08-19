@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"math"
 	"math/bits"
 	"sync"
@@ -15,6 +16,7 @@ import (
 var (
 	ErrUnsupported64  = errors.New("cpu64: unsupported instruction")
 	ErrInvalid64Block = errors.New("cpu64: invalid translated block")
+	crc32Castagnoli64 = crc32.MakeTable(crc32.Castagnoli)
 )
 
 type Flow64 uint8
@@ -513,6 +515,34 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("BSWAP destination: %v", err)
 		}
 		return makeBSWAP64(address, uint8(inst.Len), destination), false, nil
+	case x86asm.CRC32:
+		destination, err := operand64FromArg(arg(0), 0)
+		if err != nil || destination.Kind != operand64Reg || (destination.Width != 4 && destination.Width != 8) {
+			return microOp64{}, false, fmt.Errorf("CRC32 destination: %v", err)
+		}
+		sourceWidth := uint8(0)
+		if reg, ok := arg(1).(x86asm.Reg); ok {
+			_, _, sourceWidth, ok = reg64FromX86(reg)
+			if !ok {
+				return microOp64{}, false, fmt.Errorf("CRC32 source register %v", reg)
+			}
+		} else if _, ok := arg(1).(x86asm.Mem); ok {
+			sourceWidth = uint8(inst.MemBytes)
+		}
+		if sourceWidth != 1 && sourceWidth != 2 && sourceWidth != 4 && sourceWidth != 8 {
+			return microOp64{}, false, fmt.Errorf("CRC32 source width %d", sourceWidth)
+		}
+		if destination.Width == 4 && sourceWidth == 8 {
+			return microOp64{}, false, fmt.Errorf("CRC32 r32 cannot use r/m64")
+		}
+		if destination.Width == 8 && sourceWidth != 1 && sourceWidth != 8 {
+			return microOp64{}, false, fmt.Errorf("CRC32 r64 source width %d", sourceWidth)
+		}
+		source, err := operand64FromArg(arg(1), sourceWidth)
+		if err != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("CRC32 source: %v", err)
+		}
+		return makeCRC32C64(address, uint8(inst.Len), destination, source), false, nil
 	case x86asm.LZCNT, x86asm.TZCNT:
 		destination, err := operand64FromArg(arg(0), 0)
 		if err != nil || destination.Kind != operand64Reg {
@@ -3628,6 +3658,25 @@ func makeBSWAP64(address uint64, size uint8, destination operand64) microOp64 {
 			return Flow64Stop, ErrUnsupported64
 		}
 		writeReg64(state, destination, value)
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeCRC32C64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		initial := readReg64(state, destination)
+		input, err := readOperand64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var raw [8]byte
+		binary.LittleEndian.PutUint64(raw[:], input)
+		checksum := crc32.Update(uint32(initial), crc32Castagnoli64, raw[:source.Width])
+		// CRC32 always produces a 32-bit checksum.  A 32-bit destination
+		// zero-extends through writeReg64, and CRC32Q explicitly clears the
+		// upper half of its 64-bit destination as well.
+		writeReg64(state, destination, uint64(checksum))
 		state.RIP = next
 		return Flow64Continue, nil
 	}}

@@ -3584,3 +3584,64 @@ func TestJIT64SSE41IntegerMinMax(t *testing.T) {
 	wantDwords(13, 1, 0xffffffff, 0x80000000, 4)
 	wantBytes(14, 0x80, 0x80, 0xff, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 }
+
+func TestJIT64CRC32(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x54000
+		dataAddress Address64 = 0x55000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(dataAddress, []byte("12345678")); err != nil {
+		t.Fatal(err)
+	}
+	code := []byte{
+		0xf2, 0x0f, 0x38, 0xf0, 0xc1, // crc32 eax, cl
+		0x66, 0xf2, 0x44, 0x0f, 0x38, 0xf1, 0xc1, // crc32 r8d, cx
+		0xf2, 0x44, 0x0f, 0x38, 0xf1, 0xc9, // crc32 r9d, ecx
+		0xf2, 0x4c, 0x0f, 0x38, 0xf1, 0xd9, // crc32 r11, rcx
+		0xf2, 0x0f, 0x38, 0xf0, 0x07, // crc32 eax, byte ptr [rdi]
+		0x66, 0xf2, 0x44, 0x0f, 0x38, 0xf1, 0x07, // crc32 r8d, word ptr [rdi]
+		0xf2, 0x44, 0x0f, 0x38, 0xf1, 0x0f, // crc32 r9d, dword ptr [rdi]
+		0xf2, 0x4c, 0x0f, 0x38, 0xf1, 0x17, // crc32 r10, qword ptr [rdi]
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RCX, 0x3837363534333231)
+	state.Set(RDI, uint64(dataAddress))
+	state.Set(RAX, 0x1111111100000000)
+	state.Set(R8, 0x2222222200000000)
+	state.Set(R9, 0x3333333300000000)
+	state.Set(R10, 0x4444444400000000)
+	state.Set(R11, 0x5555555500000000)
+	state.RFLAGS = Flag64IF | Flag64CF | Flag64ZF | Flag64SF
+	flagsBefore := state.RFLAGS
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("RFLAGS changed from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	want := map[Reg64]uint64{
+		RAX: 0x60053794,
+		R8:  0xf7de23e8,
+		R9:  0x86b2bb7f,
+		R11: 0x6087809a,
+		R10: 0x6087809a,
+	}
+	for reg, expected := range want {
+		if got := state.Get(reg); got != expected {
+			t.Fatalf("%s=%#x, want %#x", reg, got, expected)
+		}
+	}
+}
