@@ -144,6 +144,17 @@ func readPollTimespec64(ctx *Context64, address corecpu.Address64) (time.Duratio
 	return time.Duration(seconds)*time.Second + time.Duration(nanoseconds), 0
 }
 
+func pollWaitWithSignal64(ctx *Context64, address corecpu.Address64, count uint64, duration time.Duration, signalMask uint64) int64 {
+	if hasUnblockedPending64(ctx, signalMask) {
+		return int64(EINTR)
+	}
+	result := pollWait64(ctx, address, count, duration)
+	if result == 0 && hasUnblockedPending64(ctx, signalMask) {
+		return int64(EINTR)
+	}
+	return result
+}
+
 func ppoll64(ctx *Context64, args [6]uint64) int64 {
 	if ctx == nil || ctx.Memory == nil {
 		return int64(EFAULT)
@@ -155,7 +166,14 @@ func ppoll64(ctx *Context64, args [6]uint64) int64 {
 	if args[4] != 0 && args[4] != 8 {
 		return int64(EINVAL)
 	}
-	return pollWait64(ctx, corecpu.Address64(args[0]), args[1], duration)
+	signalMask := currentSignalMask64(ctx)
+	if args[3] != 0 {
+		signalMask, result = temporarySignalMask64(ctx, args[3], args[4])
+		if result != 0 {
+			return result
+		}
+	}
+	return pollWaitWithSignal64(ctx, corecpu.Address64(args[0]), args[1], duration, signalMask)
 }
 
 func selectBit64(ctx *Context64, address corecpu.Address64, fd uint64) (bool, int64) {
@@ -240,8 +258,32 @@ func selectTimeout64(ctx *Context64, address corecpu.Address64, timespec bool) (
 }
 
 func select64(ctx *Context64, args [6]uint64, timespec bool) int64 {
+	signalMask := currentSignalMask64(ctx)
+	if timespec && args[5] != 0 {
+		var value [16]byte
+		if ctx == nil || ctx.Memory == nil {
+			return int64(EFAULT)
+		}
+		if err := ctx.Memory.Read(corecpu.Address64(args[5]), value[:]); err != nil {
+			return int64(EFAULT)
+		}
+		maskAddress := binary.LittleEndian.Uint64(value[0:8])
+		maskSize := binary.LittleEndian.Uint64(value[8:16])
+		var result int64
+		signalMask, result = temporarySignalMask64(ctx, maskAddress, maskSize)
+		if result != 0 {
+			return result
+		}
+	}
+	return select64WithMask(ctx, args, timespec, signalMask)
+}
+
+func select64WithMask(ctx *Context64, args [6]uint64, timespec bool, signalMask uint64) int64 {
 	if ctx == nil || ctx.Memory == nil || ctx.FDs == nil {
 		return int64(ENOSYS)
+	}
+	if hasUnblockedPending64(ctx, signalMask) {
+		return int64(EINTR)
 	}
 	nfds := args[0]
 	if nfds > selectMaxFD64 {
@@ -327,7 +369,7 @@ func select64(ctx *Context64, args [6]uint64, timespec bool) int64 {
 		duration = time.Millisecond
 	}
 	time.Sleep(duration)
-	return select64(ctx, [6]uint64{args[0], args[1], args[2], args[3], args[4], args[5]}, timespec)
+	return select64WithMask(ctx, [6]uint64{args[0], args[1], args[2], args[3], args[4], args[5]}, timespec, signalMask)
 }
 
 func selectSyscall64(ctx *Context64, args [6]uint64) int64 {
