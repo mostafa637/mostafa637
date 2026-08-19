@@ -117,6 +117,9 @@ const (
 	ENOTCONN     int32 = -107
 	ECONNREFUSED int32 = -111
 	EOPNOTSUPP   int32 = -95
+	E2BIG        int32 = -7
+	EXDEV        int32 = -18
+	ELOOP        int32 = -40
 )
 
 const (

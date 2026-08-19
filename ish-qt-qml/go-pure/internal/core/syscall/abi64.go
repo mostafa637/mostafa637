@@ -165,10 +165,12 @@ const (
 	Sys64InotifyAdd       Number64 = 254
 	Sys64InotifyRm        Number64 = 255
 	Sys64Openat           Number64 = 257
-	Sys64Mkdirat          Number64 = 258
-	Sys64Readlinkat       Number64 = 267
-	Sys64Fstatat          Number64 = 262
-	Sys64Unlinkat         Number64 = 263
+	Sys64Openat2          Number64 = 437
+
+	Sys64Mkdirat    Number64 = 258
+	Sys64Readlinkat Number64 = 267
+	Sys64Fstatat    Number64 = 262
+	Sys64Unlinkat   Number64 = 263
 
 	Sys64Renameat       Number64 = 264
 	Sys64Linkat         Number64 = 265
@@ -407,6 +409,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 
 	d.Register(Sys64Open, open64)
 	d.Register(Sys64Openat, openat64)
+	d.Register(Sys64Openat2, openat264)
+
 	d.Register(Sys64Stat, stat64Guest)
 	d.Register(Sys64Fstat, fstat64Guest)
 	d.Register(Sys64Fstatat, fstatat64Guest)
