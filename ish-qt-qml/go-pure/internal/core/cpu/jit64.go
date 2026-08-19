@@ -785,6 +785,18 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("SSE move source: %v", err)
 		}
 		return makeSSEMove64(address, uint8(inst.Len), left, right), false, nil
+	case x86asm.PMULUDQ, x86asm.PMULLW, x86asm.PMULHW, x86asm.PSADBW,
+		x86asm.PACKSSWB, x86asm.PACKSSDW, x86asm.PACKUSWB,
+		x86asm.PADDUSB, x86asm.PADDUSW, x86asm.PSUBUSB, x86asm.PSUBUSW:
+		left, err := operand64FromArg(arg(0), 16)
+		if err != nil || left.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("SSE special destination: %v", err)
+		}
+		right, err := operand64FromArg(arg(1), 16)
+		if err != nil || (right.Kind != operand64XMM && right.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("SSE special source: %v", err)
+		}
+		return makeSSESpecialBinary64(address, uint8(inst.Len), inst.Op, left, right), false, nil
 	case x86asm.PXOR, x86asm.PAND, x86asm.POR, x86asm.PANDN,
 		x86asm.PADDB, x86asm.PADDW, x86asm.PADDD, x86asm.PADDQ,
 		x86asm.PSUBB, x86asm.PSUBW, x86asm.PSUBD, x86asm.PSUBQ,
@@ -2178,6 +2190,108 @@ func sseLaneWidth64(op x86asm.Op) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func makeSSESpecialBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readVector64(state, dst, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readVector64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var result [16]byte
+		switch op {
+		case x86asm.PMULUDQ:
+			for _, offset := range []int{0, 8} {
+				l := uint64(binary.LittleEndian.Uint32(left[offset:]))
+				r := uint64(binary.LittleEndian.Uint32(right[offset:]))
+				binary.LittleEndian.PutUint64(result[offset:], l*r)
+			}
+		case x86asm.PMULLW, x86asm.PMULHW:
+			for offset := 0; offset < 16; offset += 2 {
+				l := int64(int16(binary.LittleEndian.Uint16(left[offset:])))
+				r := int64(int16(binary.LittleEndian.Uint16(right[offset:])))
+				product := l * r
+				if op == x86asm.PMULHW {
+					product >>= 16
+				}
+				binary.LittleEndian.PutUint16(result[offset:], uint16(product))
+			}
+		case x86asm.PSADBW:
+			for _, base := range []int{0, 8} {
+				var sum uint16
+				for i := 0; i < 8; i++ {
+					l := int(left[base+i])
+					r := int(right[base+i])
+					if l >= r {
+						sum += uint16(l - r)
+					} else {
+						sum += uint16(r - l)
+					}
+				}
+				binary.LittleEndian.PutUint16(result[base:], sum)
+			}
+		case x86asm.PACKSSWB:
+			for i := 0; i < 8; i++ {
+				value := int64(int16(binary.LittleEndian.Uint16(left[i*2:])))
+				result[i] = byte(int8(clampSigned64(value, -128, 127)))
+				value = int64(int16(binary.LittleEndian.Uint16(right[i*2:])))
+				result[i+8] = byte(int8(clampSigned64(value, -128, 127)))
+			}
+		case x86asm.PACKSSDW:
+			for i := 0; i < 4; i++ {
+				value := int64(int32(binary.LittleEndian.Uint32(left[i*4:])))
+				binary.LittleEndian.PutUint16(result[i*2:], uint16(int16(clampSigned64(value, -32768, 32767))))
+				value = int64(int32(binary.LittleEndian.Uint32(right[i*4:])))
+				binary.LittleEndian.PutUint16(result[(i+4)*2:], uint16(int16(clampSigned64(value, -32768, 32767))))
+			}
+		case x86asm.PACKUSWB:
+			for i := 0; i < 8; i++ {
+				value := int64(int16(binary.LittleEndian.Uint16(left[i*2:])))
+				result[i] = byte(clampSigned64(value, 0, 255))
+				value = int64(int16(binary.LittleEndian.Uint16(right[i*2:])))
+				result[i+8] = byte(clampSigned64(value, 0, 255))
+			}
+		case x86asm.PADDUSB, x86asm.PSUBUSB:
+			for i := 0; i < 16; i++ {
+				if op == x86asm.PADDUSB {
+					result[i] = byte(clampSigned64(int64(left[i])+int64(right[i]), 0, 255))
+				} else {
+					result[i] = byte(clampSigned64(int64(left[i])-int64(right[i]), 0, 255))
+				}
+			}
+		case x86asm.PADDUSW, x86asm.PSUBUSW:
+			for offset := 0; offset < 16; offset += 2 {
+				l := int64(binary.LittleEndian.Uint16(left[offset:]))
+				r := int64(binary.LittleEndian.Uint16(right[offset:]))
+				if op == x86asm.PADDUSW {
+					binary.LittleEndian.PutUint16(result[offset:], uint16(clampSigned64(l+r, 0, 65535)))
+				} else {
+					binary.LittleEndian.PutUint16(result[offset:], uint16(clampSigned64(l-r, 0, 65535)))
+				}
+			}
+		default:
+			return Flow64Stop, ErrUnsupported64
+		}
+		if err := writeVector64(state, dst, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func clampSigned64(value, min, max int64) int64 {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
 }
 
 func makeSSEBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {

@@ -1811,3 +1811,258 @@ func TestJIT64PackedSSEConversions(t *testing.T) {
 		}
 	}
 }
+
+func TestJIT64PackedArithmeticAndSaturation(t *testing.T) {
+	run := func(t *testing.T, code []byte, state *MachineState64) {
+		t.Helper()
+		const address Address64 = 0x22000
+		mapExecutable64(t, state.Memory, address, code)
+		state.RIP = uint64(address)
+		trap := NewJIT64(state.Memory).RunToInterrupt(state)
+		if trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+	}
+	setVector := func(state *MachineState64, xmm uint8, value []byte) {
+		t.Helper()
+		if len(value) != 16 {
+			t.Fatalf("vector length=%d, want 16", len(value))
+		}
+		copy(state.XMM[xmm][:], value)
+	}
+	putU16 := func(value []byte, lane int, raw uint16) {
+		binary.LittleEndian.PutUint16(value[lane*2:], raw)
+	}
+	putU32 := func(value []byte, lane int, raw uint32) {
+		binary.LittleEndian.PutUint32(value[lane*4:], raw)
+	}
+	putU64 := func(value []byte, lane int, raw uint64) {
+		binary.LittleEndian.PutUint64(value[lane*8:], raw)
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		left := make([]byte, 16)
+		right := make([]byte, 16)
+		putU32(left, 0, 0xffffffff)
+		putU32(left, 1, 0x00000002)
+		putU32(left, 2, 0x12345678)
+		putU32(left, 3, 0x00000003)
+		putU32(right, 0, 2)
+		putU32(right, 1, 3)
+		putU32(right, 2, 0x10)
+		putU32(right, 3, 7)
+		setVector(state, 0, left)
+		setVector(state, 1, right)
+		run(t, []byte{0x66, 0x0f, 0xf4, 0xc1, 0xf4}, state) // pmuludq xmm0, xmm1
+		want := make([]byte, 16)
+		putU64(want, 0, uint64(0xffffffff)*2)
+		putU64(want, 1, uint64(0x12345678)*0x10)
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("pmuludq=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		left := make([]byte, 16)
+		right := make([]byte, 16)
+		for i, value := range []int16{-300, -2, 3, 200, 7, -8, 11, 12} {
+			putU16(left, i, uint16(value))
+		}
+		for i, value := range []int16{2, -3, 4, -5, 6, 7, -9, 10} {
+			putU16(right, i, uint16(value))
+		}
+		setVector(state, 0, left)
+		setVector(state, 1, right)
+		run(t, []byte{0x66, 0x0f, 0xd5, 0xc1, 0xf4}, state) // pmullw xmm0, xmm1
+		want := make([]byte, 16)
+		for i, value := range []int16{-600, 6, 12, -1000, 42, -56, -99, 120} {
+			putU16(want, i, uint16(value))
+		}
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("pmullw=%x, want %x", state.XMM[0], want)
+		}
+
+		setVector(state, 0, left)
+		run(t, []byte{0x66, 0x0f, 0xe5, 0xc1, 0xf4}, state) // pmulhw xmm0, xmm1
+		want = make([]byte, 16)
+		for i, value := range []int16{-1, 0, 0, -1, 0, -1, -1, 0} {
+			putU16(want, i, uint16(value))
+		}
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("pmulhw=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		left := make([]byte, 16)
+		right := make([]byte, 16)
+		for i := 0; i < 8; i++ {
+			left[i] = byte(i)
+			right[i] = byte(8 - i)
+			left[i+8] = byte(i + 8)
+			right[i+8] = byte(i)
+		}
+		setVector(state, 0, left)
+		setVector(state, 1, right)
+		run(t, []byte{0x66, 0x0f, 0xf6, 0xc1, 0xf4}, state) // psadbw xmm0, xmm1
+		want := make([]byte, 16)
+		putU64(want, 0, 32)
+		putU64(want, 1, 64)
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("psadbw=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		left := make([]byte, 16)
+		right := make([]byte, 16)
+		for i, value := range []int16{-200, -129, -128, 0, 127, 128, 300, -1} {
+			putU16(left, i, uint16(value))
+		}
+		for i, value := range []int16{200, 129, -127, 1, -127, -128, -300, 127} {
+			putU16(right, i, uint16(value))
+		}
+		setVector(state, 0, left)
+		setVector(state, 1, right)
+		run(t, []byte{0x66, 0x0f, 0x63, 0xc1, 0xf4}, state) // packsswb xmm0, xmm1
+		want := []byte{0x80, 0x80, 0x80, 0x00, 0x7f, 0x7f, 0x7f, 0xff, 0x7f, 0x7f, 0x81, 0x01, 0x81, 0x80, 0x80, 0x7f}
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("packsswb=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		left := make([]byte, 16)
+		right := make([]byte, 16)
+		for i, value := range []int32{-40000, -32768, 32767, 40000} {
+			putU32(left, i, uint32(value))
+		}
+		for i, value := range []int32{-1, 0, 1, 100000} {
+			putU32(right, i, uint32(value))
+		}
+		setVector(state, 0, left)
+		setVector(state, 1, right)
+		run(t, []byte{0x66, 0x0f, 0x6b, 0xc1, 0xf4}, state) // packssdw xmm0, xmm1
+		want := make([]byte, 16)
+		for i, value := range []int16{-32768, -32768, 32767, 32767, -1, 0, 1, 32767} {
+			putU16(want, i, uint16(value))
+		}
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("packssdw=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		left := make([]byte, 16)
+		right := make([]byte, 16)
+		for i, value := range []int16{-1, 0, 1, 255, 256, 32767, -32768, 7} {
+			putU16(left, i, uint16(value))
+		}
+		for i, value := range []int16{300, -3, 2, 254, -200, 256, 8, 9} {
+			putU16(right, i, uint16(value))
+		}
+		setVector(state, 0, left)
+		setVector(state, 1, right)
+		run(t, []byte{0x66, 0x0f, 0x67, 0xc1, 0xf4}, state) // packuswb xmm0, xmm1
+		want := []byte{0, 0, 1, 255, 255, 255, 0, 7, 255, 0, 2, 254, 0, 255, 8, 9}
+		if !bytes.Equal(state.XMM[0][:], want) {
+			t.Fatalf("packuswb=%x, want %x", state.XMM[0], want)
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		left := make([]byte, 16)
+		right := make([]byte, 16)
+		for i := range left {
+			left[i] = 250
+			right[i] = 10
+		}
+		setVector(state, 0, left)
+		setVector(state, 1, right)
+		run(t, []byte{0x66, 0x0f, 0xdc, 0xc1, 0xf4}, state) // paddusb xmm0, xmm1
+		for i, value := range state.XMM[0] {
+			if value != 255 {
+				t.Fatalf("paddusb lane %d=%d, want 255", i, value)
+			}
+		}
+
+		for i := range left {
+			left[i] = 3
+			right[i] = 5
+		}
+		setVector(state, 0, left)
+		setVector(state, 1, right)
+		run(t, []byte{0x66, 0x0f, 0xd8, 0xc1, 0xf4}, state) // psubusb xmm0, xmm1
+		for i, value := range state.XMM[0] {
+			if value != 0 {
+				t.Fatalf("psubusb lane %d=%d, want 0", i, value)
+			}
+		}
+	}
+
+	{
+		state := NewMachineState64(NewMemory64())
+		left := make([]byte, 16)
+		right := make([]byte, 16)
+		for i := 0; i < 8; i++ {
+			putU16(left, i, 65000)
+			putU16(right, i, 1000)
+		}
+		setVector(state, 0, left)
+		setVector(state, 1, right)
+		run(t, []byte{0x66, 0x0f, 0xdd, 0xc1, 0xf4}, state) // paddusw xmm0, xmm1
+		for i := 0; i < 8; i++ {
+			if binary.LittleEndian.Uint16(state.XMM[0][i*2:]) != 65535 {
+				t.Fatalf("paddusw lane %d=%d, want 65535", i, binary.LittleEndian.Uint16(state.XMM[0][i*2:]))
+			}
+		}
+
+		for i := 0; i < 8; i++ {
+			putU16(left, i, 1000)
+			putU16(right, i, 2000)
+		}
+		setVector(state, 0, left)
+		setVector(state, 1, right)
+		run(t, []byte{0x66, 0x0f, 0xd9, 0xc1, 0xf4}, state) // psubusw xmm0, xmm1
+		for i := 0; i < 8; i++ {
+			if binary.LittleEndian.Uint16(state.XMM[0][i*2:]) != 0 {
+				t.Fatalf("psubusw lane %d=%d, want 0", i, binary.LittleEndian.Uint16(state.XMM[0][i*2:]))
+			}
+		}
+	}
+
+	{
+		memory := NewMemory64()
+		const dataAddress Address64 = 0x23000
+		if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+			t.Fatal(err)
+		}
+		source := make([]byte, 16)
+		for i := range source {
+			source[i] = 1
+		}
+		if err := memory.Write(dataAddress, source); err != nil {
+			t.Fatal(err)
+		}
+		state := NewMachineState64(memory)
+		state.Set(RDI, uint64(dataAddress))
+		left := make([]byte, 16)
+		for i := range left {
+			left[i] = 2
+		}
+		setVector(state, 0, left)
+		run(t, []byte{0x66, 0x0f, 0xdc, 0x07, 0xf4}, state) // paddusb xmm0, [rdi]
+		for i, value := range state.XMM[0] {
+			if value != 3 {
+				t.Fatalf("memory paddusb lane %d=%d, want 3", i, value)
+			}
+		}
+	}
+}
