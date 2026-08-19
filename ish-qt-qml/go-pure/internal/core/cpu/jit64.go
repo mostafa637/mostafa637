@@ -471,6 +471,42 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("MOV destination: %v", err)
 		}
 		return makeMove64(address, uint8(inst.Len), left, right), false, nil
+	case x86asm.MOVZX, x86asm.MOVSX:
+		destination, err := operand64FromArg(arg(0), 0)
+		if err != nil || destination.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("extend destination: %v", err)
+		}
+		sourceWidth := uint8(0)
+		if reg, ok := arg(1).(x86asm.Reg); ok {
+			_, _, sourceWidth, ok = reg64FromX86(reg)
+			if !ok {
+				return microOp64{}, false, fmt.Errorf("extend source register %v", reg)
+			}
+		} else if _, ok := arg(1).(x86asm.Mem); ok {
+			sourceWidth = uint8(inst.MemBytes)
+		}
+		if sourceWidth != 1 && sourceWidth != 2 && sourceWidth != 4 {
+			return microOp64{}, false, fmt.Errorf("extend source width %d", sourceWidth)
+		}
+		source, err := operand64FromArg(arg(1), sourceWidth)
+		if err != nil || (source.Kind != operand64Reg && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("extend source: %v", err)
+		}
+		return makeExtend64(address, uint8(inst.Len), inst.Op == x86asm.MOVSX, destination, source), false, nil
+	case x86asm.ADD, x86asm.SUB, x86asm.XOR, x86asm.AND, x86asm.OR, x86asm.CMP, x86asm.TEST:
+		left, right, err := two()
+		if err != nil {
+			return microOp64{}, false, err
+		}
+		return makeBinary64(address, uint8(inst.Len), inst.Op, left, right), false, nil
+	case x86asm.ADC, x86asm.SBB:
+		left, right, err := two()
+		if err != nil || left.Kind == operand64Imm {
+			return microOp64{}, false, fmt.Errorf("%s operands: %v", inst.Op, err)
+		}
+		return makeCarryBinary64(address, uint8(inst.Len), inst.Op, left, right), false, nil
+	case x86asm.LAHF, x86asm.SAHF:
+		return makeLAHFSAHF64(address, uint8(inst.Len), inst.Op), false, nil
 	case x86asm.MOVDQA, x86asm.MOVDQU:
 		left, err := operand64FromArg(arg(0), 16)
 		if err != nil || (left.Kind != operand64XMM && left.Kind != operand64Mem) {
@@ -514,12 +550,6 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			state.RIP = next
 			return Flow64Continue, nil
 		}}, false, nil
-	case x86asm.ADD, x86asm.SUB, x86asm.XOR, x86asm.AND, x86asm.OR, x86asm.CMP, x86asm.TEST:
-		left, right, err := two()
-		if err != nil {
-			return microOp64{}, false, err
-		}
-		return makeBinary64(address, uint8(inst.Len), inst.Op, left, right), false, nil
 	case x86asm.XCHG:
 		left, right, err := two()
 		if err != nil || (left.Kind == operand64Mem && right.Kind == operand64Mem) || left.Kind == operand64Imm || right.Kind == operand64Imm {
@@ -1021,6 +1051,115 @@ func makeSSEBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand6
 	}}
 }
 
+func makeExtend64(address uint64, size uint8, signed bool, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readOperand64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		value &= mask64Width(src.Width)
+		if signed {
+			sign := uint64(1) << (uint(src.Width)*8 - 1)
+			if value&sign != 0 {
+				value |= ^mask64Width(src.Width)
+			}
+		}
+		if err := writeOperand64(state, dst, next, value); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func addWithCarry64(left, right, carryIn uint64, width uint8) (uint64, bool) {
+	mask := mask64Width(width)
+	left &= mask
+	right &= mask
+	total := left + right + carryIn
+	return total & mask, total > mask
+}
+
+func subWithBorrow64(left, right, borrowIn uint64, width uint8) (uint64, bool) {
+	mask := mask64Width(width)
+	left &= mask
+	right &= mask
+	subtrahend := right + borrowIn
+	return (left - subtrahend) & mask, left < subtrahend
+}
+
+func makeCarryBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readOperand64(state, dst, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readOperand64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		mask := mask64Width(dst.Width)
+		left &= mask
+		right &= mask
+		carryIn := uint64(0)
+		if state.Flag(Flag64CF) {
+			carryIn = 1
+		}
+		var result uint64
+		var carry bool
+		var overflow bool
+		if op == x86asm.ADC {
+			result, carry = addWithCarry64(left, right, carryIn, dst.Width)
+			sign := uint64(1) << (uint(dst.Width)*8 - 1)
+			overflow = ((^(left ^ right)) & (left ^ result) & sign) != 0
+		} else {
+			result, carry = subWithBorrow64(left, right, carryIn, dst.Width)
+			sign := uint64(1) << (uint(dst.Width)*8 - 1)
+			overflow = ((left ^ right) & (left ^ result) & sign) != 0
+		}
+		state.SetLazyArithmetic(left, right, result, carry, overflow, true)
+		if err := writeOperand64(state, dst, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeLAHFSAHF64(address uint64, size uint8, op x86asm.Op) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if op == x86asm.LAHF {
+			state.CollapseFlags()
+			var ah uint64 = 1 << 1
+			for _, pair := range []struct {
+				flag uint64
+				bit  uint
+			}{{Flag64CF, 0}, {Flag64PF, 2}, {Flag64AF, 4}, {Flag64ZF, 6}, {Flag64SF, 7}} {
+				if state.RFLAGS&pair.flag != 0 {
+					ah |= uint64(1) << pair.bit
+				}
+			}
+			state.Set(RAX, (state.Get(RAX)&^uint64(0xff00))|(ah<<8))
+		} else {
+			state.CollapseFlags()
+			ah := (state.Get(RAX) >> 8) & 0xff
+			var flags uint64
+			for _, pair := range []struct {
+				mask uint64
+				bit  uint
+			}{{Flag64CF, 0}, {Flag64PF, 2}, {Flag64AF, 4}, {Flag64ZF, 6}, {Flag64SF, 7}} {
+				if ah&(uint64(1)<<pair.bit) != 0 {
+					flags |= pair.mask
+				}
+			}
+			state.RFLAGS = (state.RFLAGS &^ (Flag64CF | Flag64PF | Flag64AF | Flag64ZF | Flag64SF)) | flags | Flag64IF
+			state.ExpandFlags()
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
 func makeMove64(address uint64, size uint8, dst, src operand64) microOp64 {
 	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
 		value, err := readOperand64(state, src, next)
@@ -1052,16 +1191,17 @@ func makeBinary64(address uint64, size uint8, op x86asm.Op, dst, src operand64) 
 		subtraction := false
 		switch op {
 		case x86asm.ADD:
-			var carry uint64
-			result, carry = bits.Add64(left, right, 0)
-			result &= mask
-			state.SetLazyArithmetic(left, right, result, carry != 0, ((^(left ^ right))&(left^result)&(mask^(mask>>1))) != 0, true)
+			var carry bool
+			result, carry = addWithCarry64(left, right, 0, dst.Width)
+			sign := uint64(1) << (uint(dst.Width)*8 - 1)
+			state.SetLazyArithmetic(left, right, result, carry, ((^(left ^ right))&(left^result)&sign) != 0, true)
 		case x86asm.SUB, x86asm.CMP:
-			var borrow uint64
-			result, borrow = bits.Sub64(left, right, 0)
+			var borrow bool
+			result, borrow = subWithBorrow64(left, right, 0, dst.Width)
+			sign := uint64(1) << (uint(dst.Width)*8 - 1)
 			result &= mask
 			subtraction = true
-			state.SetLazyArithmetic(left, right, result, borrow != 0, (((left ^ right) & (left ^ result) & (mask ^ (mask >> 1))) != 0), true)
+			state.SetLazyArithmetic(left, right, result, borrow, (((left ^ right) & (left ^ result) & sign) != 0), true)
 		case x86asm.XOR:
 			result = (left ^ right) & mask
 			state.SetLazyArithmetic(left, right, result, false, false, false)

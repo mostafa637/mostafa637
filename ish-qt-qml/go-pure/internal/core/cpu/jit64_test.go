@@ -281,3 +281,66 @@ func TestJIT64SSE2PackedArithmetic(t *testing.T) {
 		t.Fatalf("packed output=%x want=%x", output, want)
 	}
 }
+
+func TestJIT64ScalarExtensions(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0xa000
+	code := []byte{
+		0xb0, 0x80, // mov al, 0x80
+		0x48, 0x0f, 0xb6, 0xc8, // movzx rcx, al
+		0x48, 0x0f, 0xbe, 0xd0, // movsx rdx, al
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v", trap, state.Halted)
+	}
+	if got := state.Get(RCX); got != 0x80 {
+		t.Fatalf("movzx rcx=%#x, want 0x80", got)
+	}
+	if got := state.Get(RDX); got != ^uint64(0x7f) {
+		t.Fatalf("movsx rdx=%#x, want %#x", got, ^uint64(0x7f))
+	}
+}
+
+func TestJIT64CarryAndFlagTransfers(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0xb000
+	code := []byte{
+		0xb8, 0xff, 0xff, 0xff, 0xff, // mov eax, -1
+		0x83, 0xc0, 0x01, // add eax, 1: CF=1, result=0
+		0xbb, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1
+		0x83, 0xd3, 0x02, // adc ebx, 2: 1+2+CF=4
+		0x31, 0xc9, // xor ecx, ecx
+		0x83, 0xe9, 0x01, // sub ecx, 1: CF=1
+		0xba, 0x05, 0x00, 0x00, 0x00, // mov edx, 5
+		0x83, 0xda, 0x01, // sbb edx, 1: 5-1-CF=3
+		0x31, 0xc0, // xor eax, eax: ZF=1, PF=1
+		0x9f,       // lahf
+		0x88, 0xe1, // mov cl, ah: preserve LAHF result
+		0xb4, 0xff, // mov ah, 0xff
+
+		0x9e, // sahf: set CF/PF/AF/ZF/SF
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v", trap, state.Halted)
+	}
+	if got := state.Get(RBX); got != 4 {
+		t.Fatalf("adc ebx=%d, want 4", got)
+	}
+	if got := state.Get(RDX); got != 3 {
+		t.Fatalf("sbb edx=%d, want 3", got)
+	}
+	if got := state.Get(RCX) & 0xff; got != 0x46 {
+		t.Fatalf("lahf byte=%#x, want 0x46", got)
+	}
+	if !state.Flag(Flag64CF) || !state.Flag(Flag64PF) || !state.Flag(Flag64AF) || !state.Flag(Flag64ZF) || !state.Flag(Flag64SF) {
+		t.Fatalf("SAHF flags: rflags=%#x", state.RFLAGS)
+	}
+}
