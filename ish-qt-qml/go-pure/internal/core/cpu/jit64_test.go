@@ -1,6 +1,7 @@
 package cpu
 
 import (
+	"encoding/binary"
 	"math"
 	"testing"
 )
@@ -941,5 +942,88 @@ func TestJIT64Cmpxchg8BAnd16B(t *testing.T) {
 	}
 	if mismatchState.Get(RAX) != 0xccbbaa99 || mismatchState.Get(RDX) != 0x88776655 || mismatchState.Flag(Flag64ZF) {
 		t.Fatalf("cmpxchg8b mismatch rax=%#x rdx=%#x zf=%v", mismatchState.Get(RAX), mismatchState.Get(RDX), mismatchState.Flag(Flag64ZF))
+	}
+}
+
+func TestJIT64SSE2ShiftsShuffleAndMovemask(t *testing.T) {
+	memory := NewMemory64()
+	const codeAddress Address64 = 0x1c000
+	code := []byte{
+		0x66, 0x0f, 0x71, 0xf0, 0x01, // psllw xmm0, 1
+		0x66, 0x0f, 0x72, 0xd1, 0x04, // psrld xmm1, 4
+		0x66, 0x0f, 0x71, 0xe2, 0x02, // psraw xmm2, 2
+		0x66, 0x0f, 0x73, 0xfb, 0x02, // pslldq xmm3, 2
+		0x66, 0x0f, 0x73, 0xdc, 0x03, // psrldq xmm4, 3
+		0x66, 0x0f, 0x70, 0xee, 0x1b, // pshufd xmm5, xmm6, 0x1b
+		0x66, 0x0f, 0xd7, 0xc7, // pmovmskb eax, xmm7
+		0xf4, // hlt
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	for i, value := range []uint16{1, 2, 3, 4, 5, 6, 7, 8} {
+		binary.LittleEndian.PutUint16(state.XMM[0][i*2:], value)
+	}
+	for i, value := range []uint32{0x12345000, 0x80000000, 0xffffffff, 0x00000010} {
+		binary.LittleEndian.PutUint32(state.XMM[1][i*4:], value)
+	}
+	for i, value := range []uint32{0xfffffff0, 0x80000000, 0x7fffffff, 0x00000010} {
+		binary.LittleEndian.PutUint32(state.XMM[2][i*4:], value)
+	}
+	for i := range state.XMM[3] {
+		state.XMM[3][i] = byte(i)
+		state.XMM[4][i] = byte(i + 0x10)
+	}
+	for i, value := range []uint32{10, 20, 30, 40} {
+		binary.LittleEndian.PutUint32(state.XMM[6][i*4:], value)
+	}
+	for _, index := range []int{0, 2, 4, 7, 15} {
+		state.XMM[7][index] = 0x80
+	}
+	if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+		t.Fatalf("SSE shift/shuffle trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	for i, value := range []uint16{2, 4, 6, 8, 10, 12, 14, 16} {
+		if got := binary.LittleEndian.Uint16(state.XMM[0][i*2:]); got != value {
+			t.Fatalf("PSLLW lane %d = %#x, want %#x", i, got, value)
+		}
+	}
+	for i, value := range []uint32{0x01234500, 0x08000000, 0x0fffffff, 0x00000001} {
+		if got := binary.LittleEndian.Uint32(state.XMM[1][i*4:]); got != value {
+			t.Fatalf("PSRLD lane %d = %#x, want %#x", i, got, value)
+		}
+	}
+	for i, value := range []uint32{0xfffffffc, 0xe0000000, 0x1fffffff, 0x00000004} {
+		if got := binary.LittleEndian.Uint32(state.XMM[2][i*4:]); got != value {
+			t.Fatalf("PSRAD lane %d = %#x, want %#x", i, got, value)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		if state.XMM[3][i] != 0 {
+			t.Fatalf("PSLLDQ low byte %d = %#x, want 0", i, state.XMM[3][i])
+		}
+	}
+	for i := 2; i < 16; i++ {
+		if state.XMM[3][i] != byte(i-2) {
+			t.Fatalf("PSLLDQ byte %d = %#x, want %#x", i, state.XMM[3][i], byte(i-2))
+		}
+	}
+	for i := 0; i < 13; i++ {
+		if state.XMM[4][i] != byte(i+3+0x10) {
+			t.Fatalf("PSRLDQ byte %d = %#x, want %#x", i, state.XMM[4][i], byte(i+3+0x10))
+		}
+	}
+	for i := 13; i < 16; i++ {
+		if state.XMM[4][i] != 0 {
+			t.Fatalf("PSRLDQ high byte %d = %#x, want 0", i, state.XMM[4][i])
+		}
+	}
+	for i, value := range []uint32{40, 30, 20, 10} {
+		if got := binary.LittleEndian.Uint32(state.XMM[5][i*4:]); got != value {
+			t.Fatalf("PSHUFD lane %d = %#x, want %#x", i, got, value)
+		}
+	}
+	if got := state.Get(RAX); got != 0x8095 {
+		t.Fatalf("PMOVMSKB result=%#x, want %#x", got, uint64(0x8095))
 	}
 }
