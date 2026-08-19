@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"time"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
 	corefd "github.com/mostafa637/mostafa637/go-pure/internal/core/fd"
@@ -28,6 +29,8 @@ const (
 	Sys64Mprotect       Number64 = 10
 	Sys64Munmap         Number64 = 11
 	Sys64Brk            Number64 = 12
+	Sys64Gettimeofday   Number64 = 96
+	Sys64Times          Number64 = 100
 	Sys64Lseek          Number64 = 8
 	Sys64Ioctl          Number64 = 16
 	Sys64RtSigaction    Number64 = 13
@@ -79,6 +82,8 @@ const (
 	Sys64Tkill          Number64 = 200
 	Sys64Futex          Number64 = 202
 	Sys64SetTIDAddr     Number64 = 218
+	Sys64ClockGettime   Number64 = 228
+	Sys64ClockGetres    Number64 = 229
 	Sys64ExitGroup      Number64 = 231
 	Sys64EpollWait      Number64 = 232
 	Sys64EpollCtl       Number64 = 233
@@ -134,6 +139,9 @@ type Context64 struct {
 	RseqSignature  uint64
 	RLimits        map[uint64]ResourceLimit64
 	Groups         []uint32
+	SignalMask     uint64
+	SignalActions  map[uint64][32]byte
+	StartTime      time.Time
 
 	// Execve is provided by the guest session. It replaces the current ELF
 	// image while preserving process identity and the descriptor table.
@@ -150,7 +158,7 @@ type Dispatcher64 struct {
 }
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
-	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), signalFDs: make(map[*signalFD64]struct{})}
+	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), SignalActions: make(map[uint64][32]byte), StartTime: time.Now(), signalFDs: make(map[*signalFD64]struct{})}
 }
 
 const maxFD64 = uint64(^uint32(0) >> 1)
@@ -195,12 +203,17 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Wait4, wait4_64)
 	d.Register(Sys64SetRobust, setRobustList64)
 	d.Register(Sys64GetRobust, getRobustList64)
+	d.Register(Sys64Gettimeofday, gettimeofday64)
+	d.Register(Sys64ClockGettime, clockGettime64)
+	d.Register(Sys64ClockGetres, clockGetres64)
+	d.Register(Sys64GetRUsage, getrusage64)
+	d.Register(Sys64Times, times64)
 	d.Register(Sys64GetRlimit, getrlimit64)
 	d.Register(Sys64SetRlimit, setrlimit64)
 	d.Register(Sys64GetGroups, getgroups64)
 	d.Register(Sys64SetGroups, setgroups64)
-	d.Register(Sys64RtSigaction, signalStub64)
-	d.Register(Sys64RtSigprocmask, signalStub64)
+	d.Register(Sys64RtSigaction, rtSigaction64)
+	d.Register(Sys64RtSigprocmask, rtSigprocmask64)
 	d.Register(Sys64RtSigreturn, signalStub64)
 	d.Register(Sys64Tkill, tkill64)
 	d.Register(Sys64Tgkill, tgkill64)

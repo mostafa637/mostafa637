@@ -100,7 +100,7 @@ func TestABI64ThreadSignals(t *testing.T) {
 		t.Fatalf("tkill foreign tid: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
 	}
 	set64Syscall(state, Sys64RtSigaction, 15, 0, 0, 8)
-	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(ENOSYS) {
-		t.Fatalf("rt_sigaction stub: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != 0 {
+		t.Fatalf("rt_sigaction: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
 	}
 }
