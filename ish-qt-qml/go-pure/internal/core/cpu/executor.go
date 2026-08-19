@@ -936,7 +936,11 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		state.Set(instruction.Dst.Reg, value)
 		state.EIP = next
 	case OpPushReg:
-		if err := push(state, state.Get(instruction.Reg)); err != nil {
+		width := instruction.StackWidth
+		if width == 0 {
+			width = 4
+		}
+		if err := pushWidth(state, state.Get(instruction.Reg), width); err != nil {
 			return instruction, err
 		}
 		state.EIP = next
@@ -945,19 +949,31 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		if err != nil {
 			return instruction, err
 		}
-		if err := push(state, value); err != nil {
+		width := instruction.StackWidth
+		if width == 0 {
+			width = 4
+		}
+		if err := pushWidth(state, value, width); err != nil {
 			return instruction, err
 		}
 		state.EIP = next
 	case OpPopReg:
-		value, err := pop(state)
+		width := instruction.StackWidth
+		if width == 0 {
+			width = 4
+		}
+		value, err := popWidth(state, width)
 		if err != nil {
 			return instruction, err
 		}
-		state.Set(instruction.Reg, value)
+		setStackRegister(state, instruction.Reg, value, width)
 		state.EIP = next
 	case OpPopMem:
-		value, err := pop(state)
+		width := instruction.StackWidth
+		if width == 0 {
+			width = 4
+		}
+		value, err := popWidth(state, width)
 		if err != nil {
 			return instruction, err
 		}
@@ -966,7 +982,11 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		}
 		state.EIP = next
 	case OpPushImm:
-		if err := push(state, uint32(instruction.Imm)); err != nil {
+		width := instruction.StackWidth
+		if width == 0 {
+			width = 4
+		}
+		if err := pushWidth(state, uint32(instruction.Imm), width); err != nil {
 			return instruction, err
 		}
 		state.EIP = next
@@ -1055,50 +1075,69 @@ func (e *Executor) Step(state *MachineState) (Instruction, error) {
 		e.Halted = true
 	case OpPushFlags:
 		state.CollapseFlags()
-		if err := push(state, state.EFlags); err != nil {
+		width := instruction.StackWidth
+		if width == 0 {
+			width = 4
+		}
+		if err := pushWidth(state, state.EFlags, width); err != nil {
 			return instruction, err
 		}
 		state.EIP = next
 	case OpPopFlags:
-		value, err := pop(state)
+		width := instruction.StackWidth
+		if width == 0 {
+			width = 4
+		}
+		value, err := popWidth(state, width)
 		if err != nil {
 			return instruction, err
+		}
+		if width == 2 {
+			value = (state.EFlags & 0xffff0000) | (value & 0xffff)
 		}
 		state.SetEFlags(value)
 		state.EIP = next
 	case OpPushAll:
+		width := instruction.StackWidth
+		if width == 0 {
+			width = 4
+		}
 		oldESP := state.Get(ESP)
 		for _, reg := range []Reg32{EAX, ECX, EDX, EBX} {
-			if err := push(state, state.Get(reg)); err != nil {
+			if err := pushWidth(state, state.Get(reg), width); err != nil {
 				return instruction, err
 			}
 		}
-		if err := push(state, oldESP); err != nil {
+		if err := pushWidth(state, oldESP, width); err != nil {
 			return instruction, err
 		}
 		for _, reg := range []Reg32{EBP, ESI, EDI} {
-			if err := push(state, state.Get(reg)); err != nil {
+			if err := pushWidth(state, state.Get(reg), width); err != nil {
 				return instruction, err
 			}
 		}
 		state.EIP = next
 	case OpPopAll:
+		width := instruction.StackWidth
+		if width == 0 {
+			width = 4
+		}
 		for _, reg := range []Reg32{EDI, ESI, EBP} {
-			value, err := pop(state)
+			value, err := popWidth(state, width)
 			if err != nil {
 				return instruction, err
 			}
-			state.Set(reg, value)
+			setStackRegister(state, reg, value, width)
 		}
-		if _, err := pop(state); err != nil { // saved ESP is discarded
+		if _, err := popWidth(state, width); err != nil { // saved ESP is discarded
 			return instruction, err
 		}
 		for _, reg := range []Reg32{EBX, EDX, ECX, EAX} {
-			value, err := pop(state)
+			value, err := popWidth(state, width)
 			if err != nil {
 				return instruction, err
 			}
-			state.Set(reg, value)
+			setStackRegister(state, reg, value, width)
 		}
 		state.EIP = next
 	case OpLeave:
@@ -1540,8 +1579,21 @@ func enter(state *MachineState, frameSize uint16, nestingLevel uint8) error {
 }
 
 func push(state *MachineState, value uint32) error {
-	sp := state.Get(ESP) - 4
-	if err := state.Memory.Write(Address(sp), uint32Bytes(value)); err != nil {
+	return pushWidth(state, value, 4)
+}
+
+func pushWidth(state *MachineState, value uint32, width uint8) error {
+	if width != 2 && width != 4 {
+		return fmt.Errorf("cpu: unsupported stack width %d", width)
+	}
+	sp := state.Get(ESP) - uint32(width)
+	var raw [4]byte
+	if width == 2 {
+		binary.LittleEndian.PutUint16(raw[:2], uint16(value))
+	} else {
+		binary.LittleEndian.PutUint32(raw[:], value)
+	}
+	if err := state.Memory.Write(Address(sp), raw[:width]); err != nil {
 		return err
 	}
 	state.Set(ESP, sp)
@@ -1549,13 +1601,31 @@ func push(state *MachineState, value uint32) error {
 }
 
 func pop(state *MachineState) (uint32, error) {
+	return popWidth(state, 4)
+}
+
+func popWidth(state *MachineState, width uint8) (uint32, error) {
+	if width != 2 && width != 4 {
+		return 0, fmt.Errorf("cpu: unsupported stack width %d", width)
+	}
 	sp := state.Get(ESP)
 	var raw [4]byte
-	if err := state.Memory.Read(Address(sp), raw[:]); err != nil {
+	if err := state.Memory.Read(Address(sp), raw[:width]); err != nil {
 		return 0, err
 	}
-	state.Set(ESP, sp+4)
+	state.Set(ESP, sp+uint32(width))
+	if width == 2 {
+		return uint32(binary.LittleEndian.Uint16(raw[:2])), nil
+	}
 	return binary.LittleEndian.Uint32(raw[:]), nil
+}
+
+func setStackRegister(state *MachineState, reg Reg32, value uint32, width uint8) {
+	if width == 2 {
+		state.Set(reg, (state.Get(reg)&0xffff0000)|(value&0xffff))
+		return
+	}
+	state.Set(reg, value)
 }
 
 func uint32Bytes(value uint32) []byte {

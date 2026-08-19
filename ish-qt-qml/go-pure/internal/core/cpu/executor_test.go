@@ -2257,3 +2257,69 @@ func TestExecutorX87CompareAndStatus(t *testing.T) {
 		}
 	})
 }
+
+func TestExecutorPushPopAll16Bit(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0xb8, 0x11, 0x11, 0xaa, 0xaa, // eax = aaaa1111
+		0xb9, 0x22, 0x22, 0xbb, 0xbb, // ecx = bbbb2222
+		0xba, 0x33, 0x33, 0xcc, 0xcc, // edx = cccc3333
+		0xbb, 0x44, 0x44, 0xdd, 0xdd, // ebx = dddd4444
+		0xbd, 0x55, 0x55, 0xee, 0xee, // ebp = eeee5555
+		0xbe, 0x66, 0x66, 0xff, 0xff, // esi = ffff6666
+		0xbf, 0x77, 0x77, 0x99, 0x99, // edi = 99997777
+		0x66, 0x60, // pushaw
+		0xb8, 0x00, 0x00, 0xcd, 0xab,
+		0xb9, 0x00, 0x00, 0xde, 0xbc,
+		0xba, 0x00, 0x00, 0xef, 0xcd,
+		0xbb, 0x00, 0x00, 0x01, 0xef,
+		0xbd, 0x00, 0x00, 0x12, 0xf0,
+		0xbe, 0x00, 0x00, 0x23, 0xf1,
+		0xbf, 0x00, 0x00, 0x34, 0xf2,
+		0x66, 0x61, // popaw
+		0xf4,
+	})
+	initialESP := state.Get(ESP)
+	if err := NewExecutor(nil).Run(state, 64); err != nil {
+		t.Fatal(err)
+	}
+	want := map[Reg32]uint32{
+		EAX: 0xabcd1111,
+		ECX: 0xbcde2222,
+		EDX: 0xcdef3333,
+		EBX: 0xef014444,
+		EBP: 0xf0125555,
+		ESI: 0xf1236666,
+		EDI: 0xf2347777,
+	}
+	for reg, expected := range want {
+		if got := state.Get(reg); got != expected {
+			t.Fatalf("%s=%#x, want %#x", reg, got, expected)
+		}
+	}
+	if got := state.Get(ESP); got != initialESP {
+		t.Fatalf("esp=%#x, want %#x", got, initialESP)
+	}
+}
+
+func TestExecutorPushPopFlags16Bit(t *testing.T) {
+	_, state := mappedCode(t, []byte{
+		0x66, 0x9c, // pushfw
+		0x31, 0xc0, // xor eax,eax changes arithmetic flags
+		0x66, 0x9d, // popfw
+		0xf4,
+	})
+	state.EFlags = 0xa0000000 | FlagIF | FlagCF | FlagOF
+	state.ExpandFlags()
+	if err := NewExecutor(nil).Run(state, 16); err != nil {
+		t.Fatal(err)
+	}
+	if got := state.EFlags & 0xffff0000; got != 0xa0000000 {
+		t.Fatalf("upper EFlags=%#x, want %#x", got, uint32(0xa0000000))
+	}
+	if !state.Flag(FlagCF) || !state.Flag(FlagOF) || !state.Flag(FlagIF) {
+		t.Fatalf("16-bit POPF did not restore flags: EFlags=%#x", state.EFlags)
+	}
+	if state.Flag(FlagZF) || state.Flag(FlagPF) {
+		t.Fatalf("16-bit POPF retained modified arithmetic flags: EFlags=%#x", state.EFlags)
+	}
+}

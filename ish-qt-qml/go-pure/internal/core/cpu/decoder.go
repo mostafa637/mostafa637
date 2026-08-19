@@ -150,6 +150,7 @@ type Instruction struct {
 	Rel         int32
 	Vector      uint8
 	Group       uint8
+	StackWidth  uint8 // stack operand width in bytes: 2 or 4
 	FPUReg      uint8
 	FPUReg2     uint8
 	FPUMemWidth uint8
@@ -2138,9 +2139,10 @@ func decodeX86FPU(inst x86asm.Inst) (Instruction, bool, error) {
 }
 
 func decodeX86Stack(inst x86asm.Inst) (Instruction, bool, error) {
-	if inst.DataSize != 32 {
+	if inst.DataSize != 16 && inst.DataSize != 32 {
 		return Instruction{}, false, nil
 	}
+	stackWidth := uint8(inst.DataSize / 8)
 	firstArg := func() (x86asm.Arg, bool) {
 		if len(inst.Args) == 0 || inst.Args[0] == nil {
 			return nil, false
@@ -2154,16 +2156,16 @@ func decodeX86Stack(inst x86asm.Inst) (Instruction, bool, error) {
 			return Instruction{}, true, fmt.Errorf("%w: PUSH without operand", ErrInvalidInstruction)
 		}
 		if immediate, ok := arg.(x86asm.Imm); ok {
-			return Instruction{Op: OpPushImm, Len: uint32(inst.Len), Imm: int32(immediate)}, true, nil
+			return Instruction{Op: OpPushImm, Len: uint32(inst.Len), Imm: int32(immediate), StackWidth: stackWidth}, true, nil
 		}
 		operand, ok, err := x86Operand32(arg)
 		if err != nil || !ok {
 			return Instruction{}, true, err
 		}
 		if operand.IsMem {
-			return Instruction{Op: OpPushMem, Len: uint32(inst.Len), Src: operand}, true, nil
+			return Instruction{Op: OpPushMem, Len: uint32(inst.Len), Src: operand, StackWidth: stackWidth}, true, nil
 		}
-		return Instruction{Op: OpPushReg, Len: uint32(inst.Len), Reg: operand.Reg}, true, nil
+		return Instruction{Op: OpPushReg, Len: uint32(inst.Len), Reg: operand.Reg, StackWidth: stackWidth}, true, nil
 	case x86asm.POP:
 		arg, ok := firstArg()
 		if !ok {
@@ -2174,9 +2176,9 @@ func decodeX86Stack(inst x86asm.Inst) (Instruction, bool, error) {
 			return Instruction{}, true, err
 		}
 		if operand.IsMem {
-			return Instruction{Op: OpPopMem, Len: uint32(inst.Len), Dst: operand}, true, nil
+			return Instruction{Op: OpPopMem, Len: uint32(inst.Len), Dst: operand, StackWidth: stackWidth}, true, nil
 		}
-		return Instruction{Op: OpPopReg, Len: uint32(inst.Len), Reg: operand.Reg}, true, nil
+		return Instruction{Op: OpPopReg, Len: uint32(inst.Len), Reg: operand.Reg, StackWidth: stackWidth}, true, nil
 	case x86asm.CALL:
 		arg, ok := firstArg()
 		if !ok {
@@ -2199,14 +2201,14 @@ func decodeX86Stack(inst x86asm.Inst) (Instruction, bool, error) {
 			return Instruction{}, true, fmt.Errorf("%w: RET operand %v", ErrUnsupportedInstruction, inst.Args[0])
 		}
 		return Instruction{Op: OpRetImm, Len: uint32(inst.Len), Imm: int32(immediate)}, true, nil
-	case x86asm.PUSHFD:
-		return Instruction{Op: OpPushFlags, Len: uint32(inst.Len)}, true, nil
-	case x86asm.POPFD:
-		return Instruction{Op: OpPopFlags, Len: uint32(inst.Len)}, true, nil
-	case x86asm.PUSHAD:
-		return Instruction{Op: OpPushAll, Len: uint32(inst.Len)}, true, nil
-	case x86asm.POPAD:
-		return Instruction{Op: OpPopAll, Len: uint32(inst.Len)}, true, nil
+	case x86asm.PUSHF, x86asm.PUSHFD:
+		return Instruction{Op: OpPushFlags, Len: uint32(inst.Len), StackWidth: stackWidth}, true, nil
+	case x86asm.POPF, x86asm.POPFD:
+		return Instruction{Op: OpPopFlags, Len: uint32(inst.Len), StackWidth: stackWidth}, true, nil
+	case x86asm.PUSHA, x86asm.PUSHAD:
+		return Instruction{Op: OpPushAll, Len: uint32(inst.Len), StackWidth: stackWidth}, true, nil
+	case x86asm.POPA, x86asm.POPAD:
+		return Instruction{Op: OpPopAll, Len: uint32(inst.Len), StackWidth: stackWidth}, true, nil
 	case x86asm.LEAVE:
 		return Instruction{Op: OpLeave, Len: uint32(inst.Len)}, true, nil
 	case x86asm.ENTER:
