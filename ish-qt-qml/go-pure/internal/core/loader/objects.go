@@ -245,27 +245,50 @@ func applyOneRelocationWithRegistry(memory *corecpu.Memory, space *AddressSpace,
 		}
 		return writeRelocationValue(memory, target, space.Bias+binary.LittleEndian.Uint32(addend[:]))
 	}
-	symbol, err := resolveSymbolFromRegistry(memory, registry, space, symbolIndex)
-	if err != nil {
-		return fmt.Errorf("resolve symbol %d for relocation[%d]: %w", symbolIndex, index, err)
-	}
 	var raw [4]byte
 	if err := memory.Read(target, raw[:]); err != nil {
 		return fmt.Errorf("read relocation addend at %#x: %w", target, err)
 	}
 	addend := binary.LittleEndian.Uint32(raw[:])
+	got, gotErr := objectGOTAddress(space)
+	if relocationType == R386GOTPC {
+		if symbolIndex != 0 {
+			return fmt.Errorf("R_386_GOTPC[%d] has symbol index %d", index, symbolIndex)
+		}
+		if gotErr != nil {
+			return gotErr
+		}
+		return writeRelocationValue(memory, target, got+addend-uint32(target))
+	}
+	symbol, err := resolveSymbolFromRegistry(memory, registry, space, symbolIndex)
+	if err != nil {
+		return fmt.Errorf("resolve symbol %d for relocation[%d]: %w", symbolIndex, index, err)
+	}
 	var value uint32
 	switch relocationType {
 	case R38632:
 		value = symbol + addend
 	case R386PC32:
 		value = symbol + addend - uint32(target)
+	case R386GOTOFF:
+		if gotErr != nil {
+			return gotErr
+		}
+		value = symbol + addend - got
 	case R386GlobDat, R386JMPSlot:
 		value = symbol
 	default:
 		return fmt.Errorf("unsupported i386 relocation type %d at %#x", relocationType, target)
 	}
 	return writeRelocationValue(memory, target, value)
+}
+
+func objectGOTAddress(space *AddressSpace) (uint32, error) {
+	if space == nil || space.Image == nil || space.Image.Dynamic == nil || space.Image.Dynamic.PltGot == 0 {
+		return 0, fmt.Errorf("loader: DT_PLTGOT is missing")
+	}
+	address, err := imageAddress(space.Bias, space.Image.Dynamic.PltGot)
+	return uint32(address), err
 }
 
 func resolveSymbolFromRegistry(memory *corecpu.Memory, registry *ObjectRegistry, requester *AddressSpace, index uint32) (uint32, error) {

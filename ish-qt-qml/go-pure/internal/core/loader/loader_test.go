@@ -154,6 +154,60 @@ func TestApplyRelocationsRejectsSymbolType(t *testing.T) {
 	}
 }
 
+func TestApplyGOTRelocations(t *testing.T) {
+	const base = uint32(0x40000000)
+	memory := corecpu.NewMemory()
+	if err := memory.MapNothing(corecpu.Page(base>>corecpu.PageBits), 4, corecpu.PRead|corecpu.PWrite); err != nil {
+		t.Fatalf("MapNothing: %v", err)
+	}
+	if err := memory.Write(corecpu.Address(base+0x1000), []byte{0, 'f', 'o', 'o', 0}); err != nil {
+		t.Fatal(err)
+	}
+	var symbol [16]byte
+	binary.LittleEndian.PutUint32(symbol[0:4], 1)
+	binary.LittleEndian.PutUint32(symbol[4:8], 0x1800)
+	binary.LittleEndian.PutUint32(symbol[8:12], 4)
+	binary.LittleEndian.PutUint16(symbol[14:16], 1)
+	if err := memory.Write(corecpu.Address(base+0x1100+16), symbol[:]); err != nil {
+		t.Fatal(err)
+	}
+	var relocations [16]byte
+	binary.LittleEndian.PutUint32(relocations[0:4], 0x2000)
+	binary.LittleEndian.PutUint32(relocations[4:8], (1<<8)|R386GOTOFF)
+	binary.LittleEndian.PutUint32(relocations[8:12], 0x2004)
+	binary.LittleEndian.PutUint32(relocations[12:16], R386GOTPC)
+	if err := memory.Write(corecpu.Address(base+0x1200), relocations[:]); err != nil {
+		t.Fatal(err)
+	}
+	var addends [8]byte
+	binary.LittleEndian.PutUint32(addends[0:4], 5)
+	binary.LittleEndian.PutUint32(addends[4:8], 4)
+	if err := memory.Write(corecpu.Address(base+0x2000), addends[:]); err != nil {
+		t.Fatal(err)
+	}
+	space := &AddressSpace{Bias: base, Image: &coreelf.Image{Dynamic: &coreelf.DynamicInfo{
+		StrTab: 0x1000, StrSz: 5, SymTab: 0x1100, SymSz: 32, SymEnt: 16,
+		Rel: 0x1200, RelSz: 16, RelEnt: 8, PltGot: 0x3000,
+	}}}
+	registry := NewObjectRegistry(memory)
+	if err := registry.Register("main", space); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyAllRelocations(memory, registry); err != nil {
+		t.Fatalf("ApplyAllRelocations: %v", err)
+	}
+	var result [8]byte
+	if err := memory.Read(corecpu.Address(base+0x2000), result[:]); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := binary.LittleEndian.Uint32(result[0:4]), uint32(0xffffe805); got != want {
+		t.Fatalf("R_386_GOTOFF = %#x, want %#x", got, want)
+	}
+	if got, want := binary.LittleEndian.Uint32(result[4:8]), uint32(0x1000); got != want {
+		t.Fatalf("R_386_GOTPC = %#x, want %#x", got, want)
+	}
+}
+
 func TestLoadTLSInitialImage(t *testing.T) {
 	data := []byte{1, 2, 3, 4, 0, 0, 0, 0}
 	image := &coreelf.Image{Segments: []coreelf.Segment{{

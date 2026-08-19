@@ -15,6 +15,8 @@ const (
 	R386GlobDat  = 6
 	R386JMPSlot  = 7
 	R386Relative = 8
+	R386GOTOFF   = 9
+	R386GOTPC    = 10
 
 	shnUndef = 0
 	shnAbs   = 0xfff1
@@ -101,21 +103,36 @@ func applyOneRelocation(memory *corecpu.Memory, space *AddressSpace, relocationT
 		return writeRelocationValue(memory, target, value)
 	}
 
-	symbol, err := resolveSymbol(memory, space, symbolIndex)
-	if err != nil {
-		return fmt.Errorf("loader: resolve symbol %d for relocation[%d]: %w", symbolIndex, index, err)
-	}
 	var addend [4]byte
 	if err := memory.Read(target, addend[:]); err != nil {
 		return fmt.Errorf("loader: read relocation addend at %#x: %w", target, err)
 	}
 	A := binary.LittleEndian.Uint32(addend[:])
+	got, gotErr := objectGOTAddress(space)
+	if relocationType == R386GOTPC {
+		if symbolIndex != 0 {
+			return fmt.Errorf("loader: R_386_GOTPC[%d] has symbol index %d", index, symbolIndex)
+		}
+		if gotErr != nil {
+			return gotErr
+		}
+		return writeRelocationValue(memory, target, got+A-uint32(target))
+	}
+	symbol, err := resolveSymbol(memory, space, symbolIndex)
+	if err != nil {
+		return fmt.Errorf("loader: resolve symbol %d for relocation[%d]: %w", symbolIndex, index, err)
+	}
 	var value uint32
 	switch relocationType {
 	case R38632:
 		value = symbol + A
 	case R386PC32:
 		value = symbol + A - uint32(target)
+	case R386GOTOFF:
+		if gotErr != nil {
+			return gotErr
+		}
+		value = symbol + A - got
 	case R386GlobDat, R386JMPSlot:
 		value = symbol
 	default:
