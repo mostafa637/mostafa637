@@ -822,6 +822,27 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
 		}
 		return makeSSEPackedFloatBinary64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.ADDSUBPS, x86asm.ADDSUBPD, x86asm.HADDPS, x86asm.HADDPD, x86asm.HSUBPS, x86asm.HSUBPD:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || (source.Kind != operand64XMM && source.Kind != operand64Mem) {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeSSEPackedHorizontal64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+	case x86asm.MOVMSKPS, x86asm.MOVMSKPD:
+		destination, err := operand64FromArg(arg(0), 0)
+		if err != nil || destination.Kind != operand64Reg || (destination.Width != 4 && destination.Width != 8) {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || source.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeSSEFloatMovemask64(address, uint8(inst.Len), inst.Op, destination, source), false, nil
+
 	case x86asm.SQRTPS, x86asm.SQRTPD:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64XMM {
@@ -2393,6 +2414,144 @@ func makeSSEMinPos64(address uint64, size uint8, destination, source operand64) 
 		if err := writeVector64(state, destination, next, result); err != nil {
 			return Flow64Stop, err
 		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEPackedHorizontal64(address uint64, size uint8, op x86asm.Op, dst, src operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readVector64(state, dst, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readVector64(state, src, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		result := left
+		switch op {
+		case x86asm.ADDSUBPS:
+			for lane := 0; lane < 4; lane++ {
+				l := math.Float32frombits(binary.LittleEndian.Uint32(left[lane*4:]))
+				r := math.Float32frombits(binary.LittleEndian.Uint32(right[lane*4:]))
+				value := l + r
+				if lane%2 == 0 {
+					value = l - r
+				}
+				binary.LittleEndian.PutUint32(result[lane*4:], math.Float32bits(value))
+			}
+		case x86asm.ADDSUBPD:
+			for lane := 0; lane < 2; lane++ {
+				l := math.Float64frombits(binary.LittleEndian.Uint64(left[lane*8:]))
+				r := math.Float64frombits(binary.LittleEndian.Uint64(right[lane*8:]))
+				if lane == 0 {
+					l -= r
+				} else {
+					l += r
+				}
+				binary.LittleEndian.PutUint64(result[lane*8:], math.Float64bits(l))
+			}
+		case x86asm.HADDPS, x86asm.HSUBPS:
+			for lane := 0; lane < 4; lane++ {
+				var a, b float32
+				if lane < 2 {
+					a = math.Float32frombits(binary.LittleEndian.Uint32(left[(lane*2)*4:]))
+					b = math.Float32frombits(binary.LittleEndian.Uint32(left[(lane*2+1)*4:]))
+				} else {
+					sourceLane := lane - 2
+					a = math.Float32frombits(binary.LittleEndian.Uint32(right[(sourceLane*2)*4:]))
+					b = math.Float32frombits(binary.LittleEndian.Uint32(right[(sourceLane*2+1)*4:]))
+				}
+				if op == x86asm.HSUBPS {
+					a -= b
+				} else {
+					a += b
+				}
+				binary.LittleEndian.PutUint32(result[lane*4:], math.Float32bits(a))
+			}
+		case x86asm.HADDPD, x86asm.HSUBPD:
+			for lane := 0; lane < 2; lane++ {
+				var a, b float64
+				if lane == 0 {
+					a = math.Float64frombits(binary.LittleEndian.Uint64(left[0:]))
+					b = math.Float64frombits(binary.LittleEndian.Uint64(left[8:]))
+				} else {
+					a = math.Float64frombits(binary.LittleEndian.Uint64(right[0:]))
+					b = math.Float64frombits(binary.LittleEndian.Uint64(right[8:]))
+				}
+				if op == x86asm.HSUBPD {
+					a -= b
+				} else {
+					a += b
+				}
+				binary.LittleEndian.PutUint64(result[lane*8:], math.Float64bits(a))
+			}
+		default:
+			return Flow64Stop, ErrUnsupported64
+		}
+		if err := writeVector64(state, dst, next, result); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEFloatMovemask64(address uint64, size uint8, op x86asm.Op, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		value, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var mask uint64
+		if op == x86asm.MOVMSKPD {
+			for lane := 0; lane < 2; lane++ {
+				mask |= uint64(value[lane*8+7]>>7) << uint(lane)
+			}
+		} else {
+			for lane := 0; lane < 4; lane++ {
+				mask |= uint64(value[lane*4+3]>>7) << uint(lane)
+			}
+		}
+		writeReg64(state, destination, mask)
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeSSEPTest64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		left, err := readVector64(state, destination, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		right, err := readVector64(state, source, next)
+		if err != nil {
+			return Flow64Stop, err
+		}
+		var andValue, andNotValue [16]byte
+		for i := range left {
+			andValue[i] = left[i] & right[i]
+			andNotValue[i] = (^left[i]) & right[i]
+		}
+		zero := func(value [16]byte) bool {
+			for _, b := range value {
+				if b != 0 {
+					return false
+				}
+			}
+			return true
+		}
+		state.CollapseFlags()
+		state.RFLAGS &^= Flag64CF | Flag64PF | Flag64AF | Flag64SF | Flag64OF | Flag64ZF
+		if zero(andValue) {
+			state.RFLAGS |= Flag64ZF
+		}
+		if zero(andNotValue) {
+			state.RFLAGS |= Flag64CF
+		}
+		state.ExpandFlags()
 		state.RIP = next
 		return Flow64Continue, nil
 	}}

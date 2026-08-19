@@ -4200,3 +4200,169 @@ func TestJIT64RDRAND(t *testing.T) {
 		}
 	})
 }
+
+func TestJIT64SSE3HorizontalArithmeticAndMasks(t *testing.T) {
+	const codeAddress Address64 = 0x2d000
+	const dataAddress Address64 = 0x2e000
+
+	putFloat32s := func(memory *Memory64, address Address64, values []float32) {
+		var raw [16]byte
+		for i, value := range values {
+			binary.LittleEndian.PutUint32(raw[i*4:], math.Float32bits(value))
+		}
+		if err := memory.Write(address, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	putFloat64s := func(memory *Memory64, address Address64, values []float64) {
+		var raw [16]byte
+		for i, value := range values {
+			binary.LittleEndian.PutUint64(raw[i*8:], math.Float64bits(value))
+		}
+		if err := memory.Write(address, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readFloat32s := func(t *testing.T, memory *Memory64, address Address64) [4]float32 {
+		t.Helper()
+		var raw [16]byte
+		if err := memory.Read(address, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+		var values [4]float32
+		for i := range values {
+			values[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4:]))
+		}
+		return values
+	}
+	readFloat64s := func(t *testing.T, memory *Memory64, address Address64) [2]float64 {
+		t.Helper()
+		var raw [16]byte
+		if err := memory.Read(address, raw[:]); err != nil {
+			t.Fatal(err)
+		}
+		var values [2]float64
+		for i := range values {
+			values[i] = math.Float64frombits(binary.LittleEndian.Uint64(raw[i*8:]))
+		}
+		return values
+	}
+	checkFloat32 := func(t *testing.T, got [4]float32, want [4]float32) {
+		t.Helper()
+		for i := range got {
+			if got[i] != want[i] {
+				t.Fatalf("float32 lane %d = %v, want %v", i, got[i], want[i])
+			}
+		}
+	}
+	checkFloat64 := func(t *testing.T, got [2]float64, want [2]float64) {
+		t.Helper()
+		for i := range got {
+			if got[i] != want[i] {
+				t.Fatalf("float64 lane %d = %v, want %v", i, got[i], want[i])
+			}
+		}
+	}
+
+	psMemory := NewMemory64()
+	psCode := []byte{
+		0xf3, 0x0f, 0x6f, 0x07, // movdqu xmm0, [rdi]
+		0xf3, 0x0f, 0x6f, 0x4f, 0x10, // movdqu xmm1, [rdi+16]
+		0xf2, 0x0f, 0xd0, 0xc1, // addsubps xmm0, xmm1
+		0xf3, 0x0f, 0x7f, 0x47, 0x20, // movdqu [rdi+32], xmm0
+		0xf3, 0x0f, 0x6f, 0x07, // reload xmm0
+		0xf3, 0x0f, 0x6f, 0x4f, 0x10, // reload xmm1
+		0xf2, 0x0f, 0x7c, 0xc1, // haddps xmm0, xmm1
+		0xf3, 0x0f, 0x7f, 0x47, 0x30, // movdqu [rdi+48], xmm0
+		0xf3, 0x0f, 0x6f, 0x07, // reload xmm0
+		0xf3, 0x0f, 0x6f, 0x4f, 0x10, // reload xmm1
+		0xf2, 0x0f, 0x7d, 0xc1, // hsubps xmm0, xmm1
+		0xf3, 0x0f, 0x7f, 0x47, 0x40, // movdqu [rdi+64], xmm0
+		0xf4,
+	}
+	mapExecutable64(t, psMemory, codeAddress, psCode)
+	if err := psMemory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	putFloat32s(psMemory, dataAddress, []float32{1, 2, 4, 8})
+	putFloat32s(psMemory, dataAddress+16, []float32{3, 4, 10, 6})
+	psState := NewMachineState64(psMemory)
+	psState.RIP = uint64(codeAddress)
+	psState.Set(RDI, uint64(dataAddress))
+	if trap := NewJIT64(psMemory).RunToInterrupt(psState); trap != Trap64Timer || !psState.Halted {
+		t.Fatalf("packed single trap=%#x halted=%v", trap, psState.Halted)
+	}
+	checkFloat32(t, readFloat32s(t, psMemory, dataAddress+32), [4]float32{-2, 6, -6, 14})
+	checkFloat32(t, readFloat32s(t, psMemory, dataAddress+48), [4]float32{3, 12, 7, 16})
+	checkFloat32(t, readFloat32s(t, psMemory, dataAddress+64), [4]float32{-1, -4, -1, 4})
+
+	pdMemory := NewMemory64()
+	pdCode := []byte{
+		0x66, 0x0f, 0x6f, 0x07, // movdqa xmm0, [rdi]
+		0x66, 0x0f, 0x6f, 0x4f, 0x10, // movdqa xmm1, [rdi+16]
+		0x66, 0x0f, 0xd0, 0xc1, // addsubpd xmm0, xmm1
+		0xf3, 0x0f, 0x7f, 0x47, 0x20, // movdqu [rdi+32], xmm0
+		0x66, 0x0f, 0x6f, 0x07, // reload xmm0
+		0x66, 0x0f, 0x6f, 0x4f, 0x10, // reload xmm1
+		0x66, 0x0f, 0x7c, 0xc1, // haddpd xmm0, xmm1
+		0xf3, 0x0f, 0x7f, 0x47, 0x30, // movdqu [rdi+48], xmm0
+		0x66, 0x0f, 0x6f, 0x07, // reload xmm0
+		0x66, 0x0f, 0x6f, 0x4f, 0x10, // reload xmm1
+		0x66, 0x0f, 0x7d, 0xc1, // hsubpd xmm0, xmm1
+		0xf3, 0x0f, 0x7f, 0x47, 0x40, // movdqu [rdi+64], xmm0
+		0xf4,
+	}
+	mapExecutable64(t, pdMemory, codeAddress, pdCode)
+	if err := pdMemory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	putFloat64s(pdMemory, dataAddress, []float64{1.5, 4})
+	putFloat64s(pdMemory, dataAddress+16, []float64{0.5, 2})
+	pdState := NewMachineState64(pdMemory)
+	pdState.RIP = uint64(codeAddress)
+	pdState.Set(RDI, uint64(dataAddress))
+	if trap := NewJIT64(pdMemory).RunToInterrupt(pdState); trap != Trap64Timer || !pdState.Halted {
+		t.Fatalf("packed double trap=%#x halted=%v", trap, pdState.Halted)
+	}
+	checkFloat64(t, readFloat64s(t, pdMemory, dataAddress+32), [2]float64{1, 6})
+	checkFloat64(t, readFloat64s(t, pdMemory, dataAddress+48), [2]float64{5.5, 2.5})
+	checkFloat64(t, readFloat64s(t, pdMemory, dataAddress+64), [2]float64{-2.5, -1.5})
+
+	maskMemory := NewMemory64()
+	maskCode := []byte{
+		0xf3, 0x0f, 0x6f, 0x07, // movdqu xmm0, [rdi]
+		0x0f, 0x50, 0xc0, // movmskps eax, xmm0
+		0x66, 0x4c, 0x0f, 0x50, 0xc8, // movmskpd r9, xmm0 (66+REX.W+REX.R)
+		0x66, 0x0f, 0x38, 0x17, 0x47, 0x10, // ptest xmm0, [rdi+16]
+		0xf4,
+	}
+	mapExecutable64(t, maskMemory, codeAddress, maskCode)
+	if err := maskMemory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	var signData [32]byte
+	binary.LittleEndian.PutUint32(signData[4:], 0x80000000)
+	binary.LittleEndian.PutUint32(signData[12:], 0x80000000)
+	for i := 16; i < len(signData); i++ {
+		signData[i] = 1
+	}
+	if err := maskMemory.Write(dataAddress, signData[:]); err != nil {
+		t.Fatal(err)
+	}
+	maskState := NewMachineState64(maskMemory)
+	maskState.RIP = uint64(codeAddress)
+	maskState.Set(RDI, uint64(dataAddress))
+	maskState.RFLAGS = Flag64CF | Flag64PF | Flag64AF | Flag64ZF | Flag64SF | Flag64OF
+	if trap := NewJIT64(maskMemory).RunToInterrupt(maskState); trap != Trap64Timer || !maskState.Halted {
+		t.Fatalf("mask trap=%#x halted=%v", trap, maskState.Halted)
+	}
+	if got := maskState.Get(RAX); got != 10 {
+		t.Fatalf("movmskps eax=%#x, want 0xa", got)
+	}
+	if got := maskState.Get(R9); got != 3 {
+		t.Fatalf("movmskpd r9=%#x, want 3", got)
+	}
+	if !maskState.Flag(Flag64ZF) || maskState.Flag(Flag64CF) || maskState.Flag(Flag64PF) || maskState.Flag(Flag64AF) || maskState.Flag(Flag64SF) || maskState.Flag(Flag64OF) {
+		t.Fatalf("ptest flags rflags=%#x, want ZF=1 and all other arithmetic flags clear", maskState.RFLAGS)
+	}
+}
