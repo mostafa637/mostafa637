@@ -3487,3 +3487,100 @@ func TestJIT64PHMINPOSUW(t *testing.T) {
 		t.Fatalf("xmm14=%x, want %x", state.XMM[14], expectedHigh)
 	}
 }
+
+func TestJIT64SSE41IntegerMinMax(t *testing.T) {
+	const (
+		codeAddress Address64 = 0x52000
+		dataAddress Address64 = 0x53000
+	)
+	memory := NewMemory64()
+	if err := memory.Map(codeAddress, Page64Size, PRead|PWrite|PExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	memorySource := make([]byte, 16)
+	for lane, value := range []uint32{1, 2, 0x7fffffff, 4} {
+		binary.LittleEndian.PutUint32(memorySource[lane*4:], value)
+	}
+	if err := memory.Write(dataAddress, memorySource); err != nil {
+		t.Fatal(err)
+	}
+	code := []byte{
+		0x66, 0x0f, 0x38, 0x3a, 0xca, // pminuw xmm1, xmm2
+		0x66, 0x0f, 0x38, 0x3b, 0xdc, // pminud xmm3, xmm4
+		0x66, 0x0f, 0x38, 0x3e, 0xee, // pmaxuw xmm5, xmm6
+		0x66, 0x41, 0x0f, 0x38, 0x3c, 0xf8, // pmaxsb xmm7, xmm8
+		0x66, 0x45, 0x0f, 0x38, 0x3d, 0xca, // pmaxsd xmm9, xmm10
+		0x66, 0x45, 0x0f, 0x38, 0x39, 0xdc, // pminsd xmm11, xmm12
+		0x66, 0x44, 0x0f, 0x38, 0x3f, 0x2f, // pmaxud xmm13, [rdi]
+		0x66, 0x45, 0x0f, 0x38, 0x38, 0xf7, // pminsb xmm14, xmm15
+		0xf4,
+	}
+	if err := memory.Write(codeAddress, code); err != nil {
+		t.Fatal(err)
+	}
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.Set(RDI, uint64(dataAddress))
+	putWords := func(destination *[16]byte, values ...uint16) {
+		for lane, value := range values {
+			binary.LittleEndian.PutUint16(destination[lane*2:], value)
+		}
+	}
+	putDwords := func(destination *[16]byte, values ...uint32) {
+		for lane, value := range values {
+			binary.LittleEndian.PutUint32(destination[lane*4:], value)
+		}
+	}
+	putWords(&state.XMM[1], 0xffff, 0, 0x8000, 1, 2, 3, 4, 5)
+	putWords(&state.XMM[2], 0, 1, 0x7fff, 2, 1, 4, 3, 6)
+	putDwords(&state.XMM[3], 0xffffffff, 0, 0x80000000, 7)
+	putDwords(&state.XMM[4], 1, 2, 0x7fffffff, 8)
+	putWords(&state.XMM[5], 0, 0xffff, 0x8000, 1, 2, 3, 4, 5)
+	putWords(&state.XMM[6], 1, 0, 0x7fff, 2, 1, 4, 3, 6)
+	copy(state.XMM[7][:], []byte{0x80, 0x7f, 0xff, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13})
+	copy(state.XMM[8][:], []byte{0x7f, 0x80, 0, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12})
+	putDwords(&state.XMM[9], 0x80000000, 0x7fffffff, 0xffffffff, 1)
+	putDwords(&state.XMM[10], 0, 0xffffffff, 0xfffffffe, 2)
+	putDwords(&state.XMM[11], 0x80000000, 0x7fffffff, 0xffffffff, 1)
+	putDwords(&state.XMM[12], 0, 0xffffffff, 0xfffffffe, 2)
+	putDwords(&state.XMM[13], 0, 0xffffffff, 0x80000000, 3)
+	copy(state.XMM[14][:], []byte{0x80, 0x7f, 0xff, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13})
+	copy(state.XMM[15][:], []byte{0x7f, 0x80, 0, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12})
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	wantWords := func(reg int, want ...uint16) {
+		t.Helper()
+		for lane, expected := range want {
+			if got := binary.LittleEndian.Uint16(state.XMM[reg][lane*2:]); got != expected {
+				t.Fatalf("xmm%d word lane %d = %#x, want %#x", reg, lane, got, expected)
+			}
+		}
+	}
+	wantDwords := func(reg int, want ...uint32) {
+		t.Helper()
+		for lane, expected := range want {
+			if got := binary.LittleEndian.Uint32(state.XMM[reg][lane*4:]); got != expected {
+				t.Fatalf("xmm%d dword lane %d = %#x, want %#x", reg, lane, got, expected)
+			}
+		}
+	}
+	wantBytes := func(reg int, want ...byte) {
+		t.Helper()
+		if string(state.XMM[reg][:]) != string(want) {
+			t.Fatalf("xmm%d bytes = % x, want % x", reg, state.XMM[reg], want)
+		}
+	}
+	wantWords(1, 0, 0, 0x7fff, 1, 1, 3, 3, 5)
+	wantDwords(3, 1, 0, 0x7fffffff, 7)
+	wantWords(5, 1, 0xffff, 0x8000, 2, 2, 4, 4, 6)
+	wantBytes(7, 0x7f, 0x7f, 0, 2, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+	wantDwords(9, 0, 0x7fffffff, 0xffffffff, 2)
+	wantDwords(11, 0x80000000, 0xffffffff, 0xfffffffe, 1)
+	wantDwords(13, 1, 0xffffffff, 0x80000000, 4)
+	wantBytes(14, 0x80, 0x80, 0xff, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+}
