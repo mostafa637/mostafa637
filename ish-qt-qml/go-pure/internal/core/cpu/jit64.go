@@ -417,6 +417,12 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			state.RIP = next
 			return Flow64Continue, nil
 		}}, false, nil
+	case x86asm.RDRAND:
+		destination, err := rdrandDestination64(inst, arg(0))
+		if err != nil || destination.Kind != operand64Reg || (destination.Width != 2 && destination.Width != 4 && destination.Width != 8) {
+			return microOp64{}, false, fmt.Errorf("RDRAND destination: %v", err)
+		}
+		return makeRDRAND64(address, uint8(inst.Len), destination), false, nil
 	case x86asm.RDFSBASE, x86asm.RDGSBASE, x86asm.WRFSBASE, x86asm.WRGSBASE:
 		baseOperand, err := operand64FromArg(arg(0), width)
 		if err != nil || baseOperand.Kind != operand64Reg {
@@ -3861,6 +3867,60 @@ func makeBitScan64(address uint64, size uint8, op x86asm.Op, destination, source
 
 		state.CollapseFlags()
 		state.RFLAGS &^= Flag64ZF
+		state.ExpandFlags()
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func rdrandDestination64(inst x86asm.Inst, decoded x86asm.Arg) (operand64, error) {
+	if decoded != nil {
+		return operand64FromArg(decoded, 0)
+	}
+	// x86asm v0.30.0 leaves the destination empty for RDRAND's REX.W form.
+	// Reconstruct the register-only ModRM encoding instead of adding a second
+	// decoder or accepting a memory operand.
+	modrm := uint8(inst.Opcode >> 8)
+	if modrm&0xc0 != 0xc0 {
+		return operand64{}, fmt.Errorf("RDRAND destination ModRM %#x is not a register", modrm)
+	}
+	reg := modrm & 7
+	for _, prefix := range inst.Prefix {
+		if prefix&x86asm.PrefixREXB != 0 {
+			reg |= 8
+			break
+		}
+	}
+	var base x86asm.Reg
+	switch inst.DataSize {
+	case 16:
+		base = x86asm.AX
+	case 32:
+		base = x86asm.EAX
+	case 64:
+		base = x86asm.RAX
+	default:
+		return operand64{}, fmt.Errorf("RDRAND unsupported data width %d", inst.DataSize)
+	}
+	return operand64FromArg(base+x86asm.Reg(reg), 0)
+}
+
+func makeRDRAND64(address uint64, size uint8, destination operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		provider := state.RDRAND
+		if provider == nil {
+			provider = defaultRDRAND64
+		}
+		value, ok := provider(destination.Width)
+		if !ok {
+			value = 0
+		}
+		writeReg64(state, destination, value)
+		state.CollapseFlags()
+		state.RFLAGS &^= Flag64CF | Flag64PF | Flag64AF | Flag64SF | Flag64OF | Flag64ZF
+		if ok {
+			state.RFLAGS |= Flag64CF
+		}
 		state.ExpandFlags()
 		state.RIP = next
 		return Flow64Continue, nil

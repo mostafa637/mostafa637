@@ -1,6 +1,8 @@
 package cpu
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"math/bits"
 
 	"github.com/mostafa637/mostafa637/go-pure/internal/core/emu/fpu"
@@ -90,6 +92,22 @@ const (
 	lazy64AF
 )
 
+// RDRAND64Provider supplies an architectural random value of the requested
+// width. The boolean reports whether a value was available, matching RDRAND's
+// CF result. It is injectable so deterministic tests can cover both outcomes.
+type RDRAND64Provider func(width uint8) (value uint64, ok bool)
+
+func defaultRDRAND64(width uint8) (uint64, bool) {
+	if width != 2 && width != 4 && width != 8 {
+		return 0, false
+	}
+	var bytes [8]byte
+	if _, err := cryptorand.Read(bytes[:width]); err != nil {
+		return 0, false
+	}
+	return binary.LittleEndian.Uint64(bytes[:]), true
+}
+
 // MachineState64 is the guest-visible long-mode state. It is intentionally
 // separate from MachineState: widening the existing i386 fields would silently
 // change stack, flag, and syscall semantics for the already-supported ABI.
@@ -117,6 +135,8 @@ type MachineState64 struct {
 	TLS    uint64
 	XCR0   uint64
 
+	RDRAND RDRAND64Provider
+
 	TrapNo           uint64
 	FaultAt          Address64
 	FaultWrite       bool
@@ -126,7 +146,7 @@ type MachineState64 struct {
 }
 
 func NewMachineState64(memory *Memory64) *MachineState64 {
-	return &MachineState64{Memory: memory, RFLAGS: Flag64IF, FCW: 0x037f, XCR0: 0x3}
+	return &MachineState64{Memory: memory, RFLAGS: Flag64IF, FCW: 0x037f, XCR0: 0x3, RDRAND: defaultRDRAND64}
 }
 
 func (s *MachineState64) Get(reg Reg64) uint64 {

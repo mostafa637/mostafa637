@@ -4118,3 +4118,85 @@ func TestJIT64AESInstructions(t *testing.T) {
 		}
 	})
 }
+
+func TestJIT64RDRAND(t *testing.T) {
+	const codeAddress Address64 = 0x50000
+
+	t.Run("success widths and flags", func(t *testing.T) {
+		memory := NewMemory64()
+		code := []byte{
+			0x0f, 0xc7, 0xf0, // rdrand eax
+			0x48, 0x0f, 0xc7, 0xf1, // rdrand rcx
+			0x66, 0x0f, 0xc7, 0xf2, // rdrand dx
+			0x41, 0x0f, 0xc7, 0xf3, // rdrand r11d (REX.B)
+			0xf4, // hlt
+		}
+		mapExecutable64(t, memory, codeAddress, code)
+		state := NewMachineState64(memory)
+		state.RIP = uint64(codeAddress)
+		state.Set(RDX, 0xaabbccdd00000000)
+		state.RFLAGS = Flag64IF | Flag64CF | Flag64PF | Flag64AF | Flag64ZF | Flag64SF | Flag64OF
+		calls := make([]uint8, 0, 4)
+		state.RDRAND = func(width uint8) (uint64, bool) {
+			calls = append(calls, width)
+			switch width {
+			case 4:
+				if len(calls) == 1 {
+					return 0x11223344, true
+				}
+				return 0x55667788, true
+			case 8:
+				return 0x0102030405060708, true
+			case 2:
+				return 0xbeef, true
+			default:
+				return 0, false
+			}
+		}
+		if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+		if got := state.Get(RAX); got != 0x11223344 {
+			t.Fatalf("rdrand eax=%#x, want %#x", got, uint64(0x11223344))
+		}
+		if got := state.Get(RCX); got != 0x0102030405060708 {
+			t.Fatalf("rdrand rcx=%#x, want %#x", got, uint64(0x0102030405060708))
+		}
+		if got := state.Get(RDX); got != 0xaabbccdd0000beef {
+			t.Fatalf("rdrand dx=%#x, want %#x", got, uint64(0xaabbccdd0000beef))
+		}
+		if got := state.Get(R11); got != 0x55667788 {
+			t.Fatalf("rdrand r11d=%#x, want %#x", got, uint64(0x55667788))
+		}
+		if len(calls) != 4 || calls[0] != 4 || calls[1] != 8 || calls[2] != 2 || calls[3] != 4 {
+			t.Fatalf("provider widths=%v, want [4 8 2 4]", calls)
+		}
+		if got := state.RFLAGS; got != Flag64IF|Flag64CF {
+			t.Fatalf("success flags=%#x, want %#x", got, uint64(Flag64IF|Flag64CF))
+		}
+	})
+
+	t.Run("failure clears destination and arithmetic flags", func(t *testing.T) {
+		memory := NewMemory64()
+		mapExecutable64(t, memory, codeAddress, []byte{0x0f, 0xc7, 0xf0, 0xf4}) // rdrand eax; hlt
+		state := NewMachineState64(memory)
+		state.RIP = uint64(codeAddress)
+		state.Set(RAX, 0xffffffffffffffff)
+		state.RFLAGS = Flag64IF | Flag64CF | Flag64PF | Flag64AF | Flag64ZF | Flag64SF | Flag64OF
+		state.RDRAND = func(width uint8) (uint64, bool) {
+			if width != 4 {
+				t.Fatalf("failure provider width=%d, want 4", width)
+			}
+			return 0, false
+		}
+		if trap := NewJIT64(memory).RunToInterrupt(state); trap != Trap64Timer || !state.Halted {
+			t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+		}
+		if got := state.Get(RAX); got != 0 {
+			t.Fatalf("failed rdrand eax=%#x, want 0", got)
+		}
+		if got := state.RFLAGS; got != Flag64IF {
+			t.Fatalf("failure flags=%#x, want %#x", got, uint64(Flag64IF))
+		}
+	})
+}
