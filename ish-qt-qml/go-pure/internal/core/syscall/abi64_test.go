@@ -2,9 +2,13 @@ package syscall
 
 import (
 	"bytes"
+	"context"
+	"path/filepath"
 	"testing"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
+	corefs "github.com/mostafa637/mostafa637/go-pure/internal/core/fs"
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/storage"
 )
 
 func TestDispatcher64RegisterABI(t *testing.T) {
@@ -106,5 +110,76 @@ func TestDispatcher64FDTableIO(t *testing.T) {
 	resume, err = dispatcher.Dispatch(state)
 	if err != nil || !resume || int64(state.Get(corecpu.RAX)) != int64(EBADF) {
 		t.Fatalf("closed fd: resume=%v err=%v rax=%d", resume, err, int64(state.Get(corecpu.RAX)))
+	}
+}
+
+func TestDispatcher64OpenatFakeFS(t *testing.T) {
+	root := t.TempDir()
+	db, err := storage.Open(context.Background(), filepath.Join(root, "meta.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	fake, err := corefs.New(root, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fake.Close()
+	created, err := fake.Create("/hello", 0o644, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := created.Write([]byte("hello")); err != nil {
+		_ = created.Close()
+		t.Fatal(err)
+	}
+	if err := created.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	memory := corecpu.NewMemory64()
+	const area corecpu.Address64 = 0x8000
+	if err := memory.Map(area, corecpu.Page64Size, corecpu.PRead|corecpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(area, append([]byte("/hello"), 0)); err != nil {
+		t.Fatal(err)
+	}
+	context64 := NewContext64(memory)
+	context64.FS = fake
+	dispatcher := NewDispatcher64(context64)
+	state := corecpu.NewMachineState64(memory)
+	state.Set(corecpu.RAX, uint64(Sys64Openat))
+	state.Set(corecpu.RDI, atFDCWD64)
+	state.Set(corecpu.RSI, uint64(area))
+	state.Set(corecpu.RDX, 0)
+	state.Set(corecpu.R10, 0)
+	resume, err := dispatcher.Dispatch(state)
+	fd := int64(state.Get(corecpu.RAX))
+	if err != nil || !resume || fd < 3 {
+		t.Fatalf("openat: resume=%v err=%v fd=%d", resume, err, fd)
+	}
+
+	state.Set(corecpu.RAX, uint64(Sys64Read))
+	state.Set(corecpu.RDI, uint64(fd))
+	state.Set(corecpu.RSI, uint64(area+0x100))
+	state.Set(corecpu.RDX, 5)
+	resume, err = dispatcher.Dispatch(state)
+	if err != nil || !resume || int64(state.Get(corecpu.RAX)) != 5 {
+		t.Fatalf("read opened file: resume=%v err=%v rax=%d", resume, err, int64(state.Get(corecpu.RAX)))
+	}
+	var got [5]byte
+	if err := memory.Read(area+0x100, got[:]); err != nil {
+		t.Fatal(err)
+	}
+	if string(got[:]) != "hello" {
+		t.Fatalf("opened file data = %q", got[:])
+	}
+
+	state.Set(corecpu.RAX, uint64(Sys64Close))
+	state.Set(corecpu.RDI, uint64(fd))
+	resume, err = dispatcher.Dispatch(state)
+	if err != nil || !resume || int64(state.Get(corecpu.RAX)) != 0 {
+		t.Fatalf("close opened file: resume=%v err=%v rax=%d", resume, err, int64(state.Get(corecpu.RAX)))
 	}
 }

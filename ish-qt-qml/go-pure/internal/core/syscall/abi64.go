@@ -3,6 +3,8 @@ package syscall
 import (
 	"crypto/rand"
 	"io"
+	"os"
+	"path"
 	"runtime"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
@@ -143,6 +145,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Close, close64)
 	d.Register(Sys64Dup, dup64)
 	d.Register(Sys64Dup2, dup264)
+	d.Register(Sys64Open, open64)
+	d.Register(Sys64Openat, openat64)
 	d.Register(Sys64Getrandom, getrandom64)
 	d.Register(Sys64Brk, brk64)
 	return d
@@ -262,6 +266,77 @@ func dup264(ctx *Context64, args [6]uint64) int64 {
 		return int64(EBADF)
 	}
 	return int64(fd)
+}
+
+func readGuestString64(ctx *Context64, address corecpu.Address64, limit int) (string, bool) {
+	if ctx == nil || ctx.Memory == nil || limit <= 0 {
+		return "", false
+	}
+	buffer := make([]byte, 0, limit)
+	var one [1]byte
+	for i := 0; i < limit; i++ {
+		if err := ctx.Memory.Read(address+corecpu.Address64(i), one[:]); err != nil {
+			return "", false
+		}
+		if one[0] == 0 {
+			return string(buffer), true
+		}
+		buffer = append(buffer, one[0])
+	}
+	return "", false
+}
+
+const atFDCWD64 uint64 = ^uint64(99)
+
+func openResolvedPath64(ctx *Context64, name string, flags, mode uint64) int64 {
+	if ctx == nil || ctx.FS == nil || ctx.FDs == nil {
+		return int64(ENOSYS)
+	}
+	if flags > uint64(^uint32(0)) || mode > uint64(^uint32(0)) {
+		return int64(EINVAL)
+	}
+	hostFlags, ok := hostOpenFlags(uint32(flags))
+	if !ok {
+		return int64(EINVAL)
+	}
+	file, err := ctx.FS.OpenFile(name, hostFlags, os.FileMode(uint32(mode)&0o7777), corefs.IshStat{Mode: corefs.ModeRegular | (uint32(mode) & 0o7777), UID: 0, GID: 0})
+	if err != nil {
+		return int64(errnoForOpen(err))
+	}
+	info, statErr := ctx.FS.Stat(name)
+	if statErr != nil {
+		_ = file.Close()
+		return int64(errnoForOpen(statErr))
+	}
+	if uint32(flags)&guestOpenDirectory != 0 && !info.IsDir() {
+		_ = file.Close()
+		return int64(ENOTDIR)
+	}
+	guestFile := &corefd.File{Reader: file, Writer: file, Closer: file, Seeker: file, Path: name, Cloexec: uint32(flags)&guestOpenCloexec != 0}
+	fd, err := ctx.FDs.Open(guestFile)
+	if err != nil {
+		_ = file.Close()
+		return int64(ENOMEM)
+	}
+	return int64(fd)
+}
+
+func open64(ctx *Context64, args [6]uint64) int64 {
+	name, ok := readGuestString64(ctx, corecpu.Address64(args[0]), 4096)
+	if !ok {
+		return int64(EFAULT)
+	}
+	if !path.IsAbs(name) {
+		name = path.Join(ctx.CWD, name)
+	}
+	return openResolvedPath64(ctx, name, args[1], args[2])
+}
+
+func openat64(ctx *Context64, args [6]uint64) int64 {
+	if args[0] != atFDCWD64 {
+		return int64(EBADF)
+	}
+	return open64(ctx, [6]uint64{args[1], args[2], args[3]})
 }
 
 func getrandom64(ctx *Context64, args [6]uint64) int64 {

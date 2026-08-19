@@ -57,6 +57,7 @@ func (g *guestTransport) start64(ctx context.Context, process *corekernel.Proces
 	state.RFLAGS = corecpu.Flag64IF
 
 	sysContext := coresyscall.NewContext64(memory)
+	sysContext.FS = fake
 	sysContext.PID = uint64(process.PID)
 	sysContext.TID = uint64(process.PID)
 	sysContext.Brk = uint64(space.Brk)
