@@ -19,99 +19,104 @@ import (
 type Number64 uint64
 
 const (
-	Sys64Read           Number64 = 0
-	Sys64Write          Number64 = 1
-	Sys64Open           Number64 = 2
-	Sys64Close          Number64 = 3
-	Sys64Stat           Number64 = 4
-	Sys64Fstat          Number64 = 5
-	Sys64Mmap           Number64 = 9
-	Sys64Mprotect       Number64 = 10
-	Sys64Munmap         Number64 = 11
-	Sys64Brk            Number64 = 12
-	Sys64Gettimeofday   Number64 = 96
-	Sys64Times          Number64 = 100
-	Sys64Lseek          Number64 = 8
-	Sys64Ioctl          Number64 = 16
-	Sys64RtSigaction    Number64 = 13
-	Sys64RtSigprocmask  Number64 = 14
-	Sys64RtSigreturn    Number64 = 15
-	Sys64Readv          Number64 = 19
-	Sys64Writev         Number64 = 20
-	Sys64SchedYield     Number64 = 24
-	Sys64Dup            Number64 = 32
-	Sys64Dup2           Number64 = 33
-	Sys64Nanosleep      Number64 = 35
-	Sys64GetPID         Number64 = 39
-	Sys64GetRlimit      Number64 = 97
-	Sys64GetRUsage      Number64 = 98
-	Sys64GetGroups      Number64 = 115
-	Sys64SetGroups      Number64 = 116
-	Sys64Socket         Number64 = 41
-	Sys64Connect        Number64 = 42
-	Sys64Accept         Number64 = 43
-	Sys64Sendto         Number64 = 44
-	Sys64Recvfrom       Number64 = 45
-	Sys64Shutdown       Number64 = 48
-	Sys64Bind           Number64 = 49
-	Sys64Listen         Number64 = 50
-	Sys64Getsockname    Number64 = 51
-	Sys64Socketpair     Number64 = 53
-	Sys64Clone          Number64 = 56
-	Sys64Fork           Number64 = 57
-	Sys64Vfork          Number64 = 58
-	Sys64Execve         Number64 = 59
-	Sys64Exit           Number64 = 60
-	Sys64Wait4          Number64 = 61
-	Sys64Kill           Number64 = 62
-	Sys64Uname          Number64 = 63
-	Sys64Fcntl          Number64 = 72
-	Sys64GetCWD         Number64 = 79
-	Sys64Chdir          Number64 = 80
-	Sys64Rename         Number64 = 82
-	Sys64Mkdir          Number64 = 83
-	Sys64Rmdir          Number64 = 84
-	Sys64Unlink         Number64 = 87
-	Sys64Readlink       Number64 = 89
-	Sys64GetUID         Number64 = 102
-	Sys64GetGID         Number64 = 104
-	Sys64GetEUID        Number64 = 107
-	Sys64GetEGID        Number64 = 108
-	Sys64GetPPID        Number64 = 110
-	Sys64GetTID         Number64 = 186
-	Sys64Tkill          Number64 = 200
-	Sys64Futex          Number64 = 202
-	Sys64SetTIDAddr     Number64 = 218
-	Sys64ClockGettime   Number64 = 228
-	Sys64ClockGetres    Number64 = 229
-	Sys64ExitGroup      Number64 = 231
-	Sys64EpollWait      Number64 = 232
-	Sys64EpollCtl       Number64 = 233
-	Sys64InotifyAdd     Number64 = 254
-	Sys64InotifyRm      Number64 = 255
-	Sys64Openat         Number64 = 257
-	Sys64Fstatat        Number64 = 262
-	Sys64Unlinkat       Number64 = 263
-	Sys64Renameat       Number64 = 264
-	Sys64Linkat         Number64 = 265
-	Sys64Symlinkat      Number64 = 266
-	Sys64SetRobust      Number64 = 273
-	Sys64GetRobust      Number64 = 274
-	Sys64Signalfd4      Number64 = 289
-	Sys64Eventfd2       Number64 = 290
-	Sys64EpollCreate1   Number64 = 291
-	Sys64Tgkill         Number64 = 234
-	Sys64SetRlimit      Number64 = 160
-	Sys64Accept4        Number64 = 288
-	Sys64InotifyInit1   Number64 = 294
-	Sys64Prlimit64      Number64 = 302
-	Sys64Getrandom      Number64 = 318
-	Sys64Statx          Number64 = 332
-	Sys64Rseq           Number64 = 334
-	Sys64Getdents64     Number64 = 217
-	Sys64TimerfdCreate  Number64 = 283
-	Sys64TimerfdSettime Number64 = 286
-	Sys64TimerfdGettime Number64 = 287
+	Sys64Read             Number64 = 0
+	Sys64Write            Number64 = 1
+	Sys64Open             Number64 = 2
+	Sys64Close            Number64 = 3
+	Sys64Stat             Number64 = 4
+	Sys64Fstat            Number64 = 5
+	Sys64Mmap             Number64 = 9
+	Sys64Mprotect         Number64 = 10
+	Sys64Munmap           Number64 = 11
+	Sys64Brk              Number64 = 12
+	Sys64Gettimeofday     Number64 = 96
+	Sys64Times            Number64 = 100
+	Sys64Lseek            Number64 = 8
+	Sys64Ioctl            Number64 = 16
+	Sys64RtSigaction      Number64 = 13
+	Sys64RtSigprocmask    Number64 = 14
+	Sys64RtSigreturn      Number64 = 15
+	Sys64Readv            Number64 = 19
+	Sys64Writev           Number64 = 20
+	Sys64SchedYield       Number64 = 24
+	Sys64Dup              Number64 = 32
+	Sys64Dup2             Number64 = 33
+	Sys64Nanosleep        Number64 = 35
+	Sys64GetPID           Number64 = 39
+	Sys64GetRlimit        Number64 = 97
+	Sys64Prctl            Number64 = 157
+	Sys64GetRUsage        Number64 = 98
+	Sys64GetGroups        Number64 = 115
+	Sys64SetGroups        Number64 = 116
+	Sys64Socket           Number64 = 41
+	Sys64Connect          Number64 = 42
+	Sys64Accept           Number64 = 43
+	Sys64Sendto           Number64 = 44
+	Sys64Recvfrom         Number64 = 45
+	Sys64Shutdown         Number64 = 48
+	Sys64Bind             Number64 = 49
+	Sys64Listen           Number64 = 50
+	Sys64Getsockname      Number64 = 51
+	Sys64Socketpair       Number64 = 53
+	Sys64Clone            Number64 = 56
+	Sys64Fork             Number64 = 57
+	Sys64Vfork            Number64 = 58
+	Sys64Execve           Number64 = 59
+	Sys64Exit             Number64 = 60
+	Sys64Wait4            Number64 = 61
+	Sys64Kill             Number64 = 62
+	Sys64Uname            Number64 = 63
+	Sys64Fcntl            Number64 = 72
+	Sys64GetCWD           Number64 = 79
+	Sys64Chdir            Number64 = 80
+	Sys64Rename           Number64 = 82
+	Sys64Mkdir            Number64 = 83
+	Sys64Rmdir            Number64 = 84
+	Sys64Unlink           Number64 = 87
+	Sys64Readlink         Number64 = 89
+	Sys64GetUID           Number64 = 102
+	Sys64GetGID           Number64 = 104
+	Sys64GetEUID          Number64 = 107
+	Sys64GetEGID          Number64 = 108
+	Sys64GetPPID          Number64 = 110
+	Sys64GetTID           Number64 = 186
+	Sys64Tkill            Number64 = 200
+	Sys64SchedSetAffinity Number64 = 203
+	Sys64SchedGetAffinity Number64 = 204
+	Sys64Futex            Number64 = 202
+	Sys64SetTIDAddr       Number64 = 218
+	Sys64ClockGettime     Number64 = 228
+	Sys64ClockGetres      Number64 = 229
+	Sys64ExitGroup        Number64 = 231
+	Sys64EpollWait        Number64 = 232
+	Sys64EpollCtl         Number64 = 233
+	Sys64InotifyAdd       Number64 = 254
+	Sys64InotifyRm        Number64 = 255
+	Sys64Openat           Number64 = 257
+	Sys64Fstatat          Number64 = 262
+	Sys64Unlinkat         Number64 = 263
+	Sys64Renameat         Number64 = 264
+	Sys64Linkat           Number64 = 265
+	Sys64Symlinkat        Number64 = 266
+	Sys64SetRobust        Number64 = 273
+	Sys64GetRobust        Number64 = 274
+	Sys64Signalfd4        Number64 = 289
+	Sys64Eventfd2         Number64 = 290
+	Sys64EpollCreate1     Number64 = 291
+	Sys64Tgkill           Number64 = 234
+	Sys64SetRlimit        Number64 = 160
+	Sys64ArchPrctl        Number64 = 158
+	Sys64Accept4          Number64 = 288
+	Sys64InotifyInit1     Number64 = 294
+	Sys64Prlimit64        Number64 = 302
+	Sys64Getrandom        Number64 = 318
+	Sys64GetCPU           Number64 = 309
+	Sys64Statx            Number64 = 332
+	Sys64Rseq             Number64 = 334
+	Sys64Getdents64       Number64 = 217
+	Sys64TimerfdCreate    Number64 = 283
+	Sys64TimerfdSettime   Number64 = 286
+	Sys64TimerfdGettime   Number64 = 287
 )
 
 // Handler64 follows the Linux x86-64 syscall register ABI after the SYSCALL
@@ -142,6 +147,14 @@ type Context64 struct {
 	SignalMask     uint64
 	SignalActions  map[uint64][32]byte
 	StartTime      time.Time
+	FSBase         uint64
+	GSBase         uint64
+	CPUIDEnabled   bool
+	ProcessName    [16]byte
+	Dumpable       bool
+	NoNewPrivs     bool
+	ParentDeathSig uint64
+	AffinityMask   uint64
 
 	// Execve is provided by the guest session. It replaces the current ELF
 	// image while preserving process identity and the descriptor table.
@@ -158,7 +171,7 @@ type Dispatcher64 struct {
 }
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
-	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), SignalActions: make(map[uint64][32]byte), StartTime: time.Now(), signalFDs: make(map[*signalFD64]struct{})}
+	return &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), SignalActions: make(map[uint64][32]byte), StartTime: time.Now(), CPUIDEnabled: true, Dumpable: true, AffinityMask: ^uint64(0), signalFDs: make(map[*signalFD64]struct{})}
 }
 
 const maxFD64 = uint64(^uint32(0) >> 1)
@@ -230,6 +243,11 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64GetTID, gettid64)
 	d.Register(Sys64SetTIDAddr, setTIDAddress64)
 	d.Register(Sys64Fcntl, fcntl64_64)
+	d.Register(Sys64ArchPrctl, archPrctl64)
+	d.Register(Sys64Prctl, prctl64)
+	d.Register(Sys64SchedSetAffinity, schedSetAffinity64)
+	d.Register(Sys64SchedGetAffinity, schedGetAffinity64)
+	d.Register(Sys64GetCPU, getcpu64)
 	d.Register(Sys64Ioctl, ioctl64)
 	d.Register(Sys64Nanosleep, nanosleep64)
 	d.Register(Sys64Futex, futex64)
@@ -322,11 +340,16 @@ func (d *Dispatcher64) Dispatch(state *corecpu.MachineState64) (bool, error) {
 		state.Get(corecpu.R8),
 		state.Get(corecpu.R9),
 	}
+	d.Context.FSBase = state.FSBase
+	d.Context.GSBase = state.GSBase
 	handler := d.handlers[number]
+
 	var result int64 = int64(ENOSYS)
 	if handler != nil {
 		result = handler(d.Context, args)
 	}
+	state.FSBase = d.Context.FSBase
+	state.GSBase = d.Context.GSBase
 	state.Set(corecpu.RAX, uint64(result))
 	if number == Sys64Exit || number == Sys64ExitGroup {
 		state.Halted = true
