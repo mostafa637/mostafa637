@@ -109,6 +109,14 @@ const (
 	ECHILD       int32 = -10
 	ESRCH        int32 = -3
 	EINTR        int32 = -4
+	EPIPE        int32 = -32
+	ENOTSOCK     int32 = -88
+	EAFNOSUPPORT int32 = -97
+	EADDRINUSE   int32 = -98
+	EISCONN      int32 = -106
+	ENOTCONN     int32 = -107
+	ECONNREFUSED int32 = -111
+	EOPNOTSUPP   int32 = -95
 )
 
 const (

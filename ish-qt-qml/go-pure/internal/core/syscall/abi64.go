@@ -39,6 +39,13 @@ const (
 	Sys64Socket       Number64 = 41
 	Sys64Connect      Number64 = 42
 	Sys64Accept       Number64 = 43
+	Sys64Sendto       Number64 = 44
+	Sys64Recvfrom     Number64 = 45
+	Sys64Shutdown     Number64 = 48
+	Sys64Bind         Number64 = 49
+	Sys64Listen       Number64 = 50
+	Sys64Getsockname  Number64 = 51
+	Sys64Socketpair   Number64 = 53
 	Sys64Clone        Number64 = 56
 	Sys64Fork         Number64 = 57
 	Sys64Vfork        Number64 = 58
@@ -77,6 +84,7 @@ const (
 	Sys64Signalfd4    Number64 = 289
 	Sys64Eventfd2     Number64 = 290
 	Sys64EpollCreate1 Number64 = 291
+	Sys64Accept4      Number64 = 288
 	Sys64InotifyInit1 Number64 = 294
 	Sys64Prlimit64    Number64 = 302
 	Sys64Getrandom    Number64 = 318
@@ -158,6 +166,17 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Rename, rename64Guest)
 	d.Register(Sys64Getrandom, getrandom64)
 	d.Register(Sys64Brk, brk64)
+	d.Register(Sys64Socket, socket64)
+	d.Register(Sys64Socketpair, socketpair64)
+	d.Register(Sys64Bind, bind64)
+	d.Register(Sys64Listen, listen64)
+	d.Register(Sys64Connect, connect64)
+	d.Register(Sys64Accept, accept64)
+	d.Register(Sys64Accept4, accept464)
+	d.Register(Sys64Getsockname, getsockname64)
+	d.Register(Sys64Sendto, sendto64)
+	d.Register(Sys64Recvfrom, recvfrom64)
+	d.Register(Sys64Shutdown, shutdown64)
 	return d
 }
 

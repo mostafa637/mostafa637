@@ -33,6 +33,10 @@ type File struct {
 
 	// DirPos is the guest directory-stream cookie used by getdents64.
 	DirPos int
+
+	// Opaque carries subsystem-specific state, such as a Pure-Go socket handle.
+	// Generic fd users must treat it as optional and leave it untouched.
+	Opaque any
 }
 
 func (f *File) retain() {
