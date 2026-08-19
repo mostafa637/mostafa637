@@ -173,6 +173,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	})
 	d.Register(Sys64Read, read64)
 	d.Register(Sys64Write, write64)
+	d.Register(Sys64Readv, readv64)
+	d.Register(Sys64Writev, writev64)
 	d.Register(Sys64Close, close64)
 	d.Register(Sys64Dup, dup64)
 	d.Register(Sys64Dup2, dup264)
