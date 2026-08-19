@@ -92,7 +92,9 @@ const (
 	Sys64Fchmodat       Number64 = 268
 	Sys64Faccessat2     Number64 = 439
 
-	Sys64GetRUsage   Number64 = 98
+	Sys64GetRUsage Number64 = 98
+	Sys64Sysinfo   Number64 = 99
+
 	Sys64GetGroups   Number64 = 115
 	Sys64SetGroups   Number64 = 116
 	Sys64Socket      Number64 = 41
@@ -316,6 +318,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64ClockGettime, clockGettime64)
 	d.Register(Sys64ClockGetres, clockGetres64)
 	d.Register(Sys64GetRUsage, getrusage64)
+	d.Register(Sys64Sysinfo, sysinfo64)
+
 	d.Register(Sys64Times, times64)
 	d.Register(Sys64Pause, pause64)
 	d.Register(Sys64GetRlimit, getrlimit64)
