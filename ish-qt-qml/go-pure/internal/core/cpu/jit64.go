@@ -1163,6 +1163,56 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("MOVNTDQA requires a memory source: %v", err)
 		}
 		return makeSSEMove64(address, uint8(inst.Len), destination, source), false, nil
+	case x86asm.MOVNTI:
+		width := uint8(4)
+		if inst.DataSize == 64 {
+			width = 8
+		} else if inst.DataSize != 32 {
+			return microOp64{}, false, fmt.Errorf("MOVNTI data size %d", inst.DataSize)
+		}
+		destination, err := operand64FromArg(arg(0), width)
+		if err != nil || destination.Kind != operand64Mem {
+			return microOp64{}, false, fmt.Errorf("MOVNTI destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), width)
+		if err != nil || source.Kind != operand64Reg {
+			return microOp64{}, false, fmt.Errorf("MOVNTI source: %v", err)
+		}
+		return makeMove64(address, uint8(inst.Len), destination, source), false, nil
+	case x86asm.MOVNTQ:
+		destination, err := operand64FromArg(arg(0), 8)
+		if err != nil || destination.Kind != operand64Mem {
+			return microOp64{}, false, fmt.Errorf("MOVNTQ destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 8)
+		if err != nil || source.Kind != operand64MMX {
+			return microOp64{}, false, fmt.Errorf("MOVNTQ source: %v", err)
+		}
+		return makeMOVNTQ64(address, uint8(inst.Len), destination, source), false, nil
+	case x86asm.MOVNTPD:
+		destination, err := operand64FromArg(arg(0), 16)
+		if err != nil || destination.Kind != operand64Mem {
+			return microOp64{}, false, fmt.Errorf("MOVNTPD destination: %v", err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || source.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("MOVNTPD source: %v", err)
+		}
+		return makeSSEMove64(address, uint8(inst.Len), destination, source), false, nil
+	case x86asm.MOVNTSD, x86asm.MOVNTSS:
+		width := uint8(8)
+		if inst.Op == x86asm.MOVNTSS {
+			width = 4
+		}
+		destination, err := operand64FromArg(arg(0), width)
+		if err != nil || destination.Kind != operand64Mem {
+			return microOp64{}, false, fmt.Errorf("%s destination: %v", inst.Op, err)
+		}
+		source, err := operand64FromArg(arg(1), 16)
+		if err != nil || source.Kind != operand64XMM {
+			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
+		}
+		return makeMOVScalar64(address, uint8(inst.Len), width, destination, source), false, nil
 	case x86asm.MOVNTDQ, x86asm.MOVNTPS:
 		destination, err := operand64FromArg(arg(0), 16)
 		if err != nil || destination.Kind != operand64Mem {
@@ -1173,6 +1223,7 @@ func compileInstruction64(inst x86asm.Inst, address uint64) (microOp64, bool, er
 			return microOp64{}, false, fmt.Errorf("%s source: %v", inst.Op, err)
 		}
 		return makeSSEMove64(address, uint8(inst.Len), destination, source), false, nil
+
 	case x86asm.MASKMOVDQU:
 		source, err := operand64FromArg(arg(0), 16)
 		if err != nil || source.Kind != operand64XMM {
@@ -4239,6 +4290,21 @@ func makePSHUFW64(address uint64, size, order uint8, destination, source operand
 			result |= word << (16 * output)
 		}
 		state.MMX[destination.MMX] = result
+		state.EnterMMX()
+		state.RIP = next
+		return Flow64Continue, nil
+	}}
+}
+
+func makeMOVNTQ64(address uint64, size uint8, destination, source operand64) microOp64 {
+	return microOp64{Address: address, Size: size, Run: func(state *MachineState64, next uint64) (Flow64, error) {
+		if destination.Kind != operand64Mem || destination.Width != 8 || source.Kind != operand64MMX || source.MMX >= uint8(len(state.MMX)) {
+			return Flow64Stop, ErrUnsupportedAddressing
+		}
+		value := state.MMX[source.MMX]
+		if err := writeOperand64(state, destination, next, value); err != nil {
+			return Flow64Stop, err
+		}
 		state.EnterMMX()
 		state.RIP = next
 		return Flow64Continue, nil

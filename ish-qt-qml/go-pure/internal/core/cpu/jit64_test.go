@@ -5042,3 +5042,81 @@ func TestJIT64PauseAndPrefetchHints(t *testing.T) {
 		t.Fatalf("FPU TOP changed to %d, want 4", state.FPUTop())
 	}
 }
+
+func TestJIT64NonTemporalStores(t *testing.T) {
+	const codeAddress Address64 = 0x74000
+	const dataAddress Address64 = 0x76000
+	memory := NewMemory64()
+	code := []byte{
+		0x49, 0xbf, 0, 0, 0, 0, 0, 0, 0, 0, // mov r15,dataAddress
+		0xb8, 0xd4, 0xc3, 0xb2, 0xa1, // mov eax,0xa1b2c3d4
+		0x41, 0x0f, 0xc3, 0x07, // movnti [r15],eax
+		0x48, 0xb8, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // mov rax,0x1122334455667788
+		0x49, 0x0f, 0xc3, 0x47, 0x08, // movnti [r15+8],rax
+		0x41, 0x0f, 0xe7, 0x47, 0x10, // movntq [r15+16],mm0
+		0x66, 0x41, 0x0f, 0x2b, 0x47, 0x18, // movntpd [r15+24],xmm0
+		0xf2, 0x41, 0x0f, 0x2b, 0x4f, 0x28, // movntsd [r15+40],xmm1
+		0xf3, 0x41, 0x0f, 0x2b, 0x57, 0x30, // movntss [r15+48],xmm2
+		0xf4, // hlt
+	}
+	binary.LittleEndian.PutUint64(code[2:], uint64(dataAddress))
+	if err := memory.Map(dataAddress, Page64Size, PRead|PWrite); err != nil {
+		t.Fatal(err)
+	}
+	initial := make([]byte, 64)
+	for i := range initial {
+		initial[i] = 0xaa
+	}
+	if err := memory.Write(dataAddress, initial); err != nil {
+		t.Fatal(err)
+	}
+	mapExecutable64(t, memory, codeAddress, code)
+
+	state := NewMachineState64(memory)
+	state.RIP = uint64(codeAddress)
+	state.MMX[0] = 0x8877665544332211
+	state.XMM[0] = [16]byte{0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f}
+	state.XMM[1] = [16]byte{0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f}
+	state.XMM[2] = [16]byte{0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f}
+	state.SetFPUTop(5)
+	state.RFLAGS = Flag64OF | Flag64AF | Flag64PF | Flag64ZF | Flag64SF | Flag64CF
+	flagsBefore := state.RFLAGS
+	mmxBefore := state.MMX[0]
+	xmm0Before := state.XMM[0]
+	xmm1Before := state.XMM[1]
+	xmm2Before := state.XMM[2]
+	trap := NewJIT64(memory).RunToInterrupt(state)
+	if trap != Trap64Timer || !state.Halted {
+		t.Fatalf("trap=%#x halted=%v rip=%#x", trap, state.Halted, state.RIP)
+	}
+	if state.RFLAGS != flagsBefore {
+		t.Fatalf("non-temporal stores changed RFLAGS from %#x to %#x", flagsBefore, state.RFLAGS)
+	}
+	if state.MMX[0] != mmxBefore || state.XMM[0] != xmm0Before || state.XMM[1] != xmm1Before || state.XMM[2] != xmm2Before {
+		t.Fatal("non-temporal stores changed a source register")
+	}
+	if state.Get(RAX) != 0x1122334455667788 || state.Get(R15) != uint64(dataAddress) {
+		t.Fatalf("GPR state changed: RAX=%#x R15=%#x", state.Get(RAX), state.Get(R15))
+	}
+	if got := state.FPUTop(); got != 0 {
+		t.Fatalf("MOVNTQ did not enter MMX mode: TOP=%d", got)
+	}
+
+	var got [64]byte
+	if err := memory.Read(dataAddress, got[:]); err != nil {
+		t.Fatal(err)
+	}
+	want := [64]byte{}
+	for i := range want {
+		want[i] = 0xaa
+	}
+	binary.LittleEndian.PutUint32(want[0:4], 0xa1b2c3d4)
+	binary.LittleEndian.PutUint64(want[8:16], 0x1122334455667788)
+	binary.LittleEndian.PutUint64(want[16:24], 0x8877665544332211)
+	copy(want[24:40], xmm0Before[:])
+	copy(want[40:48], xmm1Before[:8])
+	copy(want[48:52], xmm2Before[:4])
+	if got != want {
+		t.Fatalf("non-temporal store memory=%x, want %x", got, want)
+	}
+}
