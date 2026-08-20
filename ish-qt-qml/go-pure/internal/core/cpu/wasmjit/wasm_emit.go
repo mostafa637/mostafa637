@@ -6,7 +6,7 @@ func EmitBlock(block GuestBlock) ([]byte, error) {
 	if block.Arch != "" && block.Arch != "amd64" {
 		return nil, ErrUnsupported
 	}
-	insts, err := decodeX86(block.Bytes)
+	insts, err := decodeX86(block.Bytes, block.PC)
 	if err != nil {
 		return nil, err
 	}

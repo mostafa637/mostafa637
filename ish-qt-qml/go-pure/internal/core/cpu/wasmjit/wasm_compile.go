@@ -2,19 +2,24 @@ package wasmjit
 
 import (
 	"context"
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/cpu/machinecode"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )
 
 func CompileBlock(ctx context.Context, block GuestBlock) (*HostBlock, error) {
-	wasm, err := EmitBlock(block)
+	insts, err := decodeGuest(block)
 	if err != nil {
 		return nil, err
 	}
-	return CompileWASM(ctx, wasm, KeyForBlock(block))
+	return compileWASMOnce(ctx, emitModule(insts), KeyForBlock(block), insts)
 }
 
 func CompileWASM(ctx context.Context, wasm []byte, key BlockKey) (*HostBlock, error) {
+	return compileWASMOnce(ctx, wasm, key, nil)
+}
+
+func compileWASMOnce(ctx context.Context, wasm []byte, key BlockKey, insts []machinecode.Instruction) (*HostBlock, error) {
 	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigCompiler())
 	hostModule, err := installHost(ctx, rt, nil, nil, nil)
 	if err != nil {
@@ -27,6 +32,7 @@ func CompileWASM(ctx context.Context, wasm []byte, key BlockKey) (*HostBlock, er
 		return nil, err
 	}
 	host.stop = closeRuntime(rt, mod)
+	host.flow, host.hasFlow = lastFlow(insts)
 	return host, nil
 }
 

@@ -2,6 +2,7 @@ package wasmjit
 
 import (
 	"context"
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/cpu/machinecode"
 	"github.com/tetratelabs/wazero/api"
 )
 
@@ -14,11 +15,13 @@ type GuestBlock struct {
 }
 
 type HostBlock struct {
-	Code   []byte
-	Key    BlockKey
-	run    api.Function
-	memory api.Memory
-	stop   func(context.Context) error
+	Code    []byte
+	Key     BlockKey
+	run     api.Function
+	memory  api.Memory
+	stop    func(context.Context) error
+	flow    machinecode.Instruction
+	hasFlow bool
 }
 
 type BlockKey struct {
@@ -62,6 +65,13 @@ func resultFlag(values []uint64) uint64 {
 }
 
 func (b *HostBlock) Memory() api.Memory { return b.memory }
+
+func (b *HostBlock) Flow() (machinecode.Instruction, bool) {
+	if b == nil {
+		return machinecode.Instruction{}, false
+	}
+	return b.flow, b.hasFlow
+}
 
 func (b *HostBlock) Close(ctx context.Context) error {
 	if b.stop == nil {

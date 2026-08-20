@@ -18,13 +18,18 @@ const (
 	OpCMPImm
 	OpLoad64
 	OpStore64
+	OpJmp
+	OpJcc
 )
 
 type Instruction struct {
-	Op  Op
-	Dst int16
-	Src int16
-	Imm int64
+	Op          Op
+	Dst         int16
+	Src         int16
+	Imm         int64
+	Target      uint64
+	Fallthrough uint64
+	Cond        uint8
 }
 
 type Emitter interface {

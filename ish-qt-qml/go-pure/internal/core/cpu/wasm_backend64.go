@@ -3,13 +3,15 @@ package cpu
 import (
 	"context"
 	"fmt"
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/cpu/machinecode"
 	"github.com/mostafa637/mostafa637/go-pure/internal/core/cpu/wasmjit"
 )
 
 type WasmBlock64 struct {
-	Host  *wasmjit.HostBlock
-	Start uint64
-	End   uint64
+	Host        *wasmjit.HostBlock
+	Start, End  uint64
+	Pages       []Page64
+	Generations map[Page64]uint64
 }
 
 func (j *WasmJIT) CompileBlock64(ctx context.Context, memory *Memory64, start Address64, maxBytes uint64) (*WasmBlock64, error) {
@@ -25,7 +27,7 @@ func (j *WasmJIT) CompileBlock64(ctx context.Context, memory *Memory64, start Ad
 	if err != nil {
 		return nil, err
 	}
-	return &WasmBlock64{Host: host, Start: block.Start, End: block.End}, nil
+	return &WasmBlock64{Host: host, Start: block.Start, End: block.End, Pages: block.Pages, Generations: block.Generations}, nil
 }
 
 func readBlock64(memory *Memory64, block *CompiledBlock64) ([]byte, error) {
@@ -50,7 +52,23 @@ func (b *WasmBlock64) Run(ctx context.Context, state *MachineState64) (Flow64, e
 	regs, flags, err := b.Host.RunRegsFlags(ctx, state.Regs)
 	state.Regs = regs
 	applyZeroFlag(state, flags)
-	return Flow64Stop, err
+	flow, hasFlow := b.Host.Flow()
+	return runWasmFlow(state, flow, hasFlow, err)
+}
+
+func runWasmFlow(state *MachineState64, flow machinecode.Instruction, hasFlow bool, err error) (Flow64, error) {
+	if err != nil {
+		return Flow64Stop, err
+	}
+	if !hasFlow {
+		return Flow64Stop, nil
+	}
+	if flow.Op == machinecode.OpJcc && !conditionValue64(state, conditionCode64(flow.Cond)) {
+		state.RIP = flow.Fallthrough
+	} else {
+		state.RIP = flow.Target
+	}
+	return Flow64Branch, nil
 }
 
 func applyZeroFlag(state *MachineState64, flags uint64) {

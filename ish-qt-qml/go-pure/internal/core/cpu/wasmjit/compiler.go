@@ -3,6 +3,7 @@ package wasmjit
 import (
 	"context"
 	"errors"
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/cpu/machinecode"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"os"
@@ -39,28 +40,33 @@ func NewCompilerWithMemory(ctx context.Context, dir string, syscall SyscallHandl
 }
 
 func (c *Compiler) Compile(ctx context.Context, block GuestBlock) (*HostBlock, error) {
-	wasm, err := EmitBlock(block)
+	insts, err := decodeGuest(block)
 	if err != nil {
 		return nil, err
 	}
-	return c.compileWASM(ctx, wasm, KeyForBlock(block))
+	return c.compileWASM(ctx, emitModule(insts), KeyForBlock(block), insts)
 }
 
 func (c *Compiler) CompileCached(ctx context.Context, block GuestBlock, cache *BlockCache) (*HostBlock, error) {
 	key := KeyForBlock(block)
+	insts, err := decodeGuest(block)
+	if err != nil {
+		return nil, err
+	}
 	wasm, err := cachedWASM(block, key, cache)
 	if err != nil {
 		return nil, err
 	}
-	return c.compileWASM(ctx, wasm, key)
+	return c.compileWASM(ctx, wasm, key, insts)
 }
 
-func (c *Compiler) compileWASM(ctx context.Context, wasm []byte, key BlockKey) (*HostBlock, error) {
+func (c *Compiler) compileWASM(ctx context.Context, wasm []byte, key BlockKey, insts []machinecode.Instruction) (*HostBlock, error) {
 	host, mod, err := compileOnRuntime(ctx, c.rt, c.host, wasm, key)
 	if err != nil {
 		return nil, err
 	}
 	host.stop = func(ctx context.Context) error { return mod.Close(ctx) }
+	host.flow, host.hasFlow = lastFlow(insts)
 	return host, nil
 }
 

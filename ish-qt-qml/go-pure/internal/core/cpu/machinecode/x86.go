@@ -11,7 +11,7 @@ type x86Handler func(*asm.Builder, Instruction)
 var x86Handlers = [...]x86Handler{
 	emitX86NOP, emitX86MOV, emitX86ADD, emitX86SUB, emitX86RET, emitX86Syscall,
 	emitX86MOVReg, emitX86ADDReg, emitX86SUBReg, emitX86AND, emitX86OR, emitX86XOR, emitX86CMP,
-	emitX86Load64, emitX86Store64,
+	emitX86Load64, emitX86Store64, nil, nil,
 }
 
 func EmitX86(in []Instruction) ([]byte, error) {
@@ -28,7 +28,9 @@ func EmitX86(in []Instruction) ([]byte, error) {
 	return b.Assemble(), nil
 }
 
-func validX86Op(op Op) bool { return int(op) < len(x86Handlers) }
+func validX86Op(op Op) bool {
+	return int(op) >= 0 && int(op) < len(x86Handlers) && x86Handlers[op] != nil
+}
 
 func newX86Prog(b *asm.Builder, as obj.As) *obj.Prog {
 	p := b.NewProg()

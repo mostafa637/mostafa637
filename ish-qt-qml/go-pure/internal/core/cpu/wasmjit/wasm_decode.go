@@ -6,24 +6,28 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-func decodeX86(src []byte) ([]machinecode.Instruction, error) {
+func decodeX86(src []byte, pc uint64) ([]machinecode.Instruction, error) {
 	var out []machinecode.Instruction
-	for len(src) > 0 {
+	for offset := 0; len(src) > 0; {
 		inst, err := x86asm.Decode(src, 64)
 		if err != nil {
 			return nil, err
 		}
-		item, err := decodeX86Inst(inst)
+		item, err := decodeX86Inst(inst, pc+uint64(offset))
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, item)
+		if isFlow(item.Op) {
+			break
+		}
+		offset += inst.Len
 		src = src[inst.Len:]
 	}
 	return out, nil
 }
 
-func decodeX86Inst(inst x86asm.Inst) (machinecode.Instruction, error) {
+func decodeX86Inst(inst x86asm.Inst, address uint64) (machinecode.Instruction, error) {
 	switch inst.Op {
 	case x86asm.NOP:
 		return machinecode.Instruction{Op: machinecode.OpNOP}, nil
@@ -31,6 +35,8 @@ func decodeX86Inst(inst x86asm.Inst) (machinecode.Instruction, error) {
 		return machinecode.Instruction{Op: machinecode.OpRET}, nil
 	case x86asm.SYSCALL:
 		return machinecode.Instruction{Op: machinecode.OpSyscall}, nil
+	case x86asm.JMP:
+		return decodeBranch(inst, address, machinecode.OpJmp, 0)
 	case x86asm.MOV:
 		return decodeMove(inst)
 	case x86asm.ADD:
@@ -46,6 +52,9 @@ func decodeX86Inst(inst x86asm.Inst) (machinecode.Instruction, error) {
 	case x86asm.CMP:
 		return decodeArithmetic(inst, machinecode.OpCMPImm)
 	default:
+		if cond, ok := decodeCondition(inst.Op); ok {
+			return decodeBranch(inst, address, machinecode.OpJcc, cond)
+		}
 		return machinecode.Instruction{}, fmt.Errorf("wasmjit: unsupported x86 op %s", inst.Op)
 	}
 }
