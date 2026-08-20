@@ -118,3 +118,6 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 
 ## 2026-08-20 — تكرار زر الأسهم من لحظة الضغط
 تم تعديل `ArrowAccessoryButton.qml` ليحدد الربع المضغوط ويرسل أول escape sequence فور الضغط، ثم يبدأ مهلة التكرار مباشرة. كان التكرار سابقًا يبدأ فقط بعد `onPositionChanged`، لذلك كان الضغط المطول دون تحريك الإصبع يرسل event واحدًا عند الإفلات بدل السلوك المستمر المتوقع من شريط iSH الأصلي. أزيل الإرسال المتأخر عند `onReleased` لمنع التكرار المزدوج.
+
+## 2026-08-20 — استهلاك Control مع WebView
+اكتُشف أن `TerminalWeb.sendAccessoryInput()` كان يمسح `controlModifier` فقط عند قيمة أحادية المحرف. لذلك كان تسلسل سهم مثل `ESC[A` بعد تفعيل Control يترك Control عالقًا داخل WebView، رغم أن Main.qml يمسحه في طبقة الواجهة. أصبح Control الآن one-shot ويُستهلك بعد أي إدخال ملحقات، مع تطبيق التحويل إلى control character فقط للقيم أحادية المحرف.

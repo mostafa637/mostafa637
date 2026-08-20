@@ -56,10 +56,15 @@ Item {
         if (!value || value.length === 0)
             return
         let input = value
-        if (root.controlModifier && value.length === 1) {
-            const control = root.controlCharacter(value)
-            if (control.length > 0)
-                input = control
+        if (root.controlModifier) {
+            if (value.length === 1) {
+                const control = root.controlCharacter(value)
+                if (control.length > 0)
+                    input = control
+            }
+            // Control is a one-shot modifier. Consume it even when the
+            // selected accessory value is an escape sequence such as an
+            // arrow key; otherwise it remains latched for the next key.
             root.controlModifier = false
         }
         view.runJavaScript("window.ishSendInput && window.ishSendInput(" + JSON.stringify(input) + ")")
