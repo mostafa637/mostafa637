@@ -44,6 +44,10 @@ func (s *DB) migrate(ctx context.Context) error {
 				if _, err := tx.ExecContext(ctx, "DROP TRIGGER delete_path"); err != nil {
 					return fmt.Errorf("storage: migrate v2->v3: %w", err)
 				}
+			case 3:
+				if _, err := tx.ExecContext(ctx, "CREATE TABLE xattrs (inode INTEGER REFERENCES stats(inode) ON DELETE CASCADE, name BLOB, value BLOB NOT NULL, PRIMARY KEY(inode, name))"); err != nil {
+					return fmt.Errorf("storage: migrate v3->v4: %w", err)
+				}
 			default:
 				return fmt.Errorf("storage: invalid migration version %d", version)
 			}

@@ -120,6 +120,8 @@ const (
 	E2BIG        int32 = -7
 	EXDEV        int32 = -18
 	ELOOP        int32 = -40
+	ENODATA      int32 = -61
+	ERANGE       int32 = -34
 )
 
 const (

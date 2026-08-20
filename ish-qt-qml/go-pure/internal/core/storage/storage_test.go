@@ -163,8 +163,8 @@ func TestMigrateV0ToV3(t *testing.T) {
 	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 3 {
-		t.Fatalf("migrated version = %d, want 3", version)
+	if version != 4 {
+		t.Fatalf("migrated version = %d, want 4", version)
 	}
 	var foreignKey string
 	if err := store.db.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='paths'").Scan(&foreignKey); err != nil {

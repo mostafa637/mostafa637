@@ -13,6 +13,8 @@ import (
 
 var (
 	ErrNotFound  = errors.New("storage: not found")
+	ErrExists    = errors.New("storage: already exists")
+	ErrNoData    = errors.New("storage: no data")
 	ErrInvariant = errors.New("storage: invariant violation")
 )
 

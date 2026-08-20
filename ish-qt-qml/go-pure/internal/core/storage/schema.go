@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 const baseSchema = `
 CREATE TABLE meta (id INTEGER UNIQUE DEFAULT 0, db_inode INTEGER);
@@ -14,7 +14,8 @@ INSERT INTO meta (db_inode) VALUES (0);
 CREATE TABLE stats (inode INTEGER PRIMARY KEY, stat BLOB);
 CREATE TABLE paths (path BLOB PRIMARY KEY, inode INTEGER REFERENCES stats(inode));
 CREATE INDEX inode_to_path ON paths (inode, path);
-PRAGMA user_version = 3;
+CREATE TABLE xattrs (inode INTEGER REFERENCES stats(inode) ON DELETE CASCADE, name BLOB, value BLOB NOT NULL, PRIMARY KEY(inode, name));
+PRAGMA user_version = 4;
 `
 
 func (s *DB) ensureSchema(ctx context.Context) error {

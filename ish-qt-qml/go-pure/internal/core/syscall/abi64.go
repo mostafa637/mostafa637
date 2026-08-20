@@ -82,12 +82,24 @@ const (
 	Sys64Sync   Number64 = 162
 	Sys64Syncfs Number64 = 306
 
-	Sys64Fdatasync Number64 = 75
-	Sys64Truncate  Number64 = 76
-	Sys64Ftruncate Number64 = 77
-	Sys64Fadvise64 Number64 = 221
-	Sys64Statfs    Number64 = 137
-	Sys64Fstatfs   Number64 = 138
+	Sys64Fdatasync    Number64 = 75
+	Sys64Setxattr     Number64 = 188
+	Sys64Lsetxattr    Number64 = 189
+	Sys64Fsetxattr    Number64 = 190
+	Sys64Getxattr     Number64 = 191
+	Sys64Lgetxattr    Number64 = 192
+	Sys64Fgetxattr    Number64 = 193
+	Sys64Listxattr    Number64 = 194
+	Sys64Llistxattr   Number64 = 195
+	Sys64Flistxattr   Number64 = 196
+	Sys64Removexattr  Number64 = 197
+	Sys64Lremovexattr Number64 = 198
+	Sys64Fremovexattr Number64 = 199
+	Sys64Truncate     Number64 = 76
+	Sys64Ftruncate    Number64 = 77
+	Sys64Fadvise64    Number64 = 221
+	Sys64Statfs       Number64 = 137
+	Sys64Fstatfs      Number64 = 138
 
 	Sys64GetRlimit      Number64 = 97
 	Sys64RtSigpending   Number64 = 127
@@ -492,6 +504,18 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Lseek, lseek64)
 	d.Register(Sys64Fsync, fsync64)
 	d.Register(Sys64Fdatasync, fdatasync64)
+	d.Register(Sys64Setxattr, setxattr64)
+	d.Register(Sys64Lsetxattr, lsetxattr64)
+	d.Register(Sys64Fsetxattr, fsetxattr64)
+	d.Register(Sys64Getxattr, getxattr64)
+	d.Register(Sys64Lgetxattr, lgetxattr64)
+	d.Register(Sys64Fgetxattr, fgetxattr64)
+	d.Register(Sys64Listxattr, listxattr64)
+	d.Register(Sys64Llistxattr, llistxattr64)
+	d.Register(Sys64Flistxattr, flistxattr64)
+	d.Register(Sys64Removexattr, removexattr64)
+	d.Register(Sys64Lremovexattr, lremovexattr64)
+	d.Register(Sys64Fremovexattr, fremovexattr64)
 	d.Register(Sys64Sync, sync64)
 	d.Register(Sys64Syncfs, syncfs64)
 	d.Register(Sys64Fadvise64, fadvise64)
