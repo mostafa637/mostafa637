@@ -15,17 +15,21 @@ type Compiler struct {
 }
 
 func NewCompiler(ctx context.Context, dir string) (*Compiler, error) {
-	return NewCompilerWithSyscall(ctx, dir, nil)
+	return NewCompilerWithMemory(ctx, dir, nil, nil, nil)
 }
 
 func NewCompilerWithSyscall(ctx context.Context, dir string, handler SyscallHandler) (*Compiler, error) {
+	return NewCompilerWithMemory(ctx, dir, handler, nil, nil)
+}
+
+func NewCompilerWithMemory(ctx context.Context, dir string, syscall SyscallHandler, load MemoryLoadHandler, store MemoryStoreHandler) (*Compiler, error) {
 	cache, err := wazero.NewCompilationCacheWithDir(dir)
 	if err != nil {
 		return nil, err
 	}
 	cfg := wazero.NewRuntimeConfigCompiler().WithCompilationCache(cache)
 	rt := wazero.NewRuntimeWithConfig(ctx, cfg)
-	host, err := installSyscall(ctx, rt, handler)
+	host, err := installHost(ctx, rt, syscall, load, store)
 	if err != nil {
 		rt.Close(ctx)
 		cache.Close(ctx)
@@ -52,7 +56,7 @@ func (c *Compiler) CompileCached(ctx context.Context, block GuestBlock, cache *B
 }
 
 func (c *Compiler) compileWASM(ctx context.Context, wasm []byte, key BlockKey) (*HostBlock, error) {
-	host, mod, err := compileOnRuntime(ctx, c.rt, wasm, key)
+	host, mod, err := compileOnRuntime(ctx, c.rt, c.host, wasm, key)
 	if err != nil {
 		return nil, err
 	}

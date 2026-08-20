@@ -34,11 +34,16 @@ func (b *HostBlock) Run(ctx context.Context, regs [16]uint64) (uint64, error) {
 }
 
 func (b *HostBlock) RunRegs(ctx context.Context, regs [16]uint64) ([16]uint64, error) {
+	out, _, err := b.RunRegsFlags(ctx, regs)
+	return out, err
+}
+
+func (b *HostBlock) RunRegsFlags(ctx context.Context, regs [16]uint64) ([16]uint64, uint64, error) {
 	values, err := b.run.Call(ctx, regArgs(regs)...)
 	if err != nil {
-		return [16]uint64{}, err
+		return [16]uint64{}, 0, err
 	}
-	return regResults(values), nil
+	return regResults(values), resultFlag(values), nil
 }
 
 func regArgs(regs [16]uint64) []uint64 { return regs[:] }
@@ -47,6 +52,13 @@ func regResults(values []uint64) [16]uint64 {
 	var out [16]uint64
 	copy(out[:], values)
 	return out
+}
+
+func resultFlag(values []uint64) uint64 {
+	if len(values) <= 16 {
+		return 0
+	}
+	return values[16]
 }
 
 func (b *HostBlock) Memory() api.Memory { return b.memory }

@@ -11,11 +11,20 @@ type WasmJIT struct {
 }
 
 func NewWasmJIT(ctx context.Context, root string) (*WasmJIT, error) {
-	return NewWasmJITWithSyscall(ctx, root, nil)
+	return NewWasmJITWithSyscallAndMemory(ctx, root, nil, nil)
 }
 
 func NewWasmJITWithSyscall(ctx context.Context, root string, handler wasmjit.SyscallHandler) (*WasmJIT, error) {
-	compiler, err := wasmjit.NewCompilerWithSyscall(ctx, root+"/compiled", handler)
+	return NewWasmJITWithSyscallAndMemory(ctx, root, handler, nil)
+}
+
+func NewWasmJITWithMemory(ctx context.Context, root string, memory *Memory64) (*WasmJIT, error) {
+	return NewWasmJITWithSyscallAndMemory(ctx, root, nil, memory)
+}
+
+func NewWasmJITWithSyscallAndMemory(ctx context.Context, root string, handler wasmjit.SyscallHandler, memory *Memory64) (*WasmJIT, error) {
+	load, store := memoryHandlers(memory)
+	compiler, err := wasmjit.NewCompilerWithMemory(ctx, root+"/compiled", handler, load, store)
 	if err != nil {
 		return nil, err
 	}

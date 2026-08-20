@@ -31,7 +31,7 @@ func appendSLEB(out []byte, value int64) []byte {
 }
 
 func emitBody(insts []machinecode.Instruction) []byte {
-	out := []byte{0}
+	out := []byte{1, 1, 0x7e}
 	for _, inst := range insts {
 		out = append(out, emitInstruction(inst)...)
 	}
@@ -40,45 +40,8 @@ func emitBody(insts []machinecode.Instruction) []byte {
 }
 
 func appendRegisterResults(out []byte) []byte {
-	for i := byte(0); i < 16; i++ {
+	for i := byte(0); i < 17; i++ {
 		out = append(out, 0x20, i)
 	}
 	return out
-}
-
-func emitInstruction(inst machinecode.Instruction) []byte {
-	switch inst.Op {
-	case machinecode.OpNOP, machinecode.OpRET:
-		return nil
-	case machinecode.OpMOVImm:
-		return emitMove(inst)
-	case machinecode.OpADDImm:
-		return emitArithmetic(inst, 0x7c)
-	case machinecode.OpSUBImm:
-		return emitArithmetic(inst, 0x7d)
-	case machinecode.OpSyscall:
-		return emitSyscall()
-	default:
-		return nil
-	}
-}
-
-func emitMove(inst machinecode.Instruction) []byte {
-	out := []byte{0x42}
-	out = appendSLEB(out, inst.Imm)
-	return append(out, 0x21, byte(inst.Dst))
-}
-
-func emitSyscall() []byte {
-	out := make([]byte, 0, 30)
-	for _, index := range []byte{0, 7, 6, 2, 10, 8, 9} {
-		out = append(out, 0x20, index)
-	}
-	return append(out, 0x10, 0, 0x21, 0)
-}
-
-func emitArithmetic(inst machinecode.Instruction, op byte) []byte {
-	out := []byte{0x20, byte(inst.Dst), 0x42}
-	out = appendSLEB(out, inst.Imm)
-	return append(out, op, 0x21, byte(inst.Dst))
 }

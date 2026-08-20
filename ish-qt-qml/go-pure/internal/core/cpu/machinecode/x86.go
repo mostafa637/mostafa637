@@ -10,6 +10,8 @@ type x86Handler func(*asm.Builder, Instruction)
 
 var x86Handlers = [...]x86Handler{
 	emitX86NOP, emitX86MOV, emitX86ADD, emitX86SUB, emitX86RET, emitX86Syscall,
+	emitX86MOVReg, emitX86ADDReg, emitX86SUBReg, emitX86AND, emitX86OR, emitX86XOR, emitX86CMP,
+	emitX86Load64, emitX86Store64,
 }
 
 func EmitX86(in []Instruction) ([]byte, error) {

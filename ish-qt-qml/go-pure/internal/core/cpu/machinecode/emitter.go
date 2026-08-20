@@ -9,6 +9,15 @@ const (
 	OpSUBImm
 	OpRET
 	OpSyscall
+	OpMOVReg
+	OpADDReg
+	OpSUBReg
+	OpANDImm
+	OpORImm
+	OpXORImm
+	OpCMPImm
+	OpLoad64
+	OpStore64
 )
 
 type Instruction struct {

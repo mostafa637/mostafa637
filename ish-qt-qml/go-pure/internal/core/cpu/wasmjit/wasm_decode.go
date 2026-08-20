@@ -37,44 +37,15 @@ func decodeX86Inst(inst x86asm.Inst) (machinecode.Instruction, error) {
 		return decodeArithmetic(inst, machinecode.OpADDImm)
 	case x86asm.SUB:
 		return decodeArithmetic(inst, machinecode.OpSUBImm)
+	case x86asm.AND:
+		return decodeArithmetic(inst, machinecode.OpANDImm)
+	case x86asm.OR:
+		return decodeArithmetic(inst, machinecode.OpORImm)
+	case x86asm.XOR:
+		return decodeArithmetic(inst, machinecode.OpXORImm)
+	case x86asm.CMP:
+		return decodeArithmetic(inst, machinecode.OpCMPImm)
 	default:
 		return machinecode.Instruction{}, fmt.Errorf("wasmjit: unsupported x86 op %s", inst.Op)
 	}
-}
-
-func decodeMove(inst x86asm.Inst) (machinecode.Instruction, error) {
-	dst, ok := decodeReg(inst.Args[0])
-	if !ok {
-		return machinecode.Instruction{}, ErrUnsupported
-	}
-	imm, ok := decodeImm(inst.Args[1])
-	if !ok {
-		return machinecode.Instruction{}, ErrUnsupported
-	}
-	return machinecode.Instruction{Op: machinecode.OpMOVImm, Dst: dst, Imm: imm}, nil
-}
-
-func decodeArithmetic(inst x86asm.Inst, op machinecode.Op) (machinecode.Instruction, error) {
-	dst, ok := decodeReg(inst.Args[0])
-	if !ok {
-		return machinecode.Instruction{}, ErrUnsupported
-	}
-	imm, ok := decodeImm(inst.Args[1])
-	if !ok {
-		return machinecode.Instruction{}, ErrUnsupported
-	}
-	return machinecode.Instruction{Op: op, Dst: dst, Imm: imm}, nil
-}
-
-func decodeReg(arg x86asm.Arg) (int16, bool) {
-	reg, ok := arg.(x86asm.Reg)
-	if !ok || reg < x86asm.RAX || reg > x86asm.R15 {
-		return 0, false
-	}
-	return int16(reg - x86asm.RAX), true
-}
-
-func decodeImm(arg x86asm.Arg) (int64, bool) {
-	imm, ok := arg.(x86asm.Imm)
-	return int64(imm), ok
 }

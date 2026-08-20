@@ -47,9 +47,18 @@ func (b *WasmBlock64) Run(ctx context.Context, state *MachineState64) (Flow64, e
 	if b == nil || b.Host == nil || state == nil {
 		return Flow64Stop, ErrInvalid64Block
 	}
-	regs, err := b.Host.RunRegs(ctx, state.Regs)
+	regs, flags, err := b.Host.RunRegsFlags(ctx, state.Regs)
 	state.Regs = regs
+	applyZeroFlag(state, flags)
 	return Flow64Stop, err
+}
+
+func applyZeroFlag(state *MachineState64, flags uint64) {
+	if flags != 0 {
+		state.RFLAGS |= Flag64ZF
+		return
+	}
+	state.RFLAGS &^= Flag64ZF
 }
 
 func (b *WasmBlock64) Close(ctx context.Context) error {

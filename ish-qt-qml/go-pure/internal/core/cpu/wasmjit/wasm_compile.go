@@ -16,7 +16,12 @@ func CompileBlock(ctx context.Context, block GuestBlock) (*HostBlock, error) {
 
 func CompileWASM(ctx context.Context, wasm []byte, key BlockKey) (*HostBlock, error) {
 	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfigCompiler())
-	host, mod, err := compileOnRuntime(ctx, rt, wasm, key)
+	hostModule, err := installHost(ctx, rt, nil, nil, nil)
+	if err != nil {
+		rt.Close(ctx)
+		return nil, err
+	}
+	host, mod, err := compileOnRuntime(ctx, rt, hostModule, wasm, key)
 	if err != nil {
 		rt.Close(ctx)
 		return nil, err
@@ -25,7 +30,7 @@ func CompileWASM(ctx context.Context, wasm []byte, key BlockKey) (*HostBlock, er
 	return host, nil
 }
 
-func compileOnRuntime(ctx context.Context, rt wazero.Runtime, wasm []byte, key BlockKey) (*HostBlock, api.Module, error) {
+func compileOnRuntime(ctx context.Context, rt wazero.Runtime, hostModule api.Module, wasm []byte, key BlockKey) (*HostBlock, api.Module, error) {
 	compiled, err := rt.CompileModule(ctx, wasm)
 	if err != nil {
 		return nil, nil, err
