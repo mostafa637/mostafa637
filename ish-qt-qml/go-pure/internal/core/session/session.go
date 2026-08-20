@@ -21,6 +21,7 @@ type Config struct {
 	Shell     string
 	GuestELF  string
 	UseGuest  bool
+	UseWasm   bool
 	UID       uint32
 	GID       uint32
 	Bootstrap bool
@@ -72,7 +73,7 @@ func New(cfg Config) (*CoreSession, error) {
 		if guestPath == "" {
 			guestPath = cfg.Shell
 		}
-		return &CoreSession{fs: fake, kernel: process, manager: manager, guest: newGuestTransport(guestPath)}, nil
+		return &CoreSession{fs: fake, kernel: process, manager: manager, guest: newGuestTransport(guestPath, cfg.UseWasm)}, nil
 	}
 	return &CoreSession{fs: fake, kernel: process, manager: manager, pty: platform.NewPTYSession(cfg.Shell)}, nil
 }

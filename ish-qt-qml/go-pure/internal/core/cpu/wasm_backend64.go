@@ -79,6 +79,10 @@ func runWasmFlow(memory *Memory64, state *MachineState64, flow machinecode.Instr
 			return Flow64Stop, err
 		}
 		state.RIP = target
+	case machinecode.OpSyscall:
+		state.RIP = flow.NextPC
+		state.TrapNo = Trap64Syscall
+		return Flow64Interrupt, nil
 	case machinecode.OpJcc:
 		state.RIP = flow.Target
 		if !conditionValue64(state, conditionCode64(flow.Cond)) {

@@ -13,6 +13,7 @@ import (
 
 type guestTransport struct {
 	elfPath string
+	useWasm bool
 	input   chan []byte
 	output  chan []byte
 	done    chan struct{}
@@ -26,9 +27,11 @@ type guestTransport struct {
 	nextPID   uint64
 }
 
-func newGuestTransport(elfPath string) *guestTransport {
+func newGuestTransport(elfPath string, wasm ...bool) *guestTransport {
+	useWasm := len(wasm) > 0 && wasm[0]
 	return &guestTransport{
 		elfPath:  elfPath,
+		useWasm:  useWasm,
 		input:    make(chan []byte, 32),
 		output:   make(chan []byte, 32),
 		done:     make(chan struct{}),

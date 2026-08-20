@@ -35,13 +35,23 @@ func decodeX86Inst(inst x86asm.Inst, address uint64) (machinecode.Instruction, e
 		return decodeReturn(inst, address)
 	case x86asm.CALL:
 		return decodeBranch(inst, address, machinecode.OpCall, 0)
+	case x86asm.PUSH:
+		return decodePush(inst, address)
+	case x86asm.POP:
+		return decodePop(inst, address)
 
 	case x86asm.SYSCALL:
-		return machinecode.Instruction{Op: machinecode.OpSyscall}, nil
+		return machinecode.Instruction{Op: machinecode.OpSyscall, NextPC: address + uint64(inst.Len)}, nil
 	case x86asm.JMP:
 		return decodeBranch(inst, address, machinecode.OpJmp, 0)
 	case x86asm.MOV:
 		return decodeMove(inst, address)
+	case x86asm.MOVZX:
+		return decodeExtend(inst, address, false)
+	case x86asm.MOVSX, x86asm.MOVSXD:
+		return decodeExtend(inst, address, true)
+	case x86asm.LEA:
+		return decodeLEA(inst, address)
 
 	case x86asm.ADD:
 		return decodeArithmetic(inst, machinecode.OpADDImm)

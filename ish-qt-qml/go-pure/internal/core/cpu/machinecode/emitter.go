@@ -21,6 +21,10 @@ const (
 	OpJmp
 	OpJcc
 	OpCall
+	OpPush64
+	OpPop64
+	OpLEA64
+	OpExtend64
 )
 
 type Instruction struct {
@@ -36,6 +40,9 @@ type Instruction struct {
 	MemScale    uint8
 	MemRIP      bool
 	NextPC      uint64
+	Width       uint8
+	DstWidth    uint8
+	Signed      bool
 }
 
 type Emitter interface {

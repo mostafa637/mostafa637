@@ -7,7 +7,7 @@ func decodeGuest(block GuestBlock) ([]machinecode.Instruction, error) {
 }
 
 func isFlow(op machinecode.Op) bool {
-	return op == machinecode.OpRET || op == machinecode.OpJmp || op == machinecode.OpJcc || op == machinecode.OpCall
+	return op == machinecode.OpRET || op == machinecode.OpJmp || op == machinecode.OpJcc || op == machinecode.OpCall || op == machinecode.OpSyscall
 }
 
 func lastFlow(insts []machinecode.Instruction) (machinecode.Instruction, bool) {

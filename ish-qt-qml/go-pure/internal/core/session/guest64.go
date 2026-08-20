@@ -74,7 +74,7 @@ func (g *guestTransport) start64(ctx context.Context, process *corekernel.Proces
 		return err
 	}
 
-	var jit *corecpu.JIT64
+	var runner guest64Runner
 	var dispatcher *coresyscall.Dispatcher64
 	sysContext.Execve = func(path string, argv, env []string) int64 {
 		resolved, ok := resolveSessionPath64(sysContext.CWD, path)
@@ -103,17 +103,23 @@ func (g *guestTransport) start64(ctx context.Context, process *corekernel.Proces
 		sysContext.Brk = uint64(newLoaded.Main.Space.Brk)
 
 		sysContext.CloseOnExec()
-		jit = corecpu.NewJIT64(newMemory)
-		jit.OnSyscall64 = func(machine *corecpu.MachineState64) (bool, error) {
-			return dispatcher.Dispatch(machine)
+		oldRunner := runner
+		newRunner, runnerErr := newGuest64Runner(context.Background(), g.useWasm, newMemory, dispatcher)
+		if runnerErr != nil {
+			return int64(coresyscall.ENOMEM)
+		}
+		runner = newRunner
+		if oldRunner != nil {
+			_ = oldRunner.Close(context.Background())
 		}
 		return 0
 	}
 
 	dispatcher = coresyscall.NewDispatcher64(sysContext)
-	jit = corecpu.NewJIT64(memory)
-	jit.OnSyscall64 = func(machine *corecpu.MachineState64) (bool, error) {
-		return dispatcher.Dispatch(machine)
+	var runnerErr error
+	runner, runnerErr = newGuest64Runner(context.Background(), g.useWasm, memory, dispatcher)
+	if runnerErr != nil {
+		return runnerErr
 	}
 	sysContext.ProcessFactory = g.createChild64
 	sysContext.ChildStarter = g.startChild64
@@ -123,20 +129,21 @@ func (g *guestTransport) start64(ctx context.Context, process *corekernel.Proces
 		g.runtimes = make(map[*coresyscall.Context64]*guest64Runtime)
 	}
 	g.nextPID = uint64(process.PID)
-	g.runtimes[sysContext] = &guest64Runtime{transport: g, context: sysContext, state: state, dispatcher: dispatcher, jit: jit, pid: uint64(process.PID), done: make(chan struct{})}
+	g.runtimes[sysContext] = &guest64Runtime{transport: g, context: sysContext, state: state, dispatcher: dispatcher, runner: runner, pid: uint64(process.PID), done: make(chan struct{})}
 	g.runtimeMu.Unlock()
 	g.process = process
 	runDone := make(chan struct{})
 	go func() {
 		defer close(runDone)
 		defer g.closeOutput()
+		defer func() { _ = runner.Close(context.Background()) }()
 		for {
 			select {
 			case <-g.done:
 				return
 			default:
 			}
-			trap := jit.RunToInterrupt(state)
+			trap := runner.RunToInterrupt(context.Background(), state)
 			switch trap {
 			case corecpu.Trap64Timer:
 				continue
@@ -154,7 +161,7 @@ func (g *guestTransport) start64(ctx context.Context, process *corekernel.Proces
 			select {
 			case <-ctx.Done():
 				g.stop()
-				jit.Poke()
+				runner.Poke()
 			case <-runDone:
 			}
 		}()

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"encoding/binary"
 	"sync"
 
@@ -13,7 +14,7 @@ type guest64Runtime struct {
 	context    *coresyscall.Context64
 	state      *corecpu.MachineState64
 	dispatcher *coresyscall.Dispatcher64
-	jit        *corecpu.JIT64
+	runner     guest64Runner
 	parent     *coresyscall.Context64
 	pid        uint64
 	clearTID   uint64
@@ -122,10 +123,11 @@ func (g *guestTransport) createChild64(parent *coresyscall.Context64, request co
 		done:      make(chan struct{}),
 	}
 	runtime.dispatcher = coresyscall.NewDispatcher64(child)
-	runtime.jit = corecpu.NewJIT64(memory)
-	runtime.jit.OnSyscall64 = func(machine *corecpu.MachineState64) (bool, error) {
-		return runtime.dispatcher.Dispatch(machine)
+	runner, err := newGuest64Runner(context.Background(), g.useWasm, memory, runtime.dispatcher)
+	if err != nil {
+		return int64(coresyscall.ENOMEM)
 	}
+	runtime.runner = runner
 	child.Execve = func(path string, argv, env []string) int64 {
 		return runtime.execve64(path, argv, env)
 	}
@@ -159,12 +161,20 @@ func (g *guestTransport) startChild64(parent *coresyscall.Context64, childPID in
 }
 
 func (runtime *guest64Runtime) run() {
-	if runtime == nil || runtime.jit == nil || runtime.state == nil || runtime.context == nil {
+	if runtime == nil || runtime.runner == nil || runtime.state == nil || runtime.context == nil {
 		return
 	}
-	defer runtime.once.Do(func() { close(runtime.done) })
+	defer runtime.once.Do(func() {
+		_ = runtime.runner.Close(context.Background())
+		close(runtime.done)
+	})
 	for {
-		trap := runtime.jit.RunToInterrupt(runtime.state)
+		select {
+		case <-runtime.transport.done:
+			return
+		default:
+		}
+		trap := runtime.runner.RunToInterrupt(context.Background(), runtime.state)
 		switch trap {
 		case corecpu.Trap64Timer:
 			continue
@@ -229,8 +239,8 @@ func (g *guestTransport) pokeRuntimes() {
 	g.runtimeMu.Lock()
 	defer g.runtimeMu.Unlock()
 	for _, runtime := range g.runtimes {
-		if runtime != nil && runtime.jit != nil {
-			runtime.jit.Poke()
+		if runtime != nil && runtime.runner != nil {
+			runtime.runner.Poke()
 		}
 	}
 }
@@ -262,9 +272,14 @@ func (runtime *guest64Runtime) execve64(path string, argv, env []string) int64 {
 	runtime.context.Machine = runtime.state
 	runtime.context.Brk = uint64(loaded.Main.Space.Brk)
 	runtime.context.CloseOnExec()
-	runtime.jit = corecpu.NewJIT64(newMemory)
-	runtime.jit.OnSyscall64 = func(machine *corecpu.MachineState64) (bool, error) {
-		return runtime.dispatcher.Dispatch(machine)
+	oldRunner := runtime.runner
+	newRunner, runnerErr := newGuest64Runner(context.Background(), runtime.transport.useWasm, newMemory, runtime.dispatcher)
+	if runnerErr != nil {
+		return int64(coresyscall.ENOMEM)
+	}
+	runtime.runner = newRunner
+	if oldRunner != nil {
+		_ = oldRunner.Close(context.Background())
 	}
 	return 0
 }

@@ -30,6 +30,14 @@ func emitInstruction(inst machinecode.Instruction) []byte {
 		return emitMemoryLoad(inst)
 	case machinecode.OpStore64:
 		return emitMemoryStore(inst)
+	case machinecode.OpPush64:
+		return emitStackPush(inst)
+	case machinecode.OpPop64:
+		return emitStackPop(inst)
+	case machinecode.OpExtend64:
+		return emitExtend(inst)
+	case machinecode.OpLEA64:
+		return emitLEA(inst)
 	case machinecode.OpSyscall:
 		return emitSyscall()
 	default:
