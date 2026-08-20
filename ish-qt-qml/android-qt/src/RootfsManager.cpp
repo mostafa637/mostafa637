@@ -274,15 +274,24 @@ void RootfsManager::prepare()
         emit preparationError(error);
         return;
     }
-    QDir(m_rootPath).removeRecursively();
-    if (!QDir().rename(temporaryRoot, m_rootPath) || !isUsableRootfs(m_rootPath)) {
+    const QString dataPath = QDir(m_rootPath).filePath(QStringLiteral("data"));
+    const QString temporaryData = QDir(temporaryRoot).filePath(QStringLiteral("data"));
+    const QString temporaryDatabase = QDir(temporaryRoot).filePath(QStringLiteral("meta.db"));
+    const QString databasePath = QDir(m_rootPath).filePath(QStringLiteral("meta.db"));
+    QDir(dataPath).removeRecursively();
+    QFile::remove(databasePath);
+    if (!QDir().rename(temporaryData, dataPath) ||
+        !QFile::rename(temporaryDatabase, databasePath) ||
+        !isUsableRootfs(m_rootPath)) {
         qWarning() << "[ish-qt] FAILED to install a valid fakefs rootfs";
         QDir(temporaryRoot).removeRecursively();
-        QDir(m_rootPath).removeRecursively();
+        QDir(dataPath).removeRecursively();
+        QFile::remove(databasePath);
         QFile::remove(archivePath);
         emit preparationError(QStringLiteral("Unable to install a valid fakefs rootfs"));
         return;
     }
+    QDir(temporaryRoot).removeRecursively();
     QFile::remove(archivePath);
     refreshRepositoryState();
     setPrepared(true);
