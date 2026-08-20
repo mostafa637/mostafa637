@@ -35,7 +35,14 @@ func emitBody(insts []machinecode.Instruction) []byte {
 	for _, inst := range insts {
 		out = append(out, emitInstruction(inst)...)
 	}
-	out = append(out, 0x20, 0, 0x0b)
+	out = appendRegisterResults(out)
+	return append(out, 0x0b)
+}
+
+func appendRegisterResults(out []byte) []byte {
+	for i := byte(0); i < 16; i++ {
+		out = append(out, 0x20, i)
+	}
 	return out
 }
 

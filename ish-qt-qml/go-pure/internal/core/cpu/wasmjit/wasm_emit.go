@@ -45,7 +45,10 @@ func wasmType(imported bool) []byte {
 	for i := 0; i < 16; i++ {
 		out = append(out, 0x7e)
 	}
-	out = append(out, 1, 0x7e)
+	out = append(out, 16)
+	for i := 0; i < 16; i++ {
+		out = append(out, 0x7e)
+	}
 	if !imported {
 		return out
 	}

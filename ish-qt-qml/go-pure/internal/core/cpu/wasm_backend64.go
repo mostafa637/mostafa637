@@ -1,0 +1,60 @@
+package cpu
+
+import (
+	"context"
+	"fmt"
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/cpu/wasmjit"
+)
+
+type WasmBlock64 struct {
+	Host  *wasmjit.HostBlock
+	Start uint64
+	End   uint64
+}
+
+func (j *WasmJIT) CompileBlock64(ctx context.Context, memory *Memory64, start Address64, maxBytes uint64) (*WasmBlock64, error) {
+	block, err := CompileBlock64(memory, start, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	bytes, err := readBlock64(memory, block)
+	if err != nil {
+		return nil, err
+	}
+	host, err := j.Compile(ctx, block.Start, bytes)
+	if err != nil {
+		return nil, err
+	}
+	return &WasmBlock64{Host: host, Start: block.Start, End: block.End}, nil
+}
+
+func readBlock64(memory *Memory64, block *CompiledBlock64) ([]byte, error) {
+	if memory == nil || block == nil || block.End < block.Start {
+		return nil, ErrInvalid64Block
+	}
+	length := block.End - block.Start + 1
+	if length > uint64(^uint(0)>>1) {
+		return nil, fmt.Errorf("%w: block too large", ErrInvalid64Block)
+	}
+	bytes := make([]byte, int(length))
+	if err := memory.Read(Address64(block.Start), bytes); err != nil {
+		return nil, err
+	}
+	return bytes, nil
+}
+
+func (b *WasmBlock64) Run(ctx context.Context, state *MachineState64) (Flow64, error) {
+	if b == nil || b.Host == nil || state == nil {
+		return Flow64Stop, ErrInvalid64Block
+	}
+	regs, err := b.Host.RunRegs(ctx, state.Regs)
+	state.Regs = regs
+	return Flow64Stop, err
+}
+
+func (b *WasmBlock64) Close(ctx context.Context) error {
+	if b == nil || b.Host == nil {
+		return nil
+	}
+	return b.Host.Close(ctx)
+}

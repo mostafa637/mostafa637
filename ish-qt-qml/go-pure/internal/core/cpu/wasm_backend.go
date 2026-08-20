@@ -11,7 +11,11 @@ type WasmJIT struct {
 }
 
 func NewWasmJIT(ctx context.Context, root string) (*WasmJIT, error) {
-	compiler, err := wasmjit.NewCompiler(ctx, root+"/compiled")
+	return NewWasmJITWithSyscall(ctx, root, nil)
+}
+
+func NewWasmJITWithSyscall(ctx context.Context, root string, handler wasmjit.SyscallHandler) (*WasmJIT, error) {
+	compiler, err := wasmjit.NewCompilerWithSyscall(ctx, root+"/compiled", handler)
 	if err != nil {
 		return nil, err
 	}
