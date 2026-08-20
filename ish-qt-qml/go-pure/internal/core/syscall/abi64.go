@@ -146,6 +146,7 @@ const (
 	Sys64GetCWD    Number64 = 79
 	Sys64Chdir     Number64 = 80
 	Sys64Rename    Number64 = 82
+	Sys64Renameat2 Number64 = 316
 	Sys64Mkdir     Number64 = 83
 	Sys64Rmdir     Number64 = 84
 	Sys64Unlink    Number64 = 87
@@ -468,6 +469,7 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Statx, statx64Guest)
 	d.Register(Sys64Unlinkat, unlinkat64Guest)
 	d.Register(Sys64Renameat, renameat64Guest)
+	d.Register(Sys64Renameat2, renameat264)
 	d.Register(Sys64Linkat, linkat64Guest)
 	d.Register(Sys64Symlinkat, symlinkat64Guest)
 	d.Register(Sys64Prlimit64, prlimit64_64)

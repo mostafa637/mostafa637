@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -186,4 +187,132 @@ func (s *DB) TryCleanupInode(ctx context.Context, inode uint64) error {
 		return fmt.Errorf("storage: cleanup inode %d: %w", inode, err)
 	}
 	return nil
+}
+
+type pathInode struct {
+	path  string
+	inode uint64
+}
+
+// PathRenameNoReplace renames a path tree only when the destination path does
+// not already exist. The operation is serialized by the single SQLite store.
+func (s *DB) PathRenameNoReplace(ctx context.Context, src, dst string) error {
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		inode, err := pathGetInode(ctx, tx, dst)
+		if err != nil {
+			return err
+		}
+		if inode != 0 {
+			return fmt.Errorf("storage: rename %q -> %q: %w", src, dst, ErrExists)
+		}
+		entries, err := pathsUnderPrefix(ctx, tx, src)
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 {
+			return ErrNotFound
+		}
+		for _, entry := range entries {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM paths WHERE path = ?", []byte(entry.path)); err != nil {
+				return fmt.Errorf("storage: clear rename path %q: %w", entry.path, err)
+			}
+		}
+		for _, entry := range entries {
+			mapped := replacePathPrefix(entry.path, src, dst)
+			if _, err := tx.ExecContext(ctx, "INSERT INTO paths (path, inode) VALUES (?, ?)", []byte(mapped), entry.inode); err != nil {
+				return fmt.Errorf("storage: install rename path %q: %w", mapped, err)
+			}
+		}
+		return nil
+	})
+}
+
+func pathsUnderPrefix(ctx context.Context, tx *sql.Tx, prefix string) ([]pathInode, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT path, inode FROM paths")
+	if err != nil {
+		return nil, fmt.Errorf("storage: enumerate paths under %q: %w", prefix, err)
+	}
+	defer rows.Close()
+	var entries []pathInode
+	for rows.Next() {
+		var raw []byte
+		var inode uint64
+		if err := rows.Scan(&raw, &inode); err != nil {
+			return nil, fmt.Errorf("storage: scan path under %q: %w", prefix, err)
+		}
+		path := string(raw)
+		if pathHasPrefix(path, prefix) {
+			entries = append(entries, pathInode{path: path, inode: inode})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage: iterate paths under %q: %w", prefix, err)
+	}
+	return entries, nil
+}
+
+// PathExchange swaps two path trees while preserving each inode identity.
+func (s *DB) PathExchange(ctx context.Context, src, dst string) error {
+	var entries []pathInode
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, "SELECT path, inode FROM paths")
+		if err != nil {
+			return fmt.Errorf("storage: enumerate paths for exchange: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var raw []byte
+			var inode uint64
+			if err := rows.Scan(&raw, &inode); err != nil {
+				return fmt.Errorf("storage: scan path for exchange: %w", err)
+			}
+			path := string(raw)
+			if pathHasPrefix(path, src) || pathHasPrefix(path, dst) {
+				entries = append(entries, pathInode{path: path, inode: inode})
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("storage: iterate paths for exchange: %w", err)
+		}
+		if len(entries) == 0 {
+			return ErrNotFound
+		}
+		for _, entry := range entries {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM paths WHERE path = ?", []byte(entry.path)); err != nil {
+				return fmt.Errorf("storage: clear exchange path %q: %w", entry.path, err)
+			}
+		}
+		for _, entry := range entries {
+			mapped := entry.path
+			switch {
+			case pathHasPrefix(entry.path, src):
+				mapped = replacePathPrefix(entry.path, src, dst)
+			case pathHasPrefix(entry.path, dst):
+				mapped = replacePathPrefix(entry.path, dst, src)
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO paths (path, inode) VALUES (?, ?)", []byte(mapped), entry.inode); err != nil {
+				return fmt.Errorf("storage: install exchange path %q: %w", mapped, err)
+			}
+		}
+		return nil
+	})
+	return err
+}
+
+func pathHasPrefix(path, prefix string) bool {
+	if path == prefix {
+		return true
+	}
+	return strings.HasPrefix(path, prefix) && len(path) > len(prefix) && path[len(prefix)] == '/'
+}
+
+func replacePathPrefix(path, from, to string) string {
+	if path == from {
+		return to
+	}
+	suffix := path[len(from):]
+	if to == "/" {
+		return "/" + strings.TrimPrefix(suffix, "/")
+	}
+	return strings.TrimRight(to, "/") + suffix
 }

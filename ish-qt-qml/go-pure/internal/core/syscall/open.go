@@ -8,6 +8,7 @@ import (
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
 	corefd "github.com/mostafa637/mostafa637/go-pure/internal/core/fd"
 	corefs "github.com/mostafa637/mostafa637/go-pure/internal/core/fs"
+	corestorage "github.com/mostafa637/mostafa637/go-pure/internal/core/storage"
 )
 
 const (
@@ -81,7 +82,7 @@ func errnoForOpen(err error) int32 {
 		return EINVAL
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, corefs.ErrNotFound):
 		return ENOENT
-	case errors.Is(err, fs.ErrExist):
+	case errors.Is(err, fs.ErrExist), errors.Is(err, corestorage.ErrExists):
 		return EEXIST
 	case errors.Is(err, fs.ErrPermission), errors.Is(err, os.ErrPermission):
 		return EACCES
