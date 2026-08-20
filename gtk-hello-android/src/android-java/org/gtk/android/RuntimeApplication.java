@@ -26,39 +26,53 @@ import android.content.pm.PackageManager;
 import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 
-import org.gtk.android.SystemFilesystem;
-
 import java.util.Objects;
 
 public class RuntimeApplication extends Application {
-	static final String LIBNAME_KEY = "gtk.android.lib_name";
+    static final String LIBNAME_KEY = "gtk.android.lib_name";
 
-	static {
-		System.loadLibrary("gtk-4");
-	}
+    private boolean runtimeStarted = false;
 
-	@Override
-	public void onCreate() {
-		super.onCreate();
-		SystemFilesystem.writeResources(this);
-		startRuntime(System.mapLibraryName(getApplicationLibrary()));
-	}
+    static {
+        System.loadLibrary("gtk-4");
+    }
 
-	@Keep
-	protected native void startRuntime(String applicationLibrary);
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        // Resource extraction is safe during Application startup. The native
+        // GTK runtime is started after the first Activity has been created.
+        SystemFilesystem.writeResources(this);
+    }
 
-	protected @NonNull String getApplicationLibrary() {
-		try {
-			ApplicationInfo info = getPackageManager().getApplicationInfo(
-					getPackageName(),
-					PackageManager.GET_META_DATA
-			);
-			return Objects.requireNonNull(info.metaData.getString(LIBNAME_KEY));
-		} catch (Exception err) {
-			throw new RuntimeException(
-					String.format("Unable to retrieve \"%s\" key from application manifest", LIBNAME_KEY),
-					err
-			);
-		}
-	}
+    /**
+     * Starts GTK after an Activity exists. GTK's Android bootstrap waits for
+     * the GLib application to become available; doing that from
+     * Application.onCreate can block Android's launch path and cause an ANR.
+     */
+    @Keep
+    public synchronized void startRuntimeFromActivity() {
+        if (runtimeStarted)
+            return;
+        runtimeStarted = true;
+        startRuntime(System.mapLibraryName(getApplicationLibrary()));
+    }
+
+    @Keep
+    protected native void startRuntime(String applicationLibrary);
+
+    protected @NonNull String getApplicationLibrary() {
+        try {
+            ApplicationInfo info = getPackageManager().getApplicationInfo(
+                    getPackageName(),
+                    PackageManager.GET_META_DATA
+            );
+            return Objects.requireNonNull(info.metaData.getString(LIBNAME_KEY));
+        } catch (Exception err) {
+            throw new RuntimeException(
+                    String.format("Unable to retrieve \"%s\" key from application manifest", LIBNAME_KEY),
+                    err
+            );
+        }
+    }
 }

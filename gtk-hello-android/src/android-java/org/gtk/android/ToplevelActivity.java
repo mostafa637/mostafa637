@@ -457,36 +457,41 @@ public class ToplevelActivity extends Activity {
 			savedInstanceState != null ? savedInstanceState.getLong(toplevelIdentifierKey, 0) : 0L,
 			getIntent().getLongExtra(toplevelIdentifierKey, 0),
 		};
-		// Do not block Android's UI thread while GTK creates the first surface.
-		// GTK may post attachToplevelSurface() back to the UI thread; using
-		// blockForMain here can leave the splash screen in DRAW_PENDING and
-		// deadlock the first presentation on some Android versions.
-		GlibContext.runOnMain(() -> {
-			for (long identifier : possibleIdentifiers) {
-				if (identifier == 0)
-					continue;
 
-				try {
-					bindNative(identifier);
-					return;
-				} catch (UnregisteredSurfaceException e) {
-					this.nativeIdentifier = 0;
+		// Start the native GTK runtime only after the Activity has a frame.
+		// Starting it from Application.onCreate can keep Android's launch path
+		// blocked while GTK waits for its GLib application and surface.
+		getWindow().getDecorView().postOnAnimation(() -> {
+			RuntimeApplication runtime = (RuntimeApplication) getApplication();
+			runtime.startRuntimeFromActivity();
+
+			GlibContext.runOnMain(() -> {
+				for (long identifier : possibleIdentifiers) {
+					if (identifier == 0)
+						continue;
+
+					try {
+						bindNative(identifier);
+						return;
+					} catch (UnregisteredSurfaceException e) {
+						this.nativeIdentifier = 0;
+					}
 				}
-			}
 
-			GdkContext._set_latest_activity(this);
+				GdkContext._set_latest_activity(this);
 
-			Intent intent = getIntent();
-			if (intent.getData() != null) {
-				String hint = "";
-				if (intent.getAction() != null) {
-					String[] action = intent.getAction().split("\\\\.");
-					hint = action[action.length - 1].toLowerCase();
+				Intent intent = getIntent();
+				if (intent.getData() != null) {
+					String hint = "";
+					if (intent.getAction() != null) {
+						String[] action = intent.getAction().split("\\\\.");
+						hint = action[action.length - 1].toLowerCase();
+					}
+					GdkContext.open(intent.getData(), hint);
+				} else {
+					GdkContext.activate();
 				}
-				GdkContext.open(intent.getData(), hint);
-			} else {
-				GdkContext.activate();
-			}
+			});
 		});
 	}
 
