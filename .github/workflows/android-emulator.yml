@@ -68,7 +68,8 @@ jobs:
             sleep 2
             adb shell uiautomator dump /sdcard/gtk-window.xml >/dev/null 2>&1 || true
             adb shell cat /sdcard/gtk-window.xml 2>/dev/null | grep -Eqi 'responding|system.?ui' && adb shell input tap 540 1060 || true
-            adb shell input keyevent KEYCODE_BACK || true
+            # Do not send BACK here: if the final dialog has already been
+            # dismissed, BACK would finish the GTK Activity and show launcher.
             sleep 8
             adb logcat -d -v threadtime > gtk-hello-android/logcat.txt || true
             adb shell dumpsys window windows > gtk-hello-android/windows.txt || true
