@@ -14,6 +14,7 @@ jobs:
   emulator-test:
     name: Install and run GTK APK
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
@@ -22,8 +23,8 @@ jobs:
       - name: Run APK on Android Emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
-          target: default
+          api-level: 35
+          target: google_apis
           arch: x86_64
           profile: pixel_2
           force-avd-creation: true
@@ -36,6 +37,7 @@ jobs:
           script: |
             set -e
             adb wait-for-device
+            adb shell getprop sys.boot_completed | grep -q 1
             adb install -r gtk-hello-android/gtk-hello-android-release.apk
             adb shell pm clear com.example.gtkhelloworld || true
             adb shell am force-stop com.example.gtkhelloworld || true
@@ -48,7 +50,7 @@ jobs:
             adb logcat -d -v threadtime > gtk-hello-android/logcat.txt || true
             adb exec-out screencap -p > gtk-hello-android/emulator-screen.png || true
             adb shell ps -A | grep -q 'com.example.gtkhelloworld'
-            adb shell dumpsys activity activities | grep -q 'com.example.gtkhelloworld'
+            adb shell dumpsys activity activities | grep -q 'org.gtk.android.ToplevelActivity'
 
       - name: Upload APK and emulator screenshot
         if: always()
