@@ -224,3 +224,157 @@ func dynamicString64(r io.ReaderAt, size int64, programs []Segment64, strtab, st
 	}
 	return "", fmt.Errorf("string table is not in a PT_LOAD file range")
 }
+
+func parseDynamicSymbols64(r io.ReaderAt, size int64, programs []Segment64, info *DynamicInfo64) ([]Symbol64, error) {
+	if r == nil || size <= 0 || info == nil || info.SymTab == 0 {
+		return nil, nil
+	}
+	entrySize := info.SymEnt
+	if entrySize == 0 {
+		entrySize = 24
+	}
+	if entrySize != 24 {
+		return nil, fmt.Errorf("invalid DT_SYMENT %d", entrySize)
+	}
+
+	count := uint64(0)
+	if info.SymSz != 0 {
+		if info.SymSz%entrySize != 0 {
+			return nil, fmt.Errorf("DT_SYMSZ is not aligned to DT_SYMENT")
+		}
+		count = info.SymSz / entrySize
+	} else if info.Hash != 0 {
+		var hash [8]byte
+		if err := readVirtual64(r, size, programs, info.Hash, hash[:]); err != nil {
+			return nil, fmt.Errorf("read DT_HASH: %w", err)
+		}
+		count = uint64(binary.LittleEndian.Uint32(hash[4:]))
+	} else if info.GNUHash != 0 {
+		var header [16]byte
+		if err := readVirtual64(r, size, programs, info.GNUHash, header[:]); err != nil {
+			return nil, fmt.Errorf("read DT_GNU_HASH: %w", err)
+		}
+		nbuckets := uint64(binary.LittleEndian.Uint32(header[0:4]))
+		symOffset := uint64(binary.LittleEndian.Uint32(header[4:8]))
+		bloomSize := uint64(binary.LittleEndian.Uint32(header[8:12]))
+		if bloomSize > math.MaxUint64/8 || nbuckets > math.MaxUint64/4 {
+			return nil, fmt.Errorf("DT_GNU_HASH dimensions overflow")
+		}
+		bucketsOffset, ok := addNoOverflow64ELF(info.GNUHash, 16+bloomSize*8)
+		if !ok {
+			return nil, fmt.Errorf("DT_GNU_HASH bucket address overflows")
+		}
+		chainOffset, ok := addNoOverflow64ELF(bucketsOffset, nbuckets*4)
+		if !ok {
+			return nil, fmt.Errorf("DT_GNU_HASH chain address overflows")
+		}
+		for bucketIndex := uint64(0); bucketIndex < nbuckets; bucketIndex++ {
+			var bucketRaw [4]byte
+			bucketAddress, ok := addNoOverflow64ELF(bucketsOffset, bucketIndex*4)
+			if !ok {
+				return nil, fmt.Errorf("DT_GNU_HASH bucket address overflows")
+			}
+			if err := readVirtual64(r, size, programs, bucketAddress, bucketRaw[:]); err != nil {
+				return nil, fmt.Errorf("read DT_GNU_HASH bucket: %w", err)
+			}
+			index := uint64(binary.LittleEndian.Uint32(bucketRaw[:]))
+			if index < symOffset {
+				continue
+			}
+			for {
+				if index == math.MaxUint64 {
+					return nil, fmt.Errorf("DT_GNU_HASH symbol index overflow")
+				}
+				chainIndex := index - symOffset
+				chainAddress, ok := addNoOverflow64ELF(chainOffset, chainIndex*4)
+				if !ok {
+					return nil, fmt.Errorf("DT_GNU_HASH chain address overflows")
+				}
+				var chainRaw [4]byte
+				if err := readVirtual64(r, size, programs, chainAddress, chainRaw[:]); err != nil {
+					return nil, fmt.Errorf("read DT_GNU_HASH chain: %w", err)
+				}
+				if index+1 > count {
+					count = index + 1
+				}
+				if binary.LittleEndian.Uint32(chainRaw[:])&1 != 0 {
+					break
+				}
+				index++
+			}
+		}
+	}
+	if count == 0 {
+		return nil, nil
+	}
+	if count > uint64(maxInt())/entrySize {
+		return nil, fmt.Errorf("dynamic symbol table is too large")
+	}
+	bytesCount := count * entrySize
+	data := make([]byte, int(bytesCount))
+	if err := readVirtual64(r, size, programs, info.SymTab, data); err != nil {
+		return nil, fmt.Errorf("read dynamic symbols: %w", err)
+	}
+	symbols := make([]Symbol64, 0, int(count))
+	for index := uint64(0); index < count; index++ {
+		offset := int(index * entrySize)
+		nameOffset := uint64(binary.LittleEndian.Uint32(data[offset : offset+4]))
+		value := binary.LittleEndian.Uint64(data[offset+8 : offset+16])
+		symbolSize := binary.LittleEndian.Uint64(data[offset+16 : offset+24])
+		name := ""
+		if nameOffset != 0 {
+			if info.StrTab == 0 || info.StrSz == 0 {
+				return nil, fmt.Errorf("symbol %d has no valid string table", index)
+			}
+			var err error
+			name, err = dynamicString64(r, size, programs, info.StrTab, info.StrSz, nameOffset)
+			if err != nil {
+				return nil, fmt.Errorf("read symbol %d name: %w", index, err)
+			}
+		}
+		symbols = append(symbols, Symbol64{
+			Name: name, Value: value, Size: symbolSize,
+			Info: data[offset+4], Other: data[offset+5],
+			Section: binary.LittleEndian.Uint16(data[offset+6 : offset+8]),
+		})
+	}
+	return symbols, nil
+}
+
+func readVirtual64(r io.ReaderAt, size int64, programs []Segment64, address uint64, data []byte) error {
+	if r == nil || size <= 0 {
+		return fmt.Errorf("invalid reader or image size")
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	if uint64(len(data)) > uint64(maxInt()) {
+		return fmt.Errorf("virtual read is too large")
+	}
+	for _, program := range programs {
+		if !program.Loadable() || address < program.Vaddr {
+			continue
+		}
+		delta := address - program.Vaddr
+		if delta > program.FileSize || uint64(len(data)) > program.FileSize-delta {
+			continue
+		}
+		if program.Offset > math.MaxUint64-delta {
+			return fmt.Errorf("virtual file offset overflows")
+		}
+		fileOffset := program.Offset + delta
+		if fileOffset > uint64(size) || uint64(len(data)) > uint64(size)-fileOffset {
+			return fmt.Errorf("virtual read exceeds image")
+		}
+		_, err := io.ReadFull(io.NewSectionReader(r, int64(fileOffset), int64(len(data))), data)
+		return err
+	}
+	return fmt.Errorf("virtual address %#x is not file-backed", address)
+}
+
+func addNoOverflow64ELF(left, right uint64) (uint64, bool) {
+	if right > math.MaxUint64-left {
+		return 0, false
+	}
+	return left + right, true
+}

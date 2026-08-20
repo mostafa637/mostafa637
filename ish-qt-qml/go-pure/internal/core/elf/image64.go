@@ -39,6 +39,15 @@ type Segment64 struct {
 	Align    uint64
 }
 
+type Symbol64 struct {
+	Name    string
+	Value   uint64
+	Size    uint64
+	Info    byte
+	Other   byte
+	Section uint16
+}
+
 func (s Segment64) Loadable() bool   { return s.Type == elf.PT_LOAD }
 func (s Segment64) Readable() bool   { return s.Flags&elf.PF_R != 0 }
 func (s Segment64) Writable() bool   { return s.Flags&elf.PF_W != 0 }
@@ -72,11 +81,12 @@ func (s Segment64) PageEnd() (uint64, error) {
 }
 
 type Image64 struct {
-	Header   Header64
-	Segments []Segment64
-	Interp   string
-	Dynamic  *DynamicInfo64
-	TLS      *Segment64
+	Header         Header64
+	Segments       []Segment64
+	Interp         string
+	Dynamic        *DynamicInfo64
+	DynamicSymbols []Symbol64
+	TLS            *Segment64
 }
 
 func (i *Image64) LoadSegments() []Segment64 {
@@ -175,6 +185,14 @@ func Parse64(r io.ReaderAt, size int64) (*Image64, error) {
 	}
 
 	image := &Image64{Header: Header64{Type: file.Type, Machine: file.Machine, Entry: file.Entry, ProgramOff: programOff, ProgramNum: programNum, ProgramEnt: programEnt}, Segments: make([]Segment64, 0, len(file.Progs))}
+	if symbols, symbolErr := file.DynamicSymbols(); symbolErr == nil {
+		image.DynamicSymbols = make([]Symbol64, 0, len(symbols))
+		for _, symbol := range symbols {
+			image.DynamicSymbols = append(image.DynamicSymbols, Symbol64{
+				Name: symbol.Name, Value: symbol.Value, Size: symbol.Size, Info: symbol.Info, Other: symbol.Other, Section: uint16(symbol.Section),
+			})
+		}
+	}
 	for _, program := range file.Progs {
 		segment := Segment64{Type: program.Type, Offset: program.Off, Vaddr: program.Vaddr, Paddr: program.Paddr, FileSize: program.Filesz, MemSize: program.Memsz, Flags: program.Flags, Align: program.Align}
 		if segment.Loadable() {
@@ -218,10 +236,18 @@ func Parse64(r io.ReaderAt, size int64) (*Image64, error) {
 	if len(image.LoadSegments()) == 0 {
 		return nil, fmt.Errorf("%w: no PT_LOAD", ErrInvalidImage64)
 	}
-	if dynamic, dynamicErr := parseDynamic64(r, size, image.Segments); dynamicErr != nil {
+	dynamic, dynamicErr := parseDynamic64(r, size, image.Segments)
+	if dynamicErr != nil {
 		return nil, fmt.Errorf("%w: dynamic: %v", ErrInvalidImage64, dynamicErr)
-	} else {
-		image.Dynamic = dynamic
+	}
+	image.Dynamic = dynamic
+	if len(image.DynamicSymbols) == 0 && dynamic != nil && dynamic.SymTab != 0 {
+		symbols, symbolErr := parseDynamicSymbols64(r, size, image.Segments, dynamic)
+		if symbolErr != nil {
+			return nil, fmt.Errorf("%w: dynamic symbols: %v", ErrInvalidImage64, symbolErr)
+		}
+		image.DynamicSymbols = symbols
 	}
 	return image, nil
+
 }

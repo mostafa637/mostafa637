@@ -8,12 +8,10 @@ import (
 	"strings"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
-	coreelf "github.com/mostafa637/mostafa637/go-pure/internal/core/elf"
 	corefd "github.com/mostafa637/mostafa637/go-pure/internal/core/fd"
 	corefs "github.com/mostafa637/mostafa637/go-pure/internal/core/fs"
 
 	corekernel "github.com/mostafa637/mostafa637/go-pure/internal/core/kernel"
-	coreloader "github.com/mostafa637/mostafa637/go-pure/internal/core/loader"
 	coresyscall "github.com/mostafa637/mostafa637/go-pure/internal/core/syscall"
 )
 
@@ -49,37 +47,23 @@ func (g *guestTransport) start64(ctx context.Context, process *corekernel.Proces
 	writer := &guestOutput{chunks: g.output, done: g.done}
 
 	memory := corecpu.NewMemory64()
-	image, err := coreelf.Parse64(bytesReader(data), int64(len(data)))
-	if err != nil {
-		return err
-	}
-	var bias corecpu.Address64
-	if image.Header.Type == elf.ET_DYN {
-		bias = corecpu.Address64(0x0000000000400000)
-	}
-	space, err := coreloader.Load64(bytesReader(data), int64(len(data)), image, memory, bias)
-	if err != nil {
-		return err
-	}
-	stack := coreloader.DefaultStackConfig64()
-	stack.Argv = []string{g.elfPath}
-	stack.Env = []string{"PATH=/bin:/usr/bin"}
-	stack.ExecFilename = g.elfPath
-	layout, err := coreloader.BuildStack64ForImage(memory, space, stack)
+	loaded, layout, err := loadGuestImage64(fake, g.elfPath, data, []string{g.elfPath}, []string{"PATH=/bin:/usr/bin"}, memory)
 	if err != nil {
 		return err
 	}
 
 	state := corecpu.NewMachineState64(memory)
-	state.RIP = uint64(space.Entry)
+	state.RIP = uint64(loaded.Entry)
 	state.Set(corecpu.RSP, uint64(layout.SP))
 	state.RFLAGS = corecpu.Flag64IF
+	attachTLS64(state, loaded)
 
 	sysContext := coresyscall.NewContext64(memory)
 	sysContext.FS = fake
 	sysContext.PID = uint64(process.PID)
 	sysContext.TID = uint64(process.PID)
-	sysContext.Brk = uint64(space.Brk)
+	sysContext.Machine = state
+	sysContext.Brk = uint64(loaded.Main.Space.Brk)
 	if err := sysContext.InstallFile(0, &corefd.File{Reader: reader}); err != nil {
 		return err
 	}
@@ -101,35 +85,23 @@ func (g *guestTransport) start64(ctx context.Context, process *corekernel.Proces
 		if readErr != nil {
 			return int64(coresyscall.ENOENT)
 		}
-		newImage, parseErr := coreelf.Parse64(bytesReader(imageData), int64(len(imageData)))
-		if parseErr != nil {
-			return int64(coresyscall.EINVAL)
-		}
 		newMemory := corecpu.NewMemory64()
-		var newBias corecpu.Address64
-		if newImage.Header.Type == elf.ET_DYN {
-			newBias = corecpu.Address64(0x0000000000400000)
-		}
-		newSpace, loadErr := coreloader.Load64(bytesReader(imageData), int64(len(imageData)), newImage, newMemory, newBias)
+		newLoaded, newLayout, loadErr := loadGuestImage64(fake, resolved, imageData, argv, env, newMemory)
 		if loadErr != nil {
-			return int64(coresyscall.EINVAL)
-		}
-		newStack := coreloader.DefaultStackConfig64()
-		newStack.Argv = append([]string(nil), argv...)
-		newStack.Env = append([]string(nil), env...)
-		newStack.ExecFilename = resolved
-		newLayout, stackErr := coreloader.BuildStack64ForImage(newMemory, newSpace, newStack)
-		if stackErr != nil {
 			return int64(coresyscall.EINVAL)
 		}
 
 		newState := corecpu.NewMachineState64(newMemory)
-		newState.RIP = uint64(newSpace.Entry)
+		newState.RIP = uint64(newLoaded.Entry)
 		newState.Set(corecpu.RSP, uint64(newLayout.SP))
 		newState.RFLAGS = corecpu.Flag64IF
+		attachTLS64(newState, newLoaded)
+
 		*state = *newState
 		sysContext.Memory = newMemory
-		sysContext.Brk = uint64(newSpace.Brk)
+		sysContext.Machine = state
+		sysContext.Brk = uint64(newLoaded.Main.Space.Brk)
+
 		sysContext.CloseOnExec()
 		jit = corecpu.NewJIT64(newMemory)
 		jit.OnSyscall64 = func(machine *corecpu.MachineState64) (bool, error) {

@@ -1,13 +1,10 @@
 package session
 
 import (
-	"debug/elf"
 	"encoding/binary"
 	"sync"
 
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
-	coreelf "github.com/mostafa637/mostafa637/go-pure/internal/core/elf"
-	coreloader "github.com/mostafa637/mostafa637/go-pure/internal/core/loader"
 	coresyscall "github.com/mostafa637/mostafa637/go-pure/internal/core/syscall"
 )
 
@@ -250,35 +247,20 @@ func (runtime *guest64Runtime) execve64(path string, argv, env []string) int64 {
 	if readErr != nil {
 		return int64(coresyscall.ENOENT)
 	}
-	image, parseErr := coreelf.Parse64(bytesReader(imageData), int64(len(imageData)))
-	if parseErr != nil {
-		return int64(coresyscall.EINVAL)
-	}
 	newMemory := corecpu.NewMemory64()
-	var bias corecpu.Address64
-	if image.Header.Type == elf.ET_DYN {
-		bias = corecpu.Address64(0x0000000000400000)
-	}
-	space, loadErr := coreloader.Load64(bytesReader(imageData), int64(len(imageData)), image, newMemory, bias)
+	loaded, layout, loadErr := loadGuestImage64(runtime.context.FS, resolved, imageData, argv, env, newMemory)
 	if loadErr != nil {
 		return int64(coresyscall.EINVAL)
 	}
-	stack := coreloader.DefaultStackConfig64()
-	stack.Argv = append([]string(nil), argv...)
-	stack.Env = append([]string(nil), env...)
-	stack.ExecFilename = resolved
-	layout, stackErr := coreloader.BuildStack64ForImage(newMemory, space, stack)
-	if stackErr != nil {
-		return int64(coresyscall.EINVAL)
-	}
 	newState := corecpu.NewMachineState64(newMemory)
-	newState.RIP = uint64(space.Entry)
+	newState.RIP = uint64(loaded.Entry)
 	newState.Set(corecpu.RSP, uint64(layout.SP))
 	newState.RFLAGS = corecpu.Flag64IF
+	attachTLS64(newState, loaded)
 	*runtime.state = *newState
 	runtime.context.Memory = newMemory
 	runtime.context.Machine = runtime.state
-	runtime.context.Brk = uint64(space.Brk)
+	runtime.context.Brk = uint64(loaded.Main.Space.Brk)
 	runtime.context.CloseOnExec()
 	runtime.jit = corecpu.NewJIT64(newMemory)
 	runtime.jit.OnSyscall64 = func(machine *corecpu.MachineState64) (bool, error) {
