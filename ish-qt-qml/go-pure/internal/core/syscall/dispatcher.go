@@ -122,6 +122,7 @@ const (
 	ELOOP        int32 = -40
 	ENODATA      int32 = -61
 	ERANGE       int32 = -34
+	EOVERFLOW    int32 = -75
 )
 
 const (

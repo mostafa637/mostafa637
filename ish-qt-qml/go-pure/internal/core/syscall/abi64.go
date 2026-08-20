@@ -65,12 +65,14 @@ const (
 	Sys64ClockNanosleep Number64 = 230
 	Sys64Pause          Number64 = 34
 
-	Sys64GetPID        Number64 = 39
-	Sys64Sendfile      Number64 = 40
-	Sys64Tee           Number64 = 276
-	Sys64Vmsplice      Number64 = 278
-	Sys64Fallocate     Number64 = 285
-	Sys64CopyFileRange Number64 = 326
+	Sys64GetPID         Number64 = 39
+	Sys64Sendfile       Number64 = 40
+	Sys64Tee            Number64 = 276
+	Sys64Vmsplice       Number64 = 278
+	Sys64Fallocate      Number64 = 285
+	Sys64NameToHandleAt Number64 = 303
+	Sys64OpenByHandleAt Number64 = 304
+	Sys64CopyFileRange  Number64 = 326
 
 	Sys64Chown  Number64 = 92
 	Sys64Fchown Number64 = 93
@@ -458,6 +460,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Tee, tee64)
 	d.Register(Sys64Vmsplice, vmsplice64)
 	d.Register(Sys64Fallocate, fallocate64)
+	d.Register(Sys64NameToHandleAt, nameToHandleAt64)
+	d.Register(Sys64OpenByHandleAt, openByHandleAt64)
 	d.Register(Sys64Pipe2, pipe264)
 	d.Register(Sys64Close, close64)
 	d.Register(Sys64Dup, dup64)
