@@ -146,11 +146,11 @@ QString sqliteError(sqlite3 *db, const QString &fallback)
     return fallback;
 }
 
-bool isUsableRootfs(const QString &dataPath)
+bool isUsableRootfs(const QString &basePath)
 {
-    const QFileInfo dataInfo(dataPath);
-    const QString databasePath = QDir(dataInfo.absolutePath()).filePath(QStringLiteral("meta.db"));
-    if (!dataInfo.isDir() || !QFileInfo(databasePath).isFile())
+    const QString dataPath = QDir(basePath).filePath(QStringLiteral("data"));
+    const QString databasePath = QDir(basePath).filePath(QStringLiteral("meta.db"));
+    if (!QFileInfo(dataPath).isDir() || !QFileInfo(databasePath).isFile())
         return false;
 
     sqlite3 *db = nullptr;
@@ -210,9 +210,9 @@ RootfsManager::RootfsManager(QObject *parent)
     // replacing its basename with "meta.db" and asserts that the basename is
     // exactly "data" (fakefs_mount in upstream fs/fake.c). Mirror iSH iOS, whose
     // root directory is itself named "data" (e.g. ~/Documents/data); otherwise
-    // the kernel assertion fails and aborts the process.
-    m_rootPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
-                     .filePath(QStringLiteral("data"));
+    // the kernel assertion fails and aborts the process.  The core Linux
+    // fakefs then appends /data and /meta.db to this base path.
+    m_rootPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     refreshRepositoryState();
 }
 
@@ -230,6 +230,11 @@ void RootfsManager::prepare()
     }
     QDir().mkpath(appData);
     QDir().mkpath(m_rootPath);
+    if (isUsableRootfs(m_rootPath)) {
+        setPrepared(true);
+        emit progressChanged(100, QStringLiteral("Rootfs is ready"));
+        return;
+    }
 
     const QString archivePath = QDir(appData).filePath(QStringLiteral("root.tar.gz"));
     QFile resource(QStringLiteral(":/ish-assets/rootfs/root.tar.gz"));
@@ -269,24 +274,15 @@ void RootfsManager::prepare()
         emit preparationError(error);
         return;
     }
-    const QString appDataPath = QFileInfo(m_rootPath).absolutePath();
-    const QString temporaryData = QDir(temporaryRoot).filePath(QStringLiteral("data"));
-    const QString temporaryDatabase = QDir(temporaryRoot).filePath(QStringLiteral("meta.db"));
-    const QString databasePath = QDir(appDataPath).filePath(QStringLiteral("meta.db"));
     QDir(m_rootPath).removeRecursively();
-    QFile::remove(databasePath);
-    if (!QDir().rename(temporaryData, m_rootPath) ||
-        !QFile::rename(temporaryDatabase, databasePath) ||
-        !isUsableRootfs(m_rootPath)) {
+    if (!QDir().rename(temporaryRoot, m_rootPath) || !isUsableRootfs(m_rootPath)) {
         qWarning() << "[ish-qt] FAILED to install a valid fakefs rootfs";
         QDir(temporaryRoot).removeRecursively();
         QDir(m_rootPath).removeRecursively();
-        QFile::remove(databasePath);
         QFile::remove(archivePath);
         emit preparationError(QStringLiteral("Unable to install a valid fakefs rootfs"));
         return;
     }
-    QDir(temporaryRoot).removeRecursively();
     QFile::remove(archivePath);
     refreshRepositoryState();
     setPrepared(true);
