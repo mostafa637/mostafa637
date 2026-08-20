@@ -25,6 +25,8 @@ const (
 	OpPop64
 	OpLEA64
 	OpExtend64
+	OpTestImm
+	OpTestReg
 )
 
 type Instruction struct {

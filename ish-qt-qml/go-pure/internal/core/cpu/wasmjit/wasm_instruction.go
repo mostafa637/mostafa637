@@ -26,6 +26,10 @@ func emitInstruction(inst machinecode.Instruction) []byte {
 		return emitLogicImmediate(inst, 0x85)
 	case machinecode.OpCMPImm:
 		return emitCompare(inst)
+	case machinecode.OpTestImm:
+		return emitTestImmediate(inst)
+	case machinecode.OpTestReg:
+		return emitTestRegister(inst)
 	case machinecode.OpLoad64:
 		return emitMemoryLoad(inst)
 	case machinecode.OpStore64:

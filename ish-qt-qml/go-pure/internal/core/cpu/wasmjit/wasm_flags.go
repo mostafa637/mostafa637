@@ -39,10 +39,14 @@ func emitRegisterFlags(inst machinecode.Instruction, sub bool) []byte {
 }
 
 func emitLogicFlags(inst machinecode.Instruction) []byte {
+	return emitLogicResultFlags(inst.Dst)
+}
+
+func emitLogicResultFlags(result int16) []byte {
 	out := clearFlags(nil, logicMask)
-	out = appendFlag(out, flagZero(localCode(inst.Dst)), 6)
-	out = appendFlag(out, flagSign(localCode(inst.Dst)), 7)
-	return appendFlag(out, flagParity(localCode(inst.Dst)), 2)
+	out = appendFlag(out, flagZero(localCode(result)), 6)
+	out = appendFlag(out, flagSign(localCode(result)), 7)
+	return appendFlag(out, flagParity(localCode(result)), 2)
 }
 
 func emitPackedFlags(op1, op2, result []byte, sub bool, mask uint64) []byte {
