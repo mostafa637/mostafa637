@@ -448,3 +448,239 @@ func (b *seekBuffer) Seek(offset int64, whence int) (int64, error) {
 	b.pos = position
 	return position, nil
 }
+
+func TestDispatcher64TeeDoesNotConsumeSource(t *testing.T) {
+	memory := corecpu.NewMemory64()
+	const area corecpu.Address64 = 0x12000
+	if err := memory.Map(area, 2*corecpu.Page64Size, corecpu.PRead|corecpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	ctx := NewContext64(memory)
+	dispatcher := NewDispatcher64(ctx)
+	state := corecpu.NewMachineState64(memory)
+	readIn, writeIn := makeABI64PipePair(t, memory, dispatcher, state, area)
+	readOut, writeOut := makeABI64PipePair(t, memory, dispatcher, state, area+0x100)
+	if err := memory.Write(area+0x200, []byte("tee-data")); err != nil {
+		t.Fatal(err)
+	}
+
+	state.Set(corecpu.RAX, uint64(Sys64Write))
+	state.Set(corecpu.RDI, writeIn)
+	state.Set(corecpu.RSI, uint64(area+0x200))
+	state.Set(corecpu.RDX, 8)
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 8 {
+		t.Fatalf("tee source write: err=%v rax=%d", err, state.Get(corecpu.RAX))
+	}
+
+	state.Set(corecpu.RAX, uint64(Sys64Tee))
+	state.Set(corecpu.RDI, readIn)
+	state.Set(corecpu.RSI, writeOut)
+	state.Set(corecpu.RDX, 0)
+	state.Set(corecpu.R10, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 0 {
+		t.Fatalf("zero-count tee: err=%v rax=%d", err, state.Get(corecpu.RAX))
+	}
+	state.Set(corecpu.RAX, uint64(Sys64Tee))
+	state.Set(corecpu.RDX, 8)
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 8 {
+		t.Fatalf("tee: err=%v rax=%d", err, state.Get(corecpu.RAX))
+	}
+
+	state.Set(corecpu.RAX, uint64(Sys64Read))
+	state.Set(corecpu.RDI, readIn)
+	state.Set(corecpu.RSI, uint64(area+0x300))
+	state.Set(corecpu.RDX, 8)
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 8 {
+		t.Fatalf("tee source read: err=%v rax=%d", err, state.Get(corecpu.RAX))
+	}
+	state.Set(corecpu.RAX, uint64(Sys64Read))
+	state.Set(corecpu.RDI, readOut)
+	state.Set(corecpu.RSI, uint64(area+0x400))
+	state.Set(corecpu.RDX, 8)
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 8 {
+		t.Fatalf("tee destination read: err=%v rax=%d", err, state.Get(corecpu.RAX))
+	}
+	var sourceData, destinationData [8]byte
+	if err := memory.Read(area+0x300, sourceData[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Read(area+0x400, destinationData[:]); err != nil {
+		t.Fatal(err)
+	}
+	if string(sourceData[:]) != "tee-data" || string(destinationData[:]) != "tee-data" {
+		t.Fatalf("tee data source=%q destination=%q", sourceData[:], destinationData[:])
+	}
+
+	state.Set(corecpu.RAX, uint64(Sys64Tee))
+	state.Set(corecpu.RDI, readIn)
+	state.Set(corecpu.RSI, writeOut)
+	state.Set(corecpu.RDX, 1)
+	state.Set(corecpu.R10, 1<<20)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(EINVAL) {
+		t.Fatalf("tee invalid flags: err=%v rax=%d, want EINVAL", err, int64(state.Get(corecpu.RAX)))
+	}
+}
+
+func TestDispatcher64TeeNonblockEmptyPipe(t *testing.T) {
+	memory := corecpu.NewMemory64()
+	const area corecpu.Address64 = 0x14000
+	if err := memory.Map(area, corecpu.Page64Size, corecpu.PRead|corecpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	ctx := NewContext64(memory)
+	dispatcher := NewDispatcher64(ctx)
+	state := corecpu.NewMachineState64(memory)
+	state.Set(corecpu.RAX, uint64(Sys64Pipe2))
+	state.Set(corecpu.RDI, uint64(area))
+	state.Set(corecpu.RSI, uint64(pipe2Nonblock))
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 0 {
+		t.Fatalf("nonblock source pipe: err=%v rax=%d", err, state.Get(corecpu.RAX))
+	}
+	var sourcePair [8]byte
+	if err := memory.Read(area, sourcePair[:]); err != nil {
+		t.Fatal(err)
+	}
+	sourceRead := uint64(binary.LittleEndian.Uint32(sourcePair[:4]))
+	_, destinationWrite := makeABI64PipePair(t, memory, dispatcher, state, area+0x100)
+	state.Set(corecpu.RAX, uint64(Sys64Tee))
+	state.Set(corecpu.RDI, sourceRead)
+	state.Set(corecpu.RSI, destinationWrite)
+	state.Set(corecpu.RDX, 1)
+	state.Set(corecpu.R10, uint64(spliceNonblock64))
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(EAGAIN) {
+		t.Fatalf("nonblock empty tee: err=%v rax=%d, want EAGAIN", err, int64(state.Get(corecpu.RAX)))
+	}
+}
+
+func TestDispatcher64VmspliceGuestIOVecs(t *testing.T) {
+	memory := corecpu.NewMemory64()
+	const area corecpu.Address64 = 0x16000
+	if err := memory.Map(area, 3*corecpu.Page64Size, corecpu.PRead|corecpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	ctx := NewContext64(memory)
+	dispatcher := NewDispatcher64(ctx)
+	state := corecpu.NewMachineState64(memory)
+	readFD, writeFD := makeABI64PipePair(t, memory, dispatcher, state, area)
+	const first corecpu.Address64 = area + 0x200
+	const second corecpu.Address64 = area + 0x300
+	if err := memory.Write(first, []byte("vmsplice")); err != nil {
+		t.Fatal(err)
+	}
+	if err := memory.Write(second, []byte("-data")); err != nil {
+		t.Fatal(err)
+	}
+	writeABI64TestIOVec(t, memory, area+0x100, first, 8)
+	writeABI64TestIOVec(t, memory, area+0x110, second, 5)
+
+	state.Set(corecpu.RAX, uint64(Sys64Vmsplice))
+	state.Set(corecpu.RDI, writeFD)
+	state.Set(corecpu.RSI, uint64(area+0x100))
+	state.Set(corecpu.RDX, 2)
+	state.Set(corecpu.R10, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 13 {
+		t.Fatalf("vmsplice: err=%v rax=%d", err, state.Get(corecpu.RAX))
+	}
+
+	state.Set(corecpu.RAX, uint64(Sys64Read))
+	state.Set(corecpu.RDI, readFD)
+	state.Set(corecpu.RSI, uint64(area+0x400))
+	state.Set(corecpu.RDX, 13)
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 13 {
+		t.Fatalf("vmsplice readback: err=%v rax=%d", err, state.Get(corecpu.RAX))
+	}
+	var data [13]byte
+	if err := memory.Read(area+0x400, data[:]); err != nil {
+		t.Fatal(err)
+	}
+	if string(data[:]) != "vmsplice-data" {
+		t.Fatalf("vmsplice data = %q, want %q", data[:], "vmsplice-data")
+	}
+
+	state.Set(corecpu.RAX, uint64(Sys64Vmsplice))
+	state.Set(corecpu.RDI, writeFD)
+	state.Set(corecpu.RDX, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 0 {
+		t.Fatalf("zero-count vmsplice: err=%v rax=%d", err, state.Get(corecpu.RAX))
+	}
+	state.Set(corecpu.RAX, uint64(Sys64Vmsplice))
+	state.Set(corecpu.RDI, writeFD)
+	state.Set(corecpu.RDX, 2)
+	state.Set(corecpu.R10, uint64(spliceMove64))
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(EINVAL) {
+		t.Fatalf("vmsplice invalid flags: err=%v rax=%d, want EINVAL", err, int64(state.Get(corecpu.RAX)))
+	}
+}
+
+func TestDispatcher64VmspliceValidationAndPartialMemory(t *testing.T) {
+	memory := corecpu.NewMemory64()
+	const area corecpu.Address64 = 0x18000
+	if err := memory.Map(area, 2*corecpu.Page64Size, corecpu.PRead|corecpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	ctx := NewContext64(memory)
+	dispatcher := NewDispatcher64(ctx)
+	state := corecpu.NewMachineState64(memory)
+	readFD, writeFD := makeABI64PipePair(t, memory, dispatcher, state, area)
+	const payload corecpu.Address64 = area + 0x200
+	if err := memory.Write(payload, []byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	writeABI64TestIOVec(t, memory, area+0x100, payload, 5)
+	writeABI64TestIOVec(t, memory, area+0x110, area+0x900000, 4)
+
+	state.Set(corecpu.RAX, uint64(Sys64Vmsplice))
+	state.Set(corecpu.RDI, writeFD)
+	state.Set(corecpu.RSI, uint64(area+0x100))
+	state.Set(corecpu.RDX, 2)
+	state.Set(corecpu.R10, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 5 {
+		t.Fatalf("vmsplice partial memory: err=%v rax=%d, want 5", err, state.Get(corecpu.RAX))
+	}
+	state.Set(corecpu.RAX, uint64(Sys64Read))
+	state.Set(corecpu.RDI, readFD)
+	state.Set(corecpu.RSI, uint64(area+0x300))
+	state.Set(corecpu.RDX, 5)
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 5 {
+		t.Fatalf("vmsplice partial readback: err=%v rax=%d", err, state.Get(corecpu.RAX))
+	}
+
+	var regular bytes.Buffer
+	const regularFD uint64 = 90
+	if err := ctx.InstallFile(regularFD, &corefd.File{Writer: &regular}); err != nil {
+		t.Fatal(err)
+	}
+	state.Set(corecpu.RAX, uint64(Sys64Vmsplice))
+	state.Set(corecpu.RDI, regularFD)
+	state.Set(corecpu.RSI, uint64(area+0x100))
+	state.Set(corecpu.RDX, 1)
+	state.Set(corecpu.R10, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(EINVAL) {
+		t.Fatalf("vmsplice regular file: err=%v rax=%d, want EINVAL", err, int64(state.Get(corecpu.RAX)))
+	}
+}
+
+func makeABI64PipePair(t *testing.T, memory *corecpu.Memory64, dispatcher *Dispatcher64, state *corecpu.MachineState64, address corecpu.Address64) (uint64, uint64) {
+	t.Helper()
+	state.Set(corecpu.RAX, uint64(Sys64Pipe2))
+	state.Set(corecpu.RDI, uint64(address))
+	state.Set(corecpu.RSI, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || state.Get(corecpu.RAX) != 0 {
+		t.Fatalf("pipe2 helper: err=%v rax=%d", err, state.Get(corecpu.RAX))
+	}
+	var pair [8]byte
+	if err := memory.Read(address, pair[:]); err != nil {
+		t.Fatal(err)
+	}
+	return uint64(binary.LittleEndian.Uint32(pair[:4])), uint64(binary.LittleEndian.Uint32(pair[4:]))
+}
+
+func writeABI64TestIOVec(t *testing.T, memory *corecpu.Memory64, address, base corecpu.Address64, length uint64) {
+	t.Helper()
+	var raw [16]byte
+	binary.LittleEndian.PutUint64(raw[:8], uint64(base))
+	binary.LittleEndian.PutUint64(raw[8:], length)
+	if err := memory.Write(address, raw[:]); err != nil {
+		t.Fatal(err)
+	}
+}

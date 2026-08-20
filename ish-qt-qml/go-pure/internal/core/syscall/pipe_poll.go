@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"io"
 	"runtime"
 	"sync"
 	"time"
@@ -67,11 +68,37 @@ func (p *guestPipe) write(src []byte) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.readClosed || p.writeClosed {
-		return 0, errors.New("pipe: closed")
+		return 0, io.ErrClosedPipe
 	}
 	n, err := p.buffer.Write(src)
 	p.cond.Broadcast()
 	return n, err
+}
+
+func (p *guestPipe) peek(count int, nonblock bool) ([]byte, error) {
+	if count <= 0 {
+		return nil, nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for p.buffer.Len() == 0 && !p.writeClosed && !p.readClosed {
+		if nonblock || p.nonblock {
+			return nil, errWouldBlock64
+		}
+		p.cond.Wait()
+	}
+	if p.buffer.Len() != 0 {
+		if count > p.buffer.Len() {
+			count = p.buffer.Len()
+		}
+		data := make([]byte, count)
+		copy(data, p.buffer.Bytes()[:count])
+		return data, nil
+	}
+	if p.writeClosed {
+		return nil, io.EOF
+	}
+	return nil, io.ErrClosedPipe
 }
 
 func (p *guestPipe) closeRead() error {
