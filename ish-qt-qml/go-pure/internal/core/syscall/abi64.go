@@ -206,6 +206,21 @@ const (
 // instruction has transferred control to the guest runtime.
 type Handler64 func(*Context64, [6]uint64) int64
 
+type CloneRequest64 struct {
+	Flags      uint64
+	ChildStack uint64
+	ParentTID  uint64
+	ChildTID   uint64
+	TLS        uint64
+	Fork       bool
+	VFork      bool
+}
+
+// ProcessFactory64 is the session/kernel seam for creating a runnable 64-bit
+// child. The syscall layer validates the ABI and registers the returned child;
+// the owner must provide the actual memory, descriptor, and machine cloning.
+type ProcessFactory64 func(parent *Context64, request CloneRequest64) int64
+
 type Context64 struct {
 	Memory         *corecpu.Memory64
 	FS             *corefs.FS
@@ -262,7 +277,8 @@ type Context64 struct {
 
 	// Execve is provided by the guest session. It replaces the current ELF
 	// image while preserving process identity and the descriptor table.
-	Execve func(path string, argv, env []string) int64
+	Execve         func(path string, argv, env []string) int64
+	ProcessFactory ProcessFactory64
 
 	FDs          *corefd.Table
 	Mappings     []GuestMapping64
@@ -323,9 +339,9 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 		return int64(ctx.PID)
 	})
 	d.Register(Sys64Execve, execve64)
-	d.Register(Sys64Clone, clone64Stub)
-	d.Register(Sys64Fork, fork64Stub)
-	d.Register(Sys64Vfork, vfork64Stub)
+	d.Register(Sys64Clone, clone64)
+	d.Register(Sys64Fork, fork64)
+	d.Register(Sys64Vfork, vfork64)
 	d.Register(Sys64Wait4, wait4_64)
 	d.Register(Sys64Waitid, waitid64)
 	d.Register(Sys64SetRobust, setRobustList64)

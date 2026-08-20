@@ -6,22 +6,6 @@ import (
 	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
 )
 
-// The ABI64 process graph is owned by kernel.ProcessManager. Until the
-// executor can clone a memory image, descriptor table, and running machine
-// state atomically, these entry points fail closed instead of returning a PID
-// for a child that does not exist.
-func clone64Stub(*Context64, [6]uint64) int64 {
-	return int64(ENOSYS)
-}
-
-func fork64Stub(*Context64, [6]uint64) int64 {
-	return int64(ENOSYS)
-}
-
-func vfork64Stub(*Context64, [6]uint64) int64 {
-	return int64(ENOSYS)
-}
-
 func wait4_64(ctx *Context64, args [6]uint64) int64 {
 	if ctx == nil || ctx.Children == nil {
 		return int64(ECHILD)
