@@ -130,7 +130,10 @@ type guestSyncer64 interface {
 	Sync() error
 }
 
-func sync64(ctx *Context64, args [6]uint64) int64 {
+func syncFile64(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil {
+		return int64(ENOSYS)
+	}
 	file, err := ctx.GetFile(args[0])
 	if err != nil || file == nil {
 		return int64(EBADF)
@@ -143,16 +146,41 @@ func sync64(ctx *Context64, args [6]uint64) int64 {
 	return 0
 }
 
-func fsync64(ctx *Context64, args [6]uint64) int64 {
+func sync64(ctx *Context64, _ [6]uint64) int64 {
 	if ctx == nil {
 		return int64(ENOSYS)
 	}
-	return sync64(ctx, args)
+	if syncer, ok := any(ctx.FS).(guestSyncer64); ok {
+		if syncErr := syncer.Sync(); syncErr != nil {
+			return int64(errnoForOpen(syncErr))
+		}
+	}
+	return 0
+}
+
+func syncfs64(ctx *Context64, args [6]uint64) int64 {
+	if ctx == nil || ctx.FS == nil {
+		return int64(ENOSYS)
+	}
+	file, err := ctx.GetFile(args[0])
+	if err != nil || file == nil {
+		return int64(EBADF)
+	}
+	if file.Path == "" {
+		return int64(EINVAL)
+	}
+	if syncer, ok := any(ctx.FS).(guestSyncer64); ok {
+		if syncErr := syncer.Sync(); syncErr != nil {
+			return int64(errnoForOpen(syncErr))
+		}
+	}
+	return 0
+}
+
+func fsync64(ctx *Context64, args [6]uint64) int64 {
+	return syncFile64(ctx, args)
 }
 
 func fdatasync64(ctx *Context64, args [6]uint64) int64 {
-	if ctx == nil {
-		return int64(ENOSYS)
-	}
-	return sync64(ctx, args)
+	return syncFile64(ctx, args)
 }

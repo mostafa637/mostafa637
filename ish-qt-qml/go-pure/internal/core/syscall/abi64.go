@@ -79,6 +79,8 @@ const (
 	Sys64Semop  Number64 = 65
 	Sys64Semctl Number64 = 66
 	Sys64Fsync  Number64 = 74
+	Sys64Sync   Number64 = 162
+	Sys64Syncfs Number64 = 306
 
 	Sys64Fdatasync Number64 = 75
 	Sys64Truncate  Number64 = 76
@@ -484,6 +486,8 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Lseek, lseek64)
 	d.Register(Sys64Fsync, fsync64)
 	d.Register(Sys64Fdatasync, fdatasync64)
+	d.Register(Sys64Sync, sync64)
+	d.Register(Sys64Syncfs, syncfs64)
 	d.Register(Sys64Fadvise64, fadvise64)
 	d.Register(Sys64Truncate, truncate64Guest)
 	d.Register(Sys64Ftruncate, ftruncate64Guest)

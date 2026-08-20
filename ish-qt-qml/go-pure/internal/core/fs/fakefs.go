@@ -87,6 +87,17 @@ func (f *FS) Database() *storage.DB {
 	return f.db
 }
 
+// Sync flushes committed metadata to the SQLite WAL/checkpoint path without
+// depending on host libc or CGo. The fakefs byte files are written through the
+// standard Go filesystem APIs, while metadata is serialized by this checkpoint.
+func (f *FS) Sync() error {
+	if f == nil || f.db == nil || f.db.SQLDB() == nil {
+		return storage.ErrInvariant
+	}
+	_, err := f.db.SQLDB().ExecContext(context.Background(), "PRAGMA wal_checkpoint(FULL)")
+	return err
+}
+
 func (f *FS) ensureRoot() error {
 	_, _, exists, err := f.db.PathReadStat(context.Background(), "/")
 	if err != nil {
