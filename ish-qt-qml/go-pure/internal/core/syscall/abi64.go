@@ -250,9 +250,14 @@ type Context64 struct {
 	ProcessName    [16]byte
 	Dumpable       bool
 	NoNewPrivs     bool
+	KeepCaps       bool
+	SecureBits     uint64
+	ChildSubreaper bool
+	TimerSlack     uint64
 	ParentDeathSig uint64
-	AffinityMask   uint64
-	Umask          uint32
+
+	AffinityMask uint64
+	Umask        uint32
 
 	// Execve is provided by the guest session. It replaces the current ELF
 	// image while preserving process identity and the descriptor table.
@@ -273,7 +278,7 @@ type Dispatcher64 struct {
 }
 
 func NewContext64(memory *corecpu.Memory64) *Context64 {
-	ctx := &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), SignalActions: make(map[uint64][32]byte), StartTime: time.Now(), CPUIDEnabled: true, Dumpable: true, AffinityMask: ^uint64(0), Umask: 0o022, signalFDs: make(map[*signalFD64]struct{})}
+	ctx := &Context64{Memory: memory, CWD: "/", WinCols: 80, WinRows: 24, FDs: corefd.New(), Futexes: NewFutexRegistry64(), Children: NewChildRegistry(), RLimits: defaultResourceLimits64(), SignalActions: make(map[uint64][32]byte), StartTime: time.Now(), CPUIDEnabled: true, Dumpable: true, TimerSlack: defaultTimerSlack64, AffinityMask: ^uint64(0), Umask: 0o022, signalFDs: make(map[*signalFD64]struct{})}
 	ctx.SharedMemory = newSharedMemoryRegistry64()
 	ctx.Semaphores = newSemaphoreRegistry64()
 	ctx.SignalCond = sync.NewCond(&ctx.SignalMu)

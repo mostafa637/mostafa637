@@ -7,15 +7,26 @@ import (
 )
 
 const (
-	prSetPDeathSig64  = 1
-	prGetPDeathSig64  = 2
-	prGetDumpable64   = 3
-	prSetDumpable64   = 4
-	prSetName64       = 15
-	prGetName64       = 16
-	prSetNoNewPrivs64 = 38
-	prGetNoNewPrivs64 = 39
-	cpuSetSize64      = 8
+	prSetPDeathSig64              = 1
+	prGetPDeathSig64              = 2
+	prGetDumpable64               = 3
+	prSetDumpable64               = 4
+	prSetName64                   = 15
+	prGetName64                   = 16
+	prSetNoNewPrivs64             = 38
+	prGetNoNewPrivs64             = 39
+	prSetKeepCaps64               = 8
+	prGetKeepCaps64               = 7
+	prSetSecureBits64             = 28
+	prGetSecureBits64             = 27
+	prSetChildSubreaper64         = 36
+	prGetChildSubreaper64         = 37
+	prSetTimerSlack64             = 29
+	prGetTimerSlack64             = 30
+	secureBitsMask64              = 0x3f
+	secureBitsLockedMask64        = (1 << 1) | (1 << 3) | (1 << 5)
+	defaultTimerSlack64    uint64 = 50_000
+	cpuSetSize64                  = 8
 )
 
 func prctl64(ctx *Context64, args [6]uint64) int64 {
@@ -61,7 +72,7 @@ func prctl64(ctx *Context64, args [6]uint64) int64 {
 		}
 		return 0
 	case prSetNoNewPrivs64:
-		if args[1] != 1 {
+		if args[1] != 1 || args[2] != 0 || args[3] != 0 || args[4] != 0 {
 			return int64(EINVAL)
 		}
 		ctx.NoNewPrivs = true
@@ -71,8 +82,51 @@ func prctl64(ctx *Context64, args [6]uint64) int64 {
 			return 1
 		}
 		return 0
+	case prSetKeepCaps64:
+		if args[1] > 1 {
+			return int64(EINVAL)
+		}
+		ctx.KeepCaps = args[1] == 1
+		return 0
+	case prGetKeepCaps64:
+		if ctx.KeepCaps {
+			return 1
+		}
+		return 0
+	case prSetSecureBits64:
+		if args[1]&^uint64(secureBitsMask64) != 0 {
+			return int64(EINVAL)
+		}
+		if ctx.SecureBits&secureBitsLockedMask64&^args[1] != 0 {
+			return int64(EPERM)
+		}
+		ctx.SecureBits = args[1]
+		return 0
+	case prGetSecureBits64:
+		return int64(ctx.SecureBits)
+	case prSetChildSubreaper64:
+		if args[1] > 1 {
+			return int64(EINVAL)
+		}
+		ctx.ChildSubreaper = args[1] == 1
+		return 0
+	case prGetChildSubreaper64:
+		if ctx.ChildSubreaper {
+			return 1
+		}
+		return 0
+	case prSetTimerSlack64:
+		if args[1] == 0 {
+			ctx.TimerSlack = defaultTimerSlack64
+		} else {
+			ctx.TimerSlack = args[1]
+		}
+		return 0
+	case prGetTimerSlack64:
+		return int64(ctx.TimerSlack)
 	default:
-		return int64(ENOSYS)
+		return int64(EINVAL)
+
 	}
 }
 
