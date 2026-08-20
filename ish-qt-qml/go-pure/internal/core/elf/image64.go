@@ -75,6 +75,8 @@ type Image64 struct {
 	Header   Header64
 	Segments []Segment64
 	Interp   string
+	Dynamic  *DynamicInfo64
+	TLS      *Segment64
 }
 
 func (i *Image64) LoadSegments() []Segment64 {
@@ -194,6 +196,10 @@ func Parse64(r io.ReaderAt, size int64) (*Image64, error) {
 			}
 		}
 		image.Segments = append(image.Segments, segment)
+		if segment.Type == elf.PT_TLS && segment.MemSize != 0 {
+			tls := segment
+			image.TLS = &tls
+		}
 		if segment.Type == elf.PT_INTERP && segment.FileSize > 0 {
 			reader := io.NewSectionReader(r, int64(segment.Offset), int64(segment.FileSize))
 			data, readErr := io.ReadAll(reader)
@@ -211,6 +217,11 @@ func Parse64(r io.ReaderAt, size int64) (*Image64, error) {
 	}
 	if len(image.LoadSegments()) == 0 {
 		return nil, fmt.Errorf("%w: no PT_LOAD", ErrInvalidImage64)
+	}
+	if dynamic, dynamicErr := parseDynamic64(r, size, image.Segments); dynamicErr != nil {
+		return nil, fmt.Errorf("%w: dynamic: %v", ErrInvalidImage64, dynamicErr)
+	} else {
+		image.Dynamic = dynamic
 	}
 	return image, nil
 }
