@@ -40,18 +40,6 @@ go run ./cmd/ishgo
 ISH_SHELL=/bin/bash go run ./cmd/ishgo
 ```
 
-## Z.AI الاختياري
-
-يوجد عميل Pure Go اختياري في `internal/ai/zai` لطلبات Chat Completions المتوافقة مع واجهة Z.AI الرسمية. لا يدخل هذا العميل في مسار iSH core أو Wazero افتراضيًا، ولا يحتاج إلى CGO. عند الحاجة، تُضبط المتغيرات التالية خارج المستودع:
-
-```bash
-export ZAI_API_KEY=...
-export ZAI_MODEL=glm-5.3
-export ZAI_BASE_URL=https://api.z.ai/api/paas/v4/
-```
-
-يستخدم العميل `POST /chat/completions` مع `Authorization: Bearer`، ويُختبر محليًا عبر `httptest` دون إرسال بيانات إلى خدمة خارجية. راجع [ملاحظات تكامل Z.AI](docs/zai_integration_notes.md) و[دليل OpenAI الرسمي لـZ.AI](https://docs.z.ai/guides/develop/openai/python) قبل تفعيل اتصال حقيقي.
-
 ## Android
 
 سيُضاف ملف manifest واسم الحزمة وسكربت `gogio` في مرحلة Android. لا ينبغي نسخ إعدادات Qt أو WebView إلى هذا الفرع. يجب أن يبقى backend الخاص بالـ PTY أو iSH core خلف `internal/session.Session`، لأن إنشاء PTY Android يحتاج تنفيذًا منفصلًا عن host shell.
