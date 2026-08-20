@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	corecpu "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu"
 	transport "github.com/mostafa637/mostafa637/go-pure/internal/session"
 )
 
@@ -382,5 +383,223 @@ func TestCoreSessionGuestELF64StdinStdout(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("timed out waiting for ELF64 echo: %q", output.String())
 		}
+	}
+}
+
+func dynamicGuestELF64(interp string, needed []string, code []byte, withTLS bool) []byte {
+	const (
+		headerSize    = 64
+		programSize   = 56
+		programOffset = headerSize
+		loadVaddr     = 0x400000
+		dynamicOffset = 0x1000
+		stringOffset  = 0x1200
+		interpOffset  = 0x1300
+		tlsOffset     = 0x1400
+		codeOffset    = 0x1500
+		fileSize      = 0x1600
+	)
+	phnum := 2
+	if interp != "" {
+		phnum++
+	}
+	if withTLS {
+		phnum++
+	}
+	data := make([]byte, fileSize)
+	copy(data[:4], []byte{0x7f, 'E', 'L', 'F'})
+	data[4], data[5], data[6], data[7] = 2, 1, 1, 0
+	binary.LittleEndian.PutUint16(data[16:], 3)
+	binary.LittleEndian.PutUint16(data[18:], 62)
+	binary.LittleEndian.PutUint32(data[20:], 1)
+	binary.LittleEndian.PutUint64(data[24:], loadVaddr+codeOffset)
+	binary.LittleEndian.PutUint64(data[32:], programOffset)
+	binary.LittleEndian.PutUint16(data[52:], headerSize)
+	binary.LittleEndian.PutUint16(data[54:], programSize)
+	binary.LittleEndian.PutUint16(data[56:], uint16(phnum))
+	putProgram := func(index int, typ uint32, flags uint32, offset, vaddr, filesz, memsz, align uint64) {
+		ph := data[programOffset+index*programSize : programOffset+(index+1)*programSize]
+		binary.LittleEndian.PutUint32(ph[0:], typ)
+		binary.LittleEndian.PutUint32(ph[4:], flags)
+		binary.LittleEndian.PutUint64(ph[8:], offset)
+		binary.LittleEndian.PutUint64(ph[16:], vaddr)
+		binary.LittleEndian.PutUint64(ph[32:], filesz)
+		binary.LittleEndian.PutUint64(ph[40:], memsz)
+		binary.LittleEndian.PutUint64(ph[48:], align)
+	}
+	putProgram(0, 1, 7, 0, loadVaddr, fileSize, fileSize+0x1000, 0x1000)
+	stringsData := []byte{0}
+	neededOffsets := make([]uint64, 0, len(needed))
+	for _, name := range needed {
+		neededOffsets = append(neededOffsets, uint64(len(stringsData)))
+		stringsData = append(stringsData, []byte(name)...)
+		stringsData = append(stringsData, 0)
+	}
+	copy(data[stringOffset:], stringsData)
+	if interp != "" {
+		interpData := append([]byte(interp), 0)
+		copy(data[interpOffset:], interpData)
+		putProgram(1, 3, 4, interpOffset, loadVaddr+interpOffset, uint64(len(interpData)), uint64(len(interpData)), 1)
+	}
+	if withTLS {
+		tlsData := []byte{0x11, 0x22, 0x33, 0x44}
+		copy(data[tlsOffset:], tlsData)
+		index := 1
+		if interp != "" {
+			index++
+		}
+		putProgram(index, 7, 4, tlsOffset, loadVaddr+tlsOffset, uint64(len(tlsData)), 8, 8)
+	}
+	dynamicIndex := 1
+	if interp != "" {
+		dynamicIndex++
+	}
+	if withTLS {
+		dynamicIndex++
+	}
+	dynamic := data[dynamicOffset : dynamicOffset+16*(3+len(needed))]
+	putDynamic := func(index int, tag, value uint64) {
+		binary.LittleEndian.PutUint64(dynamic[index*16:], tag)
+		binary.LittleEndian.PutUint64(dynamic[index*16+8:], value)
+	}
+	putDynamic(0, 5, loadVaddr+stringOffset)
+	putDynamic(1, 10, uint64(len(stringsData)))
+	for index, offset := range neededOffsets {
+		putDynamic(2+index, 1, offset)
+	}
+	putDynamic(2+len(needed), 0, 0)
+	putProgram(dynamicIndex, 2, 4, dynamicOffset, loadVaddr+dynamicOffset, uint64(len(dynamic)), uint64(len(dynamic)), 8)
+	copy(data[codeOffset:], code)
+	return data
+}
+
+func TestLoadGuestImage64DynamicInterpreterNeededAndTLS(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "lib64"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "lib64", "ld-mini.so"), guestExitELF64(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainData := dynamicGuestELF64("/lib64/ld-mini.so", []string{"libneeded.so"}, nil, true)
+	if err := os.WriteFile(filepath.Join(root, "bin", "dynamic64"), mainData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "lib", "libneeded.so"), dynamicGuestELF64("", nil, nil, false), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{Rootfs: root, Bootstrap: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	memory := corecpu.NewMemory64()
+	loaded, layout, err := loadGuestImage64(s.FS(), "/bin/dynamic64", mainData, []string{"/bin/dynamic64"}, nil, memory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Interpreter == nil || loaded.Interpreter.Space == nil {
+		t.Fatal("dynamic image has no mapped interpreter")
+	}
+	if loaded.Entry != loaded.Interpreter.Space.Entry {
+		t.Fatalf("entry=%#x interpreter=%#x", loaded.Entry, loaded.Interpreter.Space.Entry)
+	}
+	if loaded.Main.Image.Dynamic == nil || len(loaded.Main.Image.Dynamic.Needed) != 1 || loaded.Main.Image.Dynamic.Needed[0] != "libneeded.so" {
+		t.Fatalf("main dynamic metadata=%+v", loaded.Main.Image.Dynamic)
+	}
+	if len(loaded.Registry.Objects()) != 3 {
+		t.Fatalf("loaded objects=%d, want main/interpreter/needed", len(loaded.Registry.Objects()))
+	}
+	if loaded.TLS == nil || len(loaded.TLS.Modules) != 1 || loaded.TLS.ThreadPointer == 0 {
+		t.Fatalf("TLS layout=%+v", loaded.TLS)
+	}
+	state := corecpu.NewMachineState64(memory)
+	attachTLS64(state, loaded)
+	if state.FSBase != uint64(loaded.TLS.ThreadPointer) || state.TLS != uint64(loaded.TLS.ThreadPointer) {
+		t.Fatalf("TLS state FSBase=%#x TLS=%#x want=%#x", state.FSBase, state.TLS, loaded.TLS.ThreadPointer)
+	}
+	if layout.SP == 0 {
+		t.Fatal("dynamic stack was not built")
+	}
+	auxv := dynamicAuxv64(loaded)
+	var atBase, atEntry uint64
+	for _, entry := range auxv {
+		switch entry.Type {
+		case 7:
+			atBase = entry.Value
+		case 9:
+			atEntry = entry.Value
+		}
+	}
+	if atBase != uint64(loaded.Interpreter.Space.Bias) || atEntry != uint64(loaded.Main.Space.Entry) {
+		t.Fatalf("auxv AT_BASE=%#x AT_ENTRY=%#x", atBase, atEntry)
+	}
+}
+
+func TestCoreSessionGuestELF64DynamicStartsInterpreter(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainData := dynamicGuestELF64("/lib64/ld-mini.so", []string{"libneeded.so"}, nil, true)
+	if err := os.WriteFile(filepath.Join(root, "bin", "dynamic64"), mainData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "lib", "libneeded.so"), dynamicGuestELF64("", nil, nil, false), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "lib64"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "lib64", "ld-mini.so"), guestExitELF64(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{Rootfs: root, Shell: "/bin/dynamic64", UseGuest: true, Bootstrap: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Start(context.Background(), 80, 24); err != nil {
+		t.Fatalf("dynamic ELF64 Start: %v", err)
+	}
+	select {
+	case _, ok := <-s.Output():
+		if ok {
+			for range s.Output() {
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for dynamic ELF64 interpreter exit")
+	}
+	if code, exited := s.Kernel().ExitCode(); !exited || code != 42 {
+		t.Fatalf("dynamic ELF64 exit: exited=%v code=%d", exited, code)
+	}
+}
+
+func TestDynamicGuestELF64RejectsMissingInterpreter(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainData := dynamicGuestELF64("/lib64/missing.so", nil, nil, false)
+	if err := os.WriteFile(filepath.Join(root, "bin", "dynamic64"), mainData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{Rootfs: root, Shell: "/bin/dynamic64", UseGuest: true, Bootstrap: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Start(context.Background(), 80, 24); err == nil {
+		t.Fatal("missing interpreter unexpectedly succeeded")
 	}
 }
