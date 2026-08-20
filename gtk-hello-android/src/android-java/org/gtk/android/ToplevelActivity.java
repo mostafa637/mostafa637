@@ -457,7 +457,11 @@ public class ToplevelActivity extends Activity {
 			savedInstanceState != null ? savedInstanceState.getLong(toplevelIdentifierKey, 0) : 0L,
 			getIntent().getLongExtra(toplevelIdentifierKey, 0),
 		};
-		GlibContext.blockForMain(() -> {
+		// Do not block Android's UI thread while GTK creates the first surface.
+		// GTK may post attachToplevelSurface() back to the UI thread; using
+		// blockForMain here can leave the splash screen in DRAW_PENDING and
+		// deadlock the first presentation on some Android versions.
+		GlibContext.runOnMain(() -> {
 			for (long identifier : possibleIdentifiers) {
 				if (identifier == 0)
 					continue;
@@ -476,16 +480,13 @@ public class ToplevelActivity extends Activity {
 			if (intent.getData() != null) {
 				String hint = "";
 				if (intent.getAction() != null) {
-					String[] action = intent.getAction().split("\\.");
+					String[] action = intent.getAction().split("\\\\.");
 					hint = action[action.length - 1].toLowerCase();
 				}
 				GdkContext.open(intent.getData(), hint);
 			} else {
 				GdkContext.activate();
 			}
-
-			if (nativeIdentifier == 0)
-				Logger.getLogger("Toplevel").log(Level.SEVERE, "Call to activate did not spawn a new window");
 		});
 	}
 
