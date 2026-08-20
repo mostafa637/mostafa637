@@ -223,6 +223,8 @@ type ProcessFactory64 func(parent *Context64, request CloneRequest64) int64
 
 type Context64 struct {
 	Memory         *corecpu.Memory64
+	Machine        *corecpu.MachineState64
+	SignalRestored bool
 	FS             *corefs.FS
 	CWD            string
 	WinCols        uint16
@@ -363,7 +365,7 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64RtSigpending, rtSigpending64)
 	d.Register(Sys64RtSigtimedwait, rtSigtimedwait64)
 	d.Register(Sys64RtSigsuspend, rtSigsuspend64)
-	d.Register(Sys64RtSigreturn, signalStub64)
+	d.Register(Sys64RtSigreturn, rtSigreturn64)
 	d.Register(Sys64Tkill, tkill64)
 	d.Register(Sys64Tgkill, tgkill64)
 	d.Register(Sys64Capget, capget64)
@@ -546,6 +548,8 @@ func (d *Dispatcher64) Dispatch(state *corecpu.MachineState64) (bool, error) {
 		state.Get(corecpu.R8),
 		state.Get(corecpu.R9),
 	}
+	d.Context.Machine = state
+	d.Context.SignalRestored = false
 	d.Context.FSBase = state.FSBase
 	d.Context.GSBase = state.GSBase
 	handler := d.handlers[number]
@@ -556,7 +560,10 @@ func (d *Dispatcher64) Dispatch(state *corecpu.MachineState64) (bool, error) {
 	}
 	state.FSBase = d.Context.FSBase
 	state.GSBase = d.Context.GSBase
-	state.Set(corecpu.RAX, uint64(result))
+	if !(number == Sys64RtSigreturn && result == 0 && d.Context.SignalRestored) {
+		state.Set(corecpu.RAX, uint64(result))
+	}
+	d.Context.SignalRestored = false
 	if number == Sys64Exit || number == Sys64ExitGroup {
 		state.Halted = true
 		return false, nil
