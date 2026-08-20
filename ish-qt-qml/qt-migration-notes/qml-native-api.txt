@@ -1,0 +1,102 @@
+android-qt/qml/Main.qml:44:        const p = preferences ? preferences.terminalStyle : {}
+android-qt/qml/Main.qml:56:        ishSession.configure(rootfsManager.rootPath,
+android-qt/qml/Main.qml:57:                             preferences.encodeCommand(preferences.bootCommand),
+android-qt/qml/Main.qml:58:                             preferences.encodeCommand(preferences.launchCommand))
+android-qt/qml/Main.qml:62:        if (webChannel && webChannel.url) {
+android-qt/qml/Main.qml:63:            const served = rootfsManager.terminalUrl(webChannel.url)
+android-qt/qml/Main.qml:71:        if (!rootfsManager.prepared)
+android-qt/qml/Main.qml:94:        } else if (ishSession.alive) {
+android-qt/qml/Main.qml:95:            ishSession.sendInput(value.replace(/\n/g, "\r"))
+android-qt/qml/Main.qml:111:        if (ishSession.alive) {
+android-qt/qml/Main.qml:112:            const text = platformServices.pasteText()
+android-qt/qml/Main.qml:114:                ishSession.sendInput(text.replace(/\n/g, "\r"))
+android-qt/qml/Main.qml:127:        if (!rootfsManager.prepared) {
+android-qt/qml/Main.qml:135:        if (ishSession.alive)
+android-qt/qml/Main.qml:136:            ishSession.stop()
+android-qt/qml/Main.qml:139:        if (!ishSession.start(rootfsManager.rootPath,
+android-qt/qml/Main.qml:140:                              preferences.encodeCommand(preferences.bootCommand),
+android-qt/qml/Main.qml:141:                              preferences.encodeCommand(preferences.launchCommand))) {
+android-qt/qml/Main.qml:152:        ishSession.stop()
+android-qt/qml/Main.qml:201:        target: platformServices
+android-qt/qml/Main.qml:208:        target: themes
+android-qt/qml/Main.qml:215:        target: rootfsUpgrade
+android-qt/qml/Main.qml:222:        target: rootfsManager
+android-qt/qml/Main.qml:232:        target: ishSession
+android-qt/qml/Main.qml:240:            if (!window.sessionStopRequested && rootfsManager.prepared)
+android-qt/qml/Main.qml:256:        target: preferences
+android-qt/qml/Main.qml:283:                    item.terminalStyle = ishSession.currentStyle
+android-qt/qml/Main.qml:287:                        ishSession.load()
+android-qt/qml/Main.qml:372:                                color: preferences.terminalStyle.foregroundColor
+android-qt/qml/Main.qml:384:                                onClicked: window.openPage("themes")
+android-qt/qml/Main.qml:407:                                text: rootfsUpgrade.busy ? "Reinstalling…" : "Reinstall bundled rootfs"
+android-qt/qml/Main.qml:408:                                enabled: !rootfsUpgrade.busy
+android-qt/qml/Main.qml:409:                                onClicked: rootfsUpgrade.reinstallBundledRootfs()
+android-qt/qml/Main.qml:414:                                visible: rootfsUpgrade.busy || rootfsUpgrade.progress > 0
+android-qt/qml/Main.qml:417:                                value: rootfsUpgrade.progress
+android-qt/qml/Main.qml:422:                                visible: rootfsUpgrade.message.length > 0
+android-qt/qml/Main.qml:423:                                text: rootfsUpgrade.message
+android-qt/qml/Main.qml:425:                                color: preferences.terminalStyle.foregroundColor
+android-qt/qml/Main.qml:429:                            IOSLabel { text: "Theme"; color: preferences.terminalStyle.foregroundColor }
+android-qt/qml/Main.qml:432:                                model: themes.themeNames
+android-qt/qml/Main.qml:433:                                currentIndex: Math.max(0, themes.themeNames.indexOf(preferences.themeName))
+android-qt/qml/Main.qml:434:                                onActivated: preferences.themeName = currentText
+android-qt/qml/Main.qml:437:                            IOSLabel { text: "Font family"; color: preferences.terminalStyle.foregroundColor }
+android-qt/qml/Main.qml:440:                                text: preferences.fontFamily
+android-qt/qml/Main.qml:441:                                onEditingFinished: preferences.fontFamily = text
+android-qt/qml/Main.qml:448:                                    text: "Font size: " + preferences.fontSize
+android-qt/qml/Main.qml:449:                                    color: preferences.terminalStyle.foregroundColor
+android-qt/qml/Main.qml:454:                                    value: preferences.fontSize
+android-qt/qml/Main.qml:455:                                    onValueModified: preferences.fontSize = value
+android-qt/qml/Main.qml:464:                                    color: preferences.terminalStyle.foregroundColor
+android-qt/qml/Main.qml:467:                                    checked: preferences.blinkCursor
+android-qt/qml/Main.qml:468:                                    onToggled: preferences.blinkCursor = checked
+android-qt/qml/Main.qml:472:                            IOSLabel { text: "Boot command"; color: preferences.terminalStyle.foregroundColor }
+android-qt/qml/Main.qml:475:                                text: preferences.bootCommand.join(" ")
+android-qt/qml/Main.qml:476:                                onEditingFinished: preferences.bootCommand = text.trim().split(/\s+/)
+android-qt/qml/Main.qml:479:                            IOSLabel { text: "Launch command"; color: preferences.terminalStyle.foregroundColor }
+android-qt/qml/Main.qml:482:                                text: preferences.launchCommand.join(" ")
+android-qt/qml/Main.qml:483:                                onEditingFinished: preferences.launchCommand = text.trim().split(/\s+/)
+android-qt/qml/Main.qml:502:                                text: ishSession.alive ? "Stop session" : "Start session"
+android-qt/qml/Main.qml:503:                                onClicked: ishSession.alive ? window.stopSession() : window.restartSession()
+android-qt/qml/Main.qml:508:                                text: !rootfsManager.repositoryManaged ? "Rootfs repository metadata is unmanaged" :
+android-qt/qml/Main.qml:509:                                      (rootfsManager.repositoryUpdateRequired ? "Repository metadata update is available" : "Repository metadata is current")
+android-qt/qml/Main.qml:510:                                color: preferences.terminalStyle.foregroundColor
+android-qt/qml/Main.qml:519:                                    ishSession.stop()
+android-qt/qml/Main.qml:520:                                    rootfsManager.resetInstalledData()
+android-qt/qml/Main.qml:521:                                    rootfsManager.prepare()
+android-qt/qml/Main.qml:530:                                color: preferences.terminalStyle.foregroundColor
+android-qt/qml/Main.qml:544:                        (window.activePage === "themes" ? "ThemesPage.qml" :
+android-qt/qml/Main.qml:556:                    item.pageForeground = preferences.terminalStyle.foregroundColor
+android-qt/qml/Main.qml:581:                     !(preferences.hideExtraKeysWithExternalKeyboard && window.externalKeyboardActive)
+android-qt/qml/Main.qml:727:                            visible: rootfsManager.repositoryUpdateRequired
+android-qt/qml/TerminalDesktop.qml:61:        if (!ishSession.alive || !value || value.length === 0)
+android-qt/qml/TerminalDesktop.qml:63:        ishSession.sendInput(value.replace(/\n/g, "\r"))
+android-qt/qml/TerminalDesktop.qml:67:        if (!value || value.length === 0 || !ishSession.alive)
+android-qt/qml/TerminalDesktop.qml:74:                ishSession.controlModifierConsumed()
+android-qt/qml/TerminalDesktop.qml:81:        ishSession.controlModifierConsumed()
+android-qt/qml/TerminalDesktop.qml:86:        const value = platformServices.pasteText()
+android-qt/qml/TerminalDesktop.qml:118:        if (!ishSession.alive)
+android-qt/qml/TerminalDesktop.qml:122:        ishSession.resize(Math.max(20, Math.floor(width / cellWidth)),
+android-qt/qml/TerminalDesktop.qml:169:                    ishSession.controlModifierConsumed()
+android-qt/qml/TerminalDesktop.qml:176:                        ishSession.controlModifierConsumed()
+android-qt/qml/TerminalDesktop.qml:188:        target: ishSession
+android-qt/qml/AppearancePage.qml:32:                model: themes.themeNames
+android-qt/qml/AppearancePage.qml:33:                currentIndex: Math.max(0, themes.themeNames.indexOf(preferences.themeName))
+android-qt/qml/AppearancePage.qml:34:                onActivated: preferences.themeName = currentText
+android-qt/qml/AppearancePage.qml:41:                value: preferences.fontSize
+android-qt/qml/AppearancePage.qml:42:                onMoved: preferences.fontSize = Math.round(value)
+android-qt/qml/AppearancePage.qml:46:                checked: preferences.blinkCursor
+android-qt/qml/AppearancePage.qml:47:                onToggled: preferences.blinkCursor = checked
+android-qt/qml/ThemesPage.qml:21:            text: "Installed themes"
+android-qt/qml/ThemesPage.qml:29:            model: themes.themeNames
+android-qt/qml/ThemesPage.qml:35:                    preferences.themeName = modelData
+android-qt/qml/RootsPage.qml:19:            text: rootfsManager.prepared ? "Rootfs is ready" : "Rootfs is being prepared"
+android-qt/qml/RootsPage.qml:24:            text: rootfsManager.rootPath
+android-qt/qml/RootsPage.qml:31:            enabled: !rootfsManager.prepared
+android-qt/qml/RootsPage.qml:32:            onClicked: rootfsManager.prepare()
+android-qt/qml/RootsPage.qml:37:            enabled: rootfsManager.prepared
+android-qt/qml/FileBrowserPage.qml:24:            text: rootfsManager.rootPath
+android-qt/qml/ExternalKeyboardPage.qml:26:            checked: preferences.hideExtraKeysWithExternalKeyboard
+android-qt/qml/ExternalKeyboardPage.qml:27:            onToggled: preferences.hideExtraKeysWithExternalKeyboard = checked
+android-qt/qml/FontPickerPage.qml:26:            text: preferences.fontFamily
+android-qt/qml/FontPickerPage.qml:27:            onEditingFinished: preferences.fontFamily = text

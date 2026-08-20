@@ -1,0 +1,25 @@
+# Qt/CMake build directories
+build-*/
+cmake-build-*/
+android-build/
+
+# Generated Qt files
+.qmake.stash
+*.qmlc
+qrc_*.cpp
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+
+# Local archives and generated distribution files
+dist-final/
+*.apk
+*.idsig
+*.gitbundle
+build-linux/
