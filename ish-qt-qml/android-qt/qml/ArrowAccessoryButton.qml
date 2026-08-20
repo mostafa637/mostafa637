@@ -88,10 +88,15 @@ Rectangle {
         onPressed: function(mouse) {
             root.startX = mouse.x
             root.startY = mouse.y
-            root.direction = ""
+            // Select the touched quadrant immediately. This makes a press-and-
+            // hold repeat even when the finger does not move, matching the
+            // directional control in the original iSH accessory bar.
+            root.direction = root.directionAtPoint(mouse.x, mouse.y)
             root.selected = true
+            root.emitDirection()
             firstRepeat.stop()
             repeating.stop()
+            firstRepeat.start()
         }
 
         onPositionChanged: function(mouse) {
@@ -102,13 +107,6 @@ Rectangle {
         }
 
         onReleased: function(mouse) {
-            // A direct tap on a quadrant is a valid arrow press. The old
-            // implementation required a 20px drag, so ordinary taps looked
-            // dead on touch screens.
-            if (root.direction.length === 0) {
-                root.direction = root.directionAtPoint(mouse.x, mouse.y)
-                root.emitDirection()
-            }
             root.selected = false
             root.direction = ""
             firstRepeat.stop()

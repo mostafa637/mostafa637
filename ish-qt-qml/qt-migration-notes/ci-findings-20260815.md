@@ -115,3 +115,6 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 كشف سجل AVD أن سبب الفشل السابق لم يكن في archive ولا في SQLite، بل في تثبيت staging: كان المستورد يحذف مجلد AppData الأب كاملًا قبل نقل `.rootfs-import`، فيحذف المصدر المؤقت نفسه على Android. أصبح التثبيت الآن يحذف `data/` و`meta.db` القديمين فقط، ثم ينقل `data` و`meta.db` من staging إلى base path، ويتحقق بعد ذلك من integrity ومساري الجذر و`/bin/sh`.
 
 أصبحت artifacts النهائية من run الناجح محفوظة بأسماء معمارية واضحة: `ish-qt-android-arm64-v8a-release-signed.apk` و`ish-qt-android-x86_64-release-signed.apk` و`ish-qt-linux-x86_64`.
+
+## 2026-08-20 — تكرار زر الأسهم من لحظة الضغط
+تم تعديل `ArrowAccessoryButton.qml` ليحدد الربع المضغوط ويرسل أول escape sequence فور الضغط، ثم يبدأ مهلة التكرار مباشرة. كان التكرار سابقًا يبدأ فقط بعد `onPositionChanged`، لذلك كان الضغط المطول دون تحريك الإصبع يرسل event واحدًا عند الإفلات بدل السلوك المستمر المتوقع من شريط iSH الأصلي. أزيل الإرسال المتأخر عند `onReleased` لمنع التكرار المزدوج.
