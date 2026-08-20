@@ -37,18 +37,31 @@ jobs:
           script: |
             set -e
             adb wait-for-device
-            adb shell getprop sys.boot_completed | grep -q 1
+            for i in $(seq 1 60); do
+              boot=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+              anim=$(adb shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r')
+              [ "$boot" = "1" ] && [ "$anim" = "stopped" ] && break
+              sleep 2
+            done
+            [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]
+            sleep 15
             adb install -r gtk-hello-android/gtk-hello-android-release.apk
             adb shell pm clear com.example.gtkhelloworld || true
             adb shell am force-stop com.example.gtkhelloworld || true
             adb logcat -c || true
             timeout 30s adb shell am start -n com.example.gtkhelloworld/org.gtk.android.ToplevelActivity
-            sleep 20
+            sleep 25
             adb exec-out screencap -p > gtk-hello-android/emulator-screen-before-dismiss.png || true
+            # Android API 34 may show a transient System UI ANR dialog while
+            # background phone services finish booting. Dismiss it if present.
+            adb shell input tap 540 1060 || true
             adb shell input keyevent KEYCODE_BACK || true
-            sleep 10
+            sleep 8
             adb logcat -d -v threadtime > gtk-hello-android/logcat.txt || true
+            adb shell dumpsys window windows > gtk-hello-android/windows.txt || true
             adb exec-out screencap -p > gtk-hello-android/emulator-screen.png || true
+            grep -q 'GTK Hello World: activate started' gtk-hello-android/logcat.txt
+            grep -q 'GTK Hello World: window presented' gtk-hello-android/logcat.txt
             adb shell ps -A | grep -q 'com.example.gtkhelloworld'
             adb shell dumpsys activity activities | grep -q 'org.gtk.android.ToplevelActivity'
 
@@ -62,7 +75,8 @@ jobs:
             gtk-hello-android/emulator-screen.png
             gtk-hello-android/emulator-screen-before-dismiss.png
             gtk-hello-android/logcat.txt
-          if-no-files-found: warn
+            gtk-hello-android/windows.txt
+            if-no-files-found: warn
 
       - name: Publish emulator diagnostics branch
         if: always() && github.event_name == 'push'
@@ -74,6 +88,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch --orphan debug/emulator-latest
           git rm -r --cached . >/dev/null 2>&1 || true
-          git add gtk-hello-android/emulator-screen.png gtk-hello-android/emulator-screen-before-dismiss.png gtk-hello-android/logcat.txt
+          git add gtk-hello-android/emulator-screen.png gtk-hello-android/emulator-screen-before-dismiss.png gtk-hello-android/logcat.txt gtk-hello-android/windows.txt
           git commit -m "chore: publish latest emulator diagnostics [skip ci]" || true
           git push origin HEAD:refs/heads/debug/emulator-latest --force
