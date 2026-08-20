@@ -27,3 +27,15 @@ func decodeCondition(op x86asm.Op) (uint8, bool) {
 	}
 	return 0, false
 }
+
+func decodeReturn(inst x86asm.Inst, address uint64) (machinecode.Instruction, error) {
+	var cleanup int64
+	if inst.Args[0] != nil {
+		imm, ok := inst.Args[0].(x86asm.Imm)
+		if !ok || imm < 0 {
+			return machinecode.Instruction{}, ErrUnsupported
+		}
+		cleanup = int64(imm)
+	}
+	return machinecode.Instruction{Op: machinecode.OpRET, Imm: cleanup, Fallthrough: address + uint64(inst.Len)}, nil
+}

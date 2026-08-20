@@ -4,26 +4,26 @@ import "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu/machinecode"
 
 func emitInstruction(inst machinecode.Instruction) []byte {
 	switch inst.Op {
-	case machinecode.OpNOP, machinecode.OpRET:
+	case machinecode.OpNOP, machinecode.OpRET, machinecode.OpJmp, machinecode.OpJcc, machinecode.OpCall:
 		return nil
 	case machinecode.OpMOVImm:
 		return emitMove(inst)
 	case machinecode.OpMOVReg:
 		return emitRegMove(inst)
 	case machinecode.OpADDImm:
-		return emitArithmetic(inst, 0x7c)
+		return emitImmediateArithmetic(inst, 0x7c, emitAddFlags)
 	case machinecode.OpSUBImm:
-		return emitArithmetic(inst, 0x7d)
+		return emitImmediateArithmetic(inst, 0x7d, emitSubFlags)
 	case machinecode.OpADDReg:
-		return emitRegArithmetic(inst, 0x7c)
+		return emitRegisterArithmetic(inst, 0x7c, func(i machinecode.Instruction) []byte { return emitRegisterFlags(i, false) })
 	case machinecode.OpSUBReg:
-		return emitRegArithmetic(inst, 0x7d)
+		return emitRegisterArithmetic(inst, 0x7d, func(i machinecode.Instruction) []byte { return emitRegisterFlags(i, true) })
 	case machinecode.OpANDImm:
-		return emitArithmetic(inst, 0x83)
+		return emitLogicImmediate(inst, 0x83)
 	case machinecode.OpORImm:
-		return emitArithmetic(inst, 0x84)
+		return emitLogicImmediate(inst, 0x84)
 	case machinecode.OpXORImm:
-		return emitArithmetic(inst, 0x85)
+		return emitLogicImmediate(inst, 0x85)
 	case machinecode.OpCMPImm:
 		return emitCompare(inst)
 	case machinecode.OpLoad64:
@@ -38,8 +38,7 @@ func emitInstruction(inst machinecode.Instruction) []byte {
 }
 
 func emitMove(inst machinecode.Instruction) []byte {
-	out := []byte{0x42}
-	out = appendSLEB(out, inst.Imm)
+	out := constCode(inst.Imm)
 	return append(out, 0x21, byte(inst.Dst))
 }
 
@@ -47,18 +46,44 @@ func emitRegMove(inst machinecode.Instruction) []byte {
 	return []byte{0x20, byte(inst.Src), 0x21, byte(inst.Dst)}
 }
 
-func emitRegArithmetic(inst machinecode.Instruction, op byte) []byte {
-	return []byte{0x20, byte(inst.Dst), 0x20, byte(inst.Src), op, 0x21, byte(inst.Dst)}
+func emitImmediateArithmetic(inst machinecode.Instruction, op byte, flags func(machinecode.Instruction) []byte) []byte {
+	out := saveImmediateOperands(inst)
+	out = append(out, localCode(17)...)
+	out = append(out, localCode(18)...)
+	out = append(out, op, 0x21, byte(inst.Dst))
+	return append(out, flags(inst)...)
+}
+
+func emitRegisterArithmetic(inst machinecode.Instruction, op byte, flags func(machinecode.Instruction) []byte) []byte {
+	out := saveRegisterOperands(inst)
+	out = append(out, localCode(17)...)
+	out = append(out, localCode(18)...)
+	out = append(out, op, 0x21, byte(inst.Dst))
+	return append(out, flags(inst)...)
+}
+
+func emitLogicImmediate(inst machinecode.Instruction, op byte) []byte {
+	out := append(localCode(inst.Dst), constCode(inst.Imm)...)
+	out = append(out, op, 0x21, byte(inst.Dst))
+	return append(out, emitLogicFlags(inst)...)
 }
 
 func emitCompare(inst machinecode.Instruction) []byte {
-	out := []byte{0x20, byte(inst.Dst), 0x42}
-	out = appendSLEB(out, inst.Imm)
-	return append(out, 0x51, 0xad, 0x21, 16)
+	out := saveImmediateOperands(inst)
+	out = append(out, localCode(17)...)
+	out = append(out, localCode(18)...)
+	out = append(out, 0x7d, 0x21, 19)
+	return append(out, emitCompareFlags(inst)...)
 }
 
-func emitArithmetic(inst machinecode.Instruction, op byte) []byte {
-	out := []byte{0x20, byte(inst.Dst), 0x42}
-	out = appendSLEB(out, inst.Imm)
-	return append(out, op, 0x21, byte(inst.Dst))
+func saveImmediateOperands(inst machinecode.Instruction) []byte {
+	out := append(localCode(inst.Dst), 0x21, 17)
+	out = append(out, constCode(inst.Imm)...)
+	return append(out, 0x21, 18)
+}
+
+func saveRegisterOperands(inst machinecode.Instruction) []byte {
+	out := append(localCode(inst.Dst), 0x21, 17)
+	out = append(out, localCode(inst.Src)...)
+	return append(out, 0x21, 18)
 }

@@ -31,7 +31,7 @@ func appendSLEB(out []byte, value int64) []byte {
 }
 
 func emitBody(insts []machinecode.Instruction) []byte {
-	out := []byte{1, 1, 0x7e}
+	out := []byte{1, 3, 0x7e}
 	for _, inst := range insts {
 		out = append(out, emitInstruction(inst)...)
 	}

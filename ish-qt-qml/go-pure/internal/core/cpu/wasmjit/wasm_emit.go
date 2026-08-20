@@ -25,8 +25,8 @@ func emitModule(insts []machinecode.Instruction) []byte {
 }
 
 func wasmType() []byte {
-	out := []byte{4, 0x60, 16}
-	for i := 0; i < 16; i++ {
+	out := []byte{4, 0x60, 17}
+	for i := 0; i < 17; i++ {
 		out = append(out, 0x7e)
 	}
 	out = append(out, 17)

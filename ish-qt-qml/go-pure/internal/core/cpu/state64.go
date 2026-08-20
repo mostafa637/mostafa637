@@ -112,11 +112,12 @@ func defaultRDRAND64(width uint8) (uint64, bool) {
 // separate from MachineState: widening the existing i386 fields would silently
 // change stack, flag, and syscall semantics for the already-supported ABI.
 type MachineState64 struct {
-	Memory *Memory64
-	Cycle  uint64
-	Regs   [Reg64Count]uint64
-	RIP    uint64
-	RFLAGS uint64
+	Memory    *Memory64
+	Cycle     uint64
+	Regs      [Reg64Count]uint64
+	RIP       uint64
+	RFLAGS    uint64
+	CallDepth uint64
 
 	CF        uint8
 	OF        uint8

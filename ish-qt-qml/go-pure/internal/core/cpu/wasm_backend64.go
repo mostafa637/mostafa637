@@ -9,6 +9,7 @@ import (
 
 type WasmBlock64 struct {
 	Host        *wasmjit.HostBlock
+	Memory      *Memory64
 	Start, End  uint64
 	Pages       []Page64
 	Generations map[Page64]uint64
@@ -27,7 +28,7 @@ func (j *WasmJIT) CompileBlock64(ctx context.Context, memory *Memory64, start Ad
 	if err != nil {
 		return nil, err
 	}
-	return &WasmBlock64{Host: host, Start: block.Start, End: block.End, Pages: block.Pages, Generations: block.Generations}, nil
+	return &WasmBlock64{Host: host, Memory: memory, Start: block.Start, End: block.End, Pages: block.Pages, Generations: block.Generations}, nil
 }
 
 func readBlock64(memory *Memory64, block *CompiledBlock64) ([]byte, error) {
@@ -49,34 +50,50 @@ func (b *WasmBlock64) Run(ctx context.Context, state *MachineState64) (Flow64, e
 	if b == nil || b.Host == nil || state == nil {
 		return Flow64Stop, ErrInvalid64Block
 	}
-	regs, flags, err := b.Host.RunRegsFlags(ctx, state.Regs)
+	regs, flags, err := b.Host.RunRegsFlags(ctx, state.Regs, state.RFLAGS)
 	state.Regs = regs
-	applyZeroFlag(state, flags)
+	applyPackedFlags(state, flags)
 	flow, hasFlow := b.Host.Flow()
-	return runWasmFlow(state, flow, hasFlow, err)
+	return runWasmFlow(b.Memory, state, flow, hasFlow, err)
 }
 
-func runWasmFlow(state *MachineState64, flow machinecode.Instruction, hasFlow bool, err error) (Flow64, error) {
+func runWasmFlow(memory *Memory64, state *MachineState64, flow machinecode.Instruction, hasFlow bool, err error) (Flow64, error) {
 	if err != nil {
 		return Flow64Stop, err
 	}
 	if !hasFlow {
 		return Flow64Stop, nil
 	}
-	if flow.Op == machinecode.OpJcc && !conditionValue64(state, conditionCode64(flow.Cond)) {
-		state.RIP = flow.Fallthrough
-	} else {
+	switch flow.Op {
+	case machinecode.OpCall:
+		if err := pushCall64(memory, state, flow.Fallthrough); err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = flow.Target
+	case machinecode.OpRET:
+		if state.CallDepth == 0 {
+			return Flow64Stop, nil
+		}
+		target, err := popReturn64(memory, state, uint64(flow.Imm))
+		if err != nil {
+			return Flow64Stop, err
+		}
+		state.RIP = target
+	case machinecode.OpJcc:
+		state.RIP = flow.Target
+		if !conditionValue64(state, conditionCode64(flow.Cond)) {
+			state.RIP = flow.Fallthrough
+		}
+	default:
 		state.RIP = flow.Target
 	}
 	return Flow64Branch, nil
 }
 
-func applyZeroFlag(state *MachineState64, flags uint64) {
-	if flags != 0 {
-		state.RFLAGS |= Flag64ZF
-		return
-	}
-	state.RFLAGS &^= Flag64ZF
+func applyPackedFlags(state *MachineState64, packed uint64) {
+	const mask = Flag64CF | Flag64PF | Flag64AF | Flag64ZF | Flag64SF | Flag64OF
+	state.RFLAGS = (state.RFLAGS &^ mask) | (packed & mask) | Flag64IF
+	state.ExpandFlags()
 }
 
 func (b *WasmBlock64) Close(ctx context.Context) error {

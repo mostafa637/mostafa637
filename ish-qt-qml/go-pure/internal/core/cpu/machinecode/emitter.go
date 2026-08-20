@@ -20,6 +20,7 @@ const (
 	OpStore64
 	OpJmp
 	OpJcc
+	OpCall
 )
 
 type Instruction struct {
@@ -30,6 +31,11 @@ type Instruction struct {
 	Target      uint64
 	Fallthrough uint64
 	Cond        uint8
+	MemBase     int16
+	MemIndex    int16
+	MemScale    uint8
+	MemRIP      bool
+	NextPC      uint64
 }
 
 type Emitter interface {

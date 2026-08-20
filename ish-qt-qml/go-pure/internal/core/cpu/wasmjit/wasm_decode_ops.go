@@ -5,13 +5,14 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-func decodeMove(inst x86asm.Inst) (machinecode.Instruction, error) {
+func decodeMove(inst x86asm.Inst, address uint64) (machinecode.Instruction, error) {
+	nextPC := address + uint64(inst.Len)
 	dst, ok := decodeReg(inst.Args[0])
 	if !ok {
-		if base, disp, valid := decodeMem(inst.Args[0]); valid {
+		if ref, valid := decodeMem(inst.Args[0], nextPC); valid {
 			src, srcOK := decodeReg(inst.Args[1])
 			if srcOK {
-				return machinecode.Instruction{Op: machinecode.OpStore64, Dst: base, Src: src, Imm: disp}, nil
+				return memoryInstruction(machinecode.OpStore64, -1, src, ref), nil
 			}
 		}
 		return machinecode.Instruction{}, ErrUnsupported
@@ -19,8 +20,8 @@ func decodeMove(inst x86asm.Inst) (machinecode.Instruction, error) {
 	if src, ok := decodeReg(inst.Args[1]); ok {
 		return machinecode.Instruction{Op: machinecode.OpMOVReg, Dst: dst, Src: src}, nil
 	}
-	if base, disp, ok := decodeMem(inst.Args[1]); ok {
-		return machinecode.Instruction{Op: machinecode.OpLoad64, Dst: dst, Src: base, Imm: disp}, nil
+	if ref, ok := decodeMem(inst.Args[1], nextPC); ok {
+		return memoryInstruction(machinecode.OpLoad64, dst, -1, ref), nil
 	}
 	imm, ok := decodeImm(inst.Args[1])
 	if !ok {

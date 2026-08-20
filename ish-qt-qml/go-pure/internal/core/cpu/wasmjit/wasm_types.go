@@ -37,19 +37,22 @@ func (b *HostBlock) Run(ctx context.Context, regs [16]uint64) (uint64, error) {
 }
 
 func (b *HostBlock) RunRegs(ctx context.Context, regs [16]uint64) ([16]uint64, error) {
-	out, _, err := b.RunRegsFlags(ctx, regs)
+	out, _, err := b.RunRegsFlags(ctx, regs, 0)
 	return out, err
 }
 
-func (b *HostBlock) RunRegsFlags(ctx context.Context, regs [16]uint64) ([16]uint64, uint64, error) {
-	values, err := b.run.Call(ctx, regArgs(regs)...)
+func (b *HostBlock) RunRegsFlags(ctx context.Context, regs [16]uint64, flags uint64) ([16]uint64, uint64, error) {
+	values, err := b.run.Call(ctx, regArgs(regs, flags)...)
 	if err != nil {
 		return [16]uint64{}, 0, err
 	}
 	return regResults(values), resultFlag(values), nil
 }
 
-func regArgs(regs [16]uint64) []uint64 { return regs[:] }
+func regArgs(regs [16]uint64, flags uint64) []uint64 {
+	out := append([]uint64{}, regs[:]...)
+	return append(out, flags)
+}
 
 func regResults(values []uint64) [16]uint64 {
 	var out [16]uint64
