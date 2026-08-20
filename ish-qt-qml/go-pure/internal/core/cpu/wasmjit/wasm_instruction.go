@@ -42,6 +42,8 @@ func emitInstruction(inst machinecode.Instruction) []byte {
 		return emitExtend(inst)
 	case machinecode.OpLEA64:
 		return emitLEA(inst)
+	case machinecode.OpShift64:
+		return emitShift(inst)
 	case machinecode.OpSyscall:
 		return emitSyscall()
 	default:
@@ -86,16 +88,4 @@ func emitCompare(inst machinecode.Instruction) []byte {
 	out = append(out, localCode(18)...)
 	out = append(out, 0x7d, 0x21, 19)
 	return append(out, emitCompareFlags(inst)...)
-}
-
-func saveImmediateOperands(inst machinecode.Instruction) []byte {
-	out := append(localCode(inst.Dst), 0x21, 17)
-	out = append(out, constCode(inst.Imm)...)
-	return append(out, 0x21, 18)
-}
-
-func saveRegisterOperands(inst machinecode.Instruction) []byte {
-	out := append(localCode(inst.Dst), 0x21, 17)
-	out = append(out, localCode(inst.Src)...)
-	return append(out, 0x21, 18)
 }

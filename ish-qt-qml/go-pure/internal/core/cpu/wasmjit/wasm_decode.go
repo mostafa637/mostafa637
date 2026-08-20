@@ -67,6 +67,8 @@ func decodeX86Inst(inst x86asm.Inst, address uint64) (machinecode.Instruction, e
 		return decodeArithmetic(inst, machinecode.OpCMPImm)
 	case x86asm.TEST:
 		return decodeTest(inst)
+	case x86asm.SHL, x86asm.SHR, x86asm.SAR, x86asm.ROL, x86asm.ROR, x86asm.RCL, x86asm.RCR:
+		return decodeShift(inst)
 	default:
 		if cond, ok := decodeCondition(inst.Op); ok {
 			return decodeBranch(inst, address, machinecode.OpJcc, cond)

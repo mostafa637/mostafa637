@@ -27,6 +27,17 @@ const (
 	OpExtend64
 	OpTestImm
 	OpTestReg
+	OpShift64
+)
+
+const (
+	ShiftSHL uint8 = iota
+	ShiftSHR
+	ShiftSAR
+	ShiftROL
+	ShiftROR
+	ShiftRCL
+	ShiftRCR
 )
 
 type Instruction struct {
@@ -45,6 +56,7 @@ type Instruction struct {
 	Width       uint8
 	DstWidth    uint8
 	Signed      bool
+	ShiftKind   uint8
 }
 
 type Emitter interface {
