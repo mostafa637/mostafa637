@@ -164,3 +164,24 @@ func TestContext64CloneForChildCopiesProcessState(t *testing.T) {
 		t.Fatal("child groups share parent backing array")
 	}
 }
+
+func TestABI64CloneChildClearTIDAndVforkWaiter(t *testing.T) {
+	_, _, ctx, dispatcher, state := newABI64FilesystemTest(t)
+	ctx.PID = 77
+	ctx.ProcessFactory = func(parent *Context64, request CloneRequest64) int64 { return 913 }
+	waited := false
+	ctx.VForkWaiter = func(childPID int64, request CloneRequest64) {
+		waited = childPID == 913 && request.VFork
+	}
+	set64Syscall(state, Sys64Clone, cloneVFork64, 0, 0, 0, 0, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != 913 {
+		t.Fatalf("clone vfork: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+	if !waited {
+		t.Fatal("vfork waiter was not called")
+	}
+	set64Syscall(state, Sys64Clone, cloneChildClear64, 0, 0, 0, 0, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != int64(EFAULT) {
+		t.Fatalf("null child clear tid: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+}

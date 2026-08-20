@@ -311,6 +311,7 @@ type Context64 struct {
 	Execve         func(path string, argv, env []string) int64
 	ProcessFactory ProcessFactory64
 	ChildStarter   ChildStarter64
+	VForkWaiter    func(childPID int64, request CloneRequest64)
 
 	FDs                         *corefd.Table
 	Mappings                    []GuestMapping64

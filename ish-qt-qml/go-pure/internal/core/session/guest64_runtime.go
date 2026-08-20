@@ -19,8 +19,11 @@ type guest64Runtime struct {
 	jit        *corecpu.JIT64
 	parent     *coresyscall.Context64
 	pid        uint64
+	clearTID   uint64
+	vforkDone  chan struct{}
 	done       chan struct{}
 	once       sync.Once
+	vforkOnce  sync.Once
 }
 
 func (g *guestTransport) nextChildPID(parent *coresyscall.Context64) uint64 {
@@ -103,6 +106,11 @@ func (g *guestTransport) createChild64(parent *coresyscall.Context64, request co
 	child.Machine = state
 	child.ProcessFactory = g.createChild64
 	child.ChildStarter = g.startChild64
+	child.VForkWaiter = g.waitVFork64
+	if request.Flags&coresyscall.CloneChildClearTIDFlag64 != 0 {
+		child.TIDAddress = request.ChildTID
+	}
+
 	if request.Flags&coresyscall.CloneSetTLSFlag64 != 0 {
 		child.FSBase = request.TLS
 	}
@@ -112,6 +120,8 @@ func (g *guestTransport) createChild64(parent *coresyscall.Context64, request co
 		state:     state,
 		parent:    parent,
 		pid:       pid,
+		clearTID:  child.TIDAddress,
+		vforkDone: make(chan struct{}),
 		done:      make(chan struct{}),
 	}
 	runtime.dispatcher = coresyscall.NewDispatcher64(child)
@@ -135,18 +145,20 @@ func (g *guestTransport) startChild64(parent *coresyscall.Context64, childPID in
 		return
 	}
 	if request.Flags&coresyscall.CloneChildTIDFlag64 != 0 { // CLONE_CHILD_SETTID, in child memory.
-		var raw [8]byte
-		binary.LittleEndian.PutUint64(raw[:], uint64(childPID))
+		var raw [4]byte
+		binary.LittleEndian.PutUint32(raw[:], uint32(childPID))
+
 		if runtime.context.Memory == nil || runtime.context.Memory.Write(corecpu.Address64(request.ChildTID), raw[:]) != nil {
 			runtime.context.ExitCode = 128 + int32(coresyscall.EFAULT)
 			runtime.context.Exited = true
-			if parent != nil && parent.Children != nil {
-				parent.Children.MarkExited(uint32(childPID), runtime.context.ExitCode)
-			}
+			runtime.publishExit()
+			runtime.releaseVFork()
 			return
 		}
+
 	}
 	go runtime.run()
+
 }
 
 func (runtime *guest64Runtime) run() {
@@ -165,18 +177,49 @@ func (runtime *guest64Runtime) run() {
 				runtime.context.Exited = true
 			}
 			runtime.publishExit()
+			runtime.releaseVFork()
 			return
 		default:
+
 			runtime.context.ExitCode = 128 + int32(trap)
 			runtime.context.Exited = true
 			runtime.publishExit()
+			runtime.releaseVFork()
 			return
 		}
 	}
 }
 
+func (runtime *guest64Runtime) releaseVFork() {
+	if runtime == nil || runtime.vforkDone == nil {
+		return
+	}
+	runtime.vforkOnce.Do(func() { close(runtime.vforkDone) })
+}
+
+func (g *guestTransport) waitVFork64(childPID int64, _ coresyscall.CloneRequest64) {
+	if g == nil || childPID <= 0 {
+		return
+	}
+	runtime := g.runtimeForPID(uint64(childPID))
+	if runtime == nil || runtime.vforkDone == nil {
+		return
+	}
+	<-runtime.vforkDone
+}
+
 func (runtime *guest64Runtime) publishExit() {
-	if runtime == nil || runtime.parent == nil || runtime.parent.Children == nil {
+	if runtime == nil || runtime.context == nil {
+		return
+	}
+	if runtime.clearTID != 0 && runtime.context.Memory != nil {
+		var zero [4]byte
+		_ = runtime.context.Memory.Write(corecpu.Address64(runtime.clearTID), zero[:])
+		if runtime.context.Futexes != nil {
+			runtime.context.Futexes.Wake(runtime.clearTID, ^uint64(0))
+		}
+	}
+	if runtime.parent == nil || runtime.parent.Children == nil {
 		return
 	}
 	runtime.parent.Children.MarkExited(uint32(runtime.pid), runtime.context.ExitCode)

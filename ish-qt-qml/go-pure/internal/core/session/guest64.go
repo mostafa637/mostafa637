@@ -145,6 +145,7 @@ func (g *guestTransport) start64(ctx context.Context, process *corekernel.Proces
 	}
 	sysContext.ProcessFactory = g.createChild64
 	sysContext.ChildStarter = g.startChild64
+	sysContext.VForkWaiter = g.waitVFork64
 	g.runtimeMu.Lock()
 	if g.runtimes == nil {
 		g.runtimes = make(map[*coresyscall.Context64]*guest64Runtime)

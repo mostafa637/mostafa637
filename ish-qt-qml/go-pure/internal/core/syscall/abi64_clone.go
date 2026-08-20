@@ -22,10 +22,12 @@ const (
 // Exported flag aliases used by the session runtime when materializing a
 // child process from a validated CloneRequest64.
 const (
-	CloneVMFlag64       = cloneVM64
-	CloneFilesFlag64    = cloneFiles64
-	CloneSetTLSFlag64   = cloneSetTLS64
-	CloneChildTIDFlag64 = cloneChildTID64
+	CloneVMFlag64            = cloneVM64
+	CloneFilesFlag64         = cloneFiles64
+	CloneVForkFlag64         = cloneVFork64
+	CloneSetTLSFlag64        = cloneSetTLS64
+	CloneChildClearTIDFlag64 = cloneChildClear64
+	CloneChildTIDFlag64      = cloneChildTID64
 )
 
 func validateCloneFlags64(flags uint64, childStack, parentTID, childTID uint64, fork, vfork bool) int64 {
@@ -41,7 +43,7 @@ func validateCloneFlags64(flags uint64, childStack, parentTID, childTID uint64, 
 	if flags&cloneParentTID64 != 0 && parentTID == 0 {
 		return int64(EFAULT)
 	}
-	if flags&cloneChildTID64 != 0 && childTID == 0 {
+	if flags&(cloneChildTID64|cloneChildClear64) != 0 && childTID == 0 {
 		return int64(EFAULT)
 	}
 	if (fork || vfork) && (childStack != 0 || parentTID != 0 || childTID != 0) {
@@ -60,17 +62,17 @@ func cloneWithFactory64(ctx *Context64, request CloneRequest64) int64 {
 	if ctx.ProcessFactory == nil {
 		return int64(ENOSYS)
 	}
-	if request.Flags&(cloneParentTID64|cloneChildTID64) != 0 {
+	if request.Flags&(cloneParentTID64|cloneChildTID64|cloneChildClear64) != 0 {
 		if ctx.Memory == nil {
 			return int64(EFAULT)
 		}
-		var probe [8]byte
+		var probe [4]byte
 		if request.Flags&cloneParentTID64 != 0 {
 			if err := ctx.Memory.Read(corecpu.Address64(request.ParentTID), probe[:]); err != nil {
 				return int64(EFAULT)
 			}
 		}
-		if request.Flags&cloneChildTID64 != 0 {
+		if request.Flags&(cloneChildTID64|cloneChildClear64) != 0 && request.ChildTID != 0 {
 			if err := ctx.Memory.Read(corecpu.Address64(request.ChildTID), probe[:]); err != nil {
 				return int64(EFAULT)
 			}
@@ -87,7 +89,7 @@ func cloneWithFactory64(ctx *Context64, request CloneRequest64) int64 {
 		if ctx.Memory == nil {
 			return int64(EFAULT)
 		}
-		var raw [8]byte
+		var raw [4]byte
 		for i := range raw {
 			raw[i] = byte(uint64(childPID) >> (8 * i))
 		}
@@ -97,6 +99,11 @@ func cloneWithFactory64(ctx *Context64, request CloneRequest64) int64 {
 	}
 	if ctx.ChildStarter != nil {
 		ctx.ChildStarter(ctx, childPID, request)
+	}
+	if request.VFork || request.Flags&cloneVFork64 != 0 {
+		if ctx.VForkWaiter != nil {
+			ctx.VForkWaiter(childPID, request)
+		}
 	}
 	return childPID
 }
@@ -108,6 +115,7 @@ func clone64(ctx *Context64, args [6]uint64) int64 {
 		ParentTID:  args[2],
 		ChildTID:   args[3],
 		TLS:        args[4],
+		VFork:      args[0]&cloneVFork64 != 0,
 	})
 }
 

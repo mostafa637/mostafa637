@@ -160,6 +160,12 @@ func (r *FutexRegistry64) wait(memory *corecpu.Memory64, address corecpu.Address
 	}
 }
 
+// Wake releases up to count waiters registered on address. It is used by
+// lifecycle code for CLONE_CHILD_CLEARTID notification.
+func (r *FutexRegistry64) Wake(address uint64, count uint64) int32 {
+	return r.wake(address, count)
+}
+
 func (r *FutexRegistry64) wake(address uint64, count uint64) int32 {
 	if r == nil || count == 0 {
 		return 0

@@ -17,40 +17,43 @@ func (r *ChildRegistry) WaitID(parentPID, idType, wantedPID uint32, options uint
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	var candidate *ChildState
-	for _, child := range r.children {
-		if child.ParentPID != parentPID || child.Reaped {
+	r.initLocked()
+	for {
+		var candidate *ChildState
+		for _, child := range r.children {
+			if child.ParentPID != parentPID || child.Reaped {
+				continue
+			}
+			switch idType {
+			case waitIDTypePID64:
+				if child.PID != wantedPID {
+					continue
+				}
+			case waitIDTypePGRP64:
+				// ChildRegistry has no process-group field yet. The only safe
+				// representable group is the child PID itself.
+				if wantedPID != 0 && child.PID != wantedPID {
+					continue
+				}
+			}
+			candidate = child
+			if child.Exited {
+				break
+			}
+		}
+		if candidate == nil {
+			return 0, 0, false, ECHILD
+		}
+		if !candidate.Exited {
+			if options&WaitNoHang != 0 {
+				return 0, 0, false, 0
+			}
+			r.cond.Wait()
 			continue
 		}
-		switch idType {
-		case waitIDTypePID64:
-			if child.PID != wantedPID {
-				continue
-			}
-		case waitIDTypePGRP64:
-			// ChildRegistry has no process-group field yet. The only safe
-			// representable group is the child PID itself.
-			if wantedPID != 0 && child.PID != wantedPID {
-				continue
-			}
+		if options&WaitNoWait == 0 {
+			candidate.Reaped = true
 		}
-		candidate = child
-		if child.Exited {
-			break
-		}
+		return candidate.PID, candidate.ExitCode, true, 0
 	}
-	if candidate == nil {
-		return 0, 0, false, ECHILD
-	}
-	if !candidate.Exited {
-		if options&WaitNoHang != 0 {
-			return 0, 0, false, 0
-		}
-		return 0, 0, false, EINTR
-	}
-	if options&WaitNoWait == 0 {
-		candidate.Reaped = true
-	}
-	return candidate.PID, candidate.ExitCode, true, 0
 }
