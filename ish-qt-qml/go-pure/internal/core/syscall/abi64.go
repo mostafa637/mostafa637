@@ -69,6 +69,7 @@ const (
 	Sys64Sendfile      Number64 = 40
 	Sys64Tee           Number64 = 276
 	Sys64Vmsplice      Number64 = 278
+	Sys64Fallocate     Number64 = 285
 	Sys64CopyFileRange Number64 = 326
 
 	Sys64Chown  Number64 = 92
@@ -456,6 +457,7 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Splice, splice64)
 	d.Register(Sys64Tee, tee64)
 	d.Register(Sys64Vmsplice, vmsplice64)
+	d.Register(Sys64Fallocate, fallocate64)
 	d.Register(Sys64Pipe2, pipe264)
 	d.Register(Sys64Close, close64)
 	d.Register(Sys64Dup, dup64)
