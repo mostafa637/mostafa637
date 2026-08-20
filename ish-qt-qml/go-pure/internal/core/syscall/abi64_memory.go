@@ -22,6 +22,9 @@ type GuestMapping64 struct {
 	FileSize int64
 	Prot     uint64
 	Shared   bool
+	// Special identifies virtual kernel objects whose mmap contents live in
+	// guest memory rather than fakefs (for example io_uring rings).
+	Special any
 }
 
 func (ctx *Context64) addMapping64(mapping GuestMapping64) {
@@ -213,7 +216,13 @@ func mmap64(ctx *Context64, args [6]uint64) int64 {
 		}
 		var err error
 		backing, err = ctx.GetFile(rawFD)
-		if err != nil || backing == nil || backing.Path == "" || ctx.FS == nil {
+		if err != nil || backing == nil {
+			return int64(EBADF)
+		}
+		if ring, ok := backing.Opaque.(*ioUring64); ok {
+			return mmapIoUring64(ctx, ring, args)
+		}
+		if backing.Path == "" || ctx.FS == nil {
 			return int64(EBADF)
 		}
 		info, statErr := ctx.FS.Stat(backing.Path)
@@ -313,6 +322,7 @@ func munmap64(ctx *Context64, args [6]uint64) int64 {
 	if err := ctx.Memory.UnmapAlways(corecpu.Address64(args[0]), length); err != nil {
 		return int64(EINVAL)
 	}
+	ioUringReleaseMapping64(ctx, corecpu.Address64(args[0]))
 	ctx.removeMappings64(corecpu.Address64(args[0]), length)
 	return 0
 }
