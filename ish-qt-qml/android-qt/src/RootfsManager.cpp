@@ -14,6 +14,7 @@
 #include <cerrno>
 #include <cstring>
 #include <memory>
+#include <unistd.h>
 
 #include <sqlite3.h>
 #include <zlib.h>
@@ -145,6 +146,61 @@ QString sqliteError(sqlite3 *db, const QString &fallback)
     return fallback;
 }
 
+bool isUsableRootfs(const QString &dataPath)
+{
+    const QFileInfo dataInfo(dataPath);
+    const QString databasePath = QDir(dataInfo.absolutePath()).filePath(QStringLiteral("meta.db"));
+    if (!dataInfo.isDir() || !QFileInfo(databasePath).isFile())
+        return false;
+
+    sqlite3 *db = nullptr;
+    if (sqlite3_open_v2(QFile::encodeName(databasePath).constData(), &db,
+                        SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+        if (db)
+            sqlite3_close(db);
+        return false;
+    }
+
+    bool valid = false;
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &statement, nullptr) == SQLITE_OK &&
+        sqlite3_step(statement) == SQLITE_ROW)
+        valid = sqlite3_column_int(statement, 0) == 3;
+    if (statement)
+        sqlite3_finalize(statement);
+
+    if (valid && sqlite3_prepare_v2(db, "PRAGMA integrity_check;", -1, &statement, nullptr) == SQLITE_OK &&
+        sqlite3_step(statement) == SQLITE_ROW) {
+        const char *integrity = reinterpret_cast<const char *>(sqlite3_column_text(statement, 0));
+        valid = integrity && std::strcmp(integrity, "ok") == 0;
+    } else {
+        valid = false;
+    }
+    if (statement)
+        sqlite3_finalize(statement);
+
+    auto pathExistsWithStat = [db](const char *path) {
+        sqlite3_stmt *check = nullptr;
+        const char *sql = "SELECT p.inode, length(s.stat) FROM paths p "
+                          "JOIN stats s ON s.inode = p.inode WHERE p.path = ?1 LIMIT 1;";
+        bool exists = false;
+        if (sqlite3_prepare_v2(db, sql, -1, &check, nullptr) == SQLITE_OK) {
+            sqlite3_bind_blob(check, 1, path, static_cast<int>(std::strlen(path)), SQLITE_STATIC);
+            if (sqlite3_step(check) == SQLITE_ROW)
+                exists = sqlite3_column_int64(check, 0) > 0 && sqlite3_column_int(check, 1) == 16;
+        }
+        if (check)
+            sqlite3_finalize(check);
+        return exists;
+    };
+
+    // fakefs stores the root path as an empty blob, and /bin/sh catches an
+    // incomplete first-run import that would otherwise look usable.
+    valid = valid && pathExistsWithStat("") && pathExistsWithStat("/bin/sh");
+    sqlite3_close(db);
+    return valid;
+}
+
 } // namespace
 
 RootfsManager::RootfsManager(QObject *parent)
@@ -213,14 +269,24 @@ void RootfsManager::prepare()
         emit preparationError(error);
         return;
     }
+    const QString appDataPath = QFileInfo(m_rootPath).absolutePath();
+    const QString temporaryData = QDir(temporaryRoot).filePath(QStringLiteral("data"));
+    const QString temporaryDatabase = QDir(temporaryRoot).filePath(QStringLiteral("meta.db"));
+    const QString databasePath = QDir(appDataPath).filePath(QStringLiteral("meta.db"));
     QDir(m_rootPath).removeRecursively();
-    if (!QDir().rename(temporaryRoot, m_rootPath)) {
-        qWarning() << "[ish-qt] FAILED to install imported rootfs (rename)";
+    QFile::remove(databasePath);
+    if (!QDir().rename(temporaryData, m_rootPath) ||
+        !QFile::rename(temporaryDatabase, databasePath) ||
+        !isUsableRootfs(m_rootPath)) {
+        qWarning() << "[ish-qt] FAILED to install a valid fakefs rootfs";
         QDir(temporaryRoot).removeRecursively();
+        QDir(m_rootPath).removeRecursively();
+        QFile::remove(databasePath);
         QFile::remove(archivePath);
-        emit preparationError(QStringLiteral("Unable to install imported rootfs"));
+        emit preparationError(QStringLiteral("Unable to install a valid fakefs rootfs"));
         return;
     }
+    QDir(temporaryRoot).removeRecursively();
     QFile::remove(archivePath);
     refreshRepositoryState();
     setPrepared(true);
@@ -274,6 +340,7 @@ bool RootfsManager::importBundledRootfs(const QString &archivePath,
     const qint64 archiveSize = QFileInfo(archivePath).size();
     qint64 approximateRead = 0;
     QList<QByteArray> metadataPaths;
+    QList<QByteArray> metadataHardlinkTargets;
     QList<quint32> metadataModes;
     QList<quint32> metadataUids;
     QList<quint32> metadataGids;
@@ -335,6 +402,24 @@ bool RootfsManager::importBundledRootfs(const QString &archivePath,
                 ok = false;
             }
             linkFile.close();
+        } else if (entry.type == '1') {
+            QByteArray hardlinkPath;
+            if (!normalizeTarPath(entry.link, &hardlinkPath)) {
+                localError = QStringLiteral("Rootfs contains an unsafe hardlink target");
+                ok = false;
+            } else {
+                QDir().mkpath(QFileInfo(outputPath).absolutePath());
+                const QString sourcePath = hardlinkPath.isEmpty()
+                    ? QDir(destination).filePath(QStringLiteral("data"))
+                    : QDir(destination).filePath(QStringLiteral("data") + QString::fromUtf8(hardlinkPath));
+                QFile::remove(outputPath);
+                if (::link(QFile::encodeName(sourcePath).constData(),
+                           QFile::encodeName(outputPath).constData()) != 0) {
+                    localError = QStringLiteral("Unable to create rootfs hardlink %1").arg(displayPath(entry.path));
+                    ok = false;
+                }
+                entry.link = hardlinkPath;
+            }
         } else {
             QDir().mkpath(QFileInfo(outputPath).absolutePath());
             QFile output(outputPath);
@@ -372,6 +457,7 @@ bool RootfsManager::importBundledRootfs(const QString &archivePath,
 
         if (ok) {
             metadataPaths.append(entry.path);
+            metadataHardlinkTargets.append(entry.type == '1' ? entry.link : QByteArray());
             metadataModes.append(entry.mode);
             metadataUids.append(entry.uid);
             metadataGids.append(entry.gid);
@@ -387,11 +473,13 @@ bool RootfsManager::importBundledRootfs(const QString &archivePath,
 
     if (ok && !rootSeen) {
         metadataPaths.append(QByteArray());
+        metadataHardlinkTargets.append(QByteArray());
         metadataModes.append(0040755);
         metadataUids.append(0);
         metadataGids.append(0);
     }
-    if (ok && !writeMetadata(destination, metadataPaths, metadataModes, metadataUids, metadataGids, &localError))
+    if (ok && !writeMetadata(destination, metadataPaths, metadataHardlinkTargets,
+                              metadataModes, metadataUids, metadataGids, &localError))
         ok = false;
 
     if (!ok) {
@@ -403,6 +491,7 @@ bool RootfsManager::importBundledRootfs(const QString &archivePath,
 
 bool RootfsManager::writeMetadata(const QString &destination,
                                    const QList<QByteArray> &paths,
+                                   const QList<QByteArray> &hardlinkTargets,
                                    const QList<quint32> &modes,
                                    const QList<quint32> &uids,
                                    const QList<quint32> &gids,
@@ -439,13 +528,27 @@ bool RootfsManager::writeMetadata(const QString &destination,
 
     sqlite3_stmt *insertStat = nullptr;
     sqlite3_stmt *insertPath = nullptr;
+    sqlite3_stmt *insertHardlink = nullptr;
     if (ok)
         ok = sqlite3_prepare_v2(db, "INSERT INTO stats (stat) VALUES (?)", -1, &insertStat, nullptr) == SQLITE_OK;
     if (ok)
         ok = sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO paths (path, inode) VALUES (?, ?)", -1, &insertPath, nullptr) == SQLITE_OK;
+    if (ok)
+        ok = sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO paths (path, inode) SELECT ?, inode FROM paths WHERE path = ? LIMIT 1", -1, &insertHardlink, nullptr) == SQLITE_OK;
 
     if (ok) {
         for (int i = 0; i < paths.size(); ++i) {
+            if (!hardlinkTargets.value(i).isEmpty()) {
+                if (sqlite3_bind_blob(insertHardlink, 1, paths.at(i).constData(), paths.at(i).size(), SQLITE_TRANSIENT) != SQLITE_OK ||
+                    sqlite3_bind_blob(insertHardlink, 2, hardlinkTargets.at(i).constData(), hardlinkTargets.at(i).size(), SQLITE_TRANSIENT) != SQLITE_OK ||
+                    sqlite3_step(insertHardlink) != SQLITE_DONE || sqlite3_changes(db) == 0) {
+                    ok = false;
+                    break;
+                }
+                sqlite3_reset(insertHardlink);
+                sqlite3_clear_bindings(insertHardlink);
+                continue;
+            }
             IshStat stat{modes.value(i), uids.value(i), gids.value(i), 0};
             if (sqlite3_bind_blob(insertStat, 1, &stat, sizeof(stat), SQLITE_TRANSIENT) != SQLITE_OK ||
                 sqlite3_step(insertStat) != SQLITE_DONE) {
@@ -468,6 +571,7 @@ bool RootfsManager::writeMetadata(const QString &destination,
 
     if (insertStat) sqlite3_finalize(insertStat);
     if (insertPath) sqlite3_finalize(insertPath);
+    if (insertHardlink) sqlite3_finalize(insertHardlink);
     if (ok)
         ok = sqlite3_exec(db, "COMMIT;", nullptr, nullptr, &sqliteMessage) == SQLITE_OK;
     else

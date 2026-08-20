@@ -690,11 +690,13 @@ ApplicationWindow {
                             anchors.centerIn: parent
                             z: 2
                             source: accessoryButton.iconName.length > 0 ? window.accessoryIcon(accessoryButton.iconName) : ""
-                            visible: accessoryButton.iconName.length > 0 && status === Image.Ready
+                            visible: accessoryButton.iconName.length > 0
+                            opacity: status === Image.Ready ? 1.0 : 0.0
                             fillMode: Image.PreserveAspectFit
                             asynchronous: false
+                            cache: true
                             smooth: true
-                            sourceSize: Qt.size(Math.min(26, window.accessoryButtonSize * 0.58), Math.min(26, window.accessoryButtonSize * 0.58))
+                            sourceSize: Qt.size(128, 128)
                             onStatusChanged: if (status === Image.Error) console.warn("iSH icon load failed:", source)
                         }
                         Image {
@@ -704,17 +706,20 @@ ApplicationWindow {
                             anchors.centerIn: parent
                             z: 2
                             source: accessoryButton.bitmapIconName.length > 0 ? window.accessoryIcon(accessoryButton.bitmapIconName) : ""
-                            visible: accessoryButton.bitmapIconName.length > 0 && status === Image.Ready
+                            visible: accessoryButton.bitmapIconName.length > 0
+                            opacity: status === Image.Ready ? 1.0 : 0.0
                             fillMode: Image.PreserveAspectFit
                             asynchronous: false
+                            cache: true
                             smooth: true
-                            sourceSize: Qt.size(Math.min(26, window.accessoryButtonSize * 0.58), Math.min(26, window.accessoryButtonSize * 0.58))
+                            sourceSize: Qt.size(128, 128)
                             onStatusChanged: if (status === Image.Error) console.warn("iSH bitmap load failed:", source)
                         }
                         Text {
                             anchors.fill: parent
                             z: 1
-                            visible: !vectorImage.visible && !bitmapImage.visible
+                            visible: (accessoryButton.iconName.length === 0 || vectorImage.status !== Image.Ready) &&
+                                     (accessoryButton.bitmapIconName.length === 0 || bitmapImage.status !== Image.Ready)
                             text: accessoryButton.fallbackText
                             color: window.accessoryForeground
                             font.pixelSize: 15
@@ -727,10 +732,10 @@ ApplicationWindow {
                         layer.enabled: Qt.platform.os === "android"
                         layer.smooth: true
                         color: accessoryButton.pressed || accessoryButton.checked
-                               ? (window.isDarkColor(window.terminalBackground()) ? "#666666" : "#b8b8bd")
-                               : (window.isDarkColor(window.terminalBackground()) ? "#555555" : "#f2f2f7")
+                               ? (window.isDarkColor(window.accessoryBackground) ? "#666666" : "#b8b8bd")
+                               : (window.isDarkColor(window.accessoryBackground) ? "#555555" : "#f2f2f7")
                         border.width: 1
-                        border.color: window.isDarkColor(window.terminalBackground()) ? "#707070" : "#d1d1d6"
+                        border.color: window.isDarkColor(window.accessoryBackground) ? "#707070" : "#d1d1d6"
                         opacity: accessoryButton.enabled ? 1.0 : 0.55
                     }
                 }

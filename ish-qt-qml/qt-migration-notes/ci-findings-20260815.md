@@ -97,3 +97,14 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 أصبح توقيع APK جزءًا إلزاميًا من بناء Android نفسه عبر `QT_ANDROID_SIGN_APK=ON` في CMake، وتُمرَّر بيانات keystore إلى `androiddeployqt` من متغيرات `QT_ANDROID_KEYSTORE_*`. أُضيف keystore ثابت للمشروع باسم `ish-qt-ci-release.keystore`، وتُرفع فقط ملفات Release الموقّعة بعد تحقق `apksigner verify`. اختبار Linux KVM يرفض الآن أي artifact غير موقّع ويثبت نفس APK المرفوع.
 
 هذا المفتاح مخصص لبناء CI والتوزيع المباشر داخل المشروع. قبل نشر التطبيق في Google Play يجب استبداله بمفتاح نشر خاص محفوظ خارج المستودع، لأن المفتاح الموجود في المصدر لا يُعد سر Play Store.
+
+
+## 2026-08-20 — rootfs وملحقات QML
+
+تم تشديد فحص جاهزية rootfs بحيث لا يكتفي بوجود `data/` و`meta.db` و`user_version=3`؛ بل يتحقق أيضًا من `PRAGMA integrity_check`، ومن وجود مسار fakefs الجذري المخزن كـblob فارغ، ومن وجود `/bin/sh` مع blob `ish_stat` بحجم 16 بايت. هذا يمنع إعادة استخدام تثبيت مبتور بعد فشل أول تشغيل.
+
+تمت مواءمة مستورد Qt مع سلوك `fakefs_import` في hardlinks: تُطبَّع أهداف hardlink، يُنشأ رابط inode فعلي في مجلد البيانات، ويُسجَّل المساران على inode واحد في `paths`. كما أُضيفت حماية تمنع قبول هدف hardlink مفقود.
+
+في شريط الملحقات، أصبحت صور iSH الأصلية مرئية عند جاهزية المصدر بدل ربط خاصية `visible` مباشرة بحالة التحميل، مع الإبقاء على النص fallback عند الخطأ. كما أصبحت ألوان الخلفية والحدود تعتمد على سطح شريط الملحقات نفسه بدل خلفية الطرفية السوداء على Android.
+
+الخطوة التالية هي تشغيل بناء Linux وAndroid والتحقق من سجل QML، ثم تشغيل اختبار AVD والتأكد من أن `rootfs/data/meta.db` يحتوي الجذر و`/bin/sh` بعد أول تشغيل.

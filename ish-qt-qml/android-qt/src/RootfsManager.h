@@ -46,6 +46,7 @@ signals:
 private:
     bool importBundledRootfs(const QString &archivePath, const QString &destination, QString *error);
     bool writeMetadata(const QString &destination, const QList<QByteArray> &paths,
+                       const QList<QByteArray> &hardlinkTargets,
                        const QList<quint32> &modes, const QList<quint32> &uids,
                        const QList<quint32> &gids, QString *error);
     bool updateOnlyRepositoriesFile();
