@@ -108,3 +108,10 @@ The iSH Meson source currently supports `platform/darwin.c` and `platform/linux.
 في شريط الملحقات، أصبحت صور iSH الأصلية مرئية عند جاهزية المصدر بدل ربط خاصية `visible` مباشرة بحالة التحميل، مع الإبقاء على النص fallback عند الخطأ. كما أصبحت ألوان الخلفية والحدود تعتمد على سطح شريط الملحقات نفسه بدل خلفية الطرفية السوداء على Android.
 
 الخطوة التالية هي تشغيل بناء Linux وAndroid والتحقق من سجل QML، ثم تشغيل اختبار AVD والتأكد من أن `rootfs/data/meta.db` يحتوي الجذر و`/bin/sh` بعد أول تشغيل.
+
+## 2026-08-20 — تحقق CI النهائي وإصلاح تثبيت Android
+نجح run `32362318694` بالكامل. نجح QML lint على Qt 6.11.1، وبناء Linux Desktop واختبار `ish_core_host_smoke`، وبناء APKs الموقعة لـ`arm64-v8a` و`x86_64`، واختبار AVD على Linux + KVM مع دورة LLDB الكاملة.
+
+كشف سجل AVD أن سبب الفشل السابق لم يكن في archive ولا في SQLite، بل في تثبيت staging: كان المستورد يحذف مجلد AppData الأب كاملًا قبل نقل `.rootfs-import`، فيحذف المصدر المؤقت نفسه على Android. أصبح التثبيت الآن يحذف `data/` و`meta.db` القديمين فقط، ثم ينقل `data` و`meta.db` من staging إلى base path، ويتحقق بعد ذلك من integrity ومساري الجذر و`/bin/sh`.
+
+أصبحت artifacts النهائية من run الناجح محفوظة بأسماء معمارية واضحة: `ish-qt-android-arm64-v8a-release-signed.apk` و`ish-qt-android-x86_64-release-signed.apk` و`ish-qt-linux-x86_64`.
