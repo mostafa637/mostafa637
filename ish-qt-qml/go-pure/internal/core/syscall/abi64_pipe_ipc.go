@@ -71,6 +71,9 @@ func sendfile64(ctx *Context64, args [6]uint64) int64 {
 	if ctx == nil || ctx.Memory == nil {
 		return int64(EFAULT)
 	}
+	if args[0] == args[1] {
+		return int64(EINVAL)
+	}
 	outFile, err := ctx.GetFile(args[0])
 	if err != nil || outFile.Writer == nil {
 		return int64(EBADF)
@@ -84,28 +87,15 @@ func sendfile64(ctx *Context64, args [6]uint64) int64 {
 		return int64(EINVAL)
 	}
 
-	var offset *int64
-	if args[2] != 0 {
-		value, readErr := readSigned64(ctx, args[2])
-		if readErr != nil {
-			return int64(EFAULT)
-		}
-		if inFile.Seeker == nil {
-			return espipe64
-		}
-		if _, seekErr := inFile.Seek(value, io.SeekStart); seekErr != nil {
-			return int64(EINVAL)
-		}
-		offset = &value
+	offset, errCode := prepareOffset64(ctx, inFile, args[2])
+	if errCode != 0 {
+		return errCode
 	}
 
 	total, transferErr := copyBetween64(inFile.Reader, outFile.Writer, count)
-	if offset != nil && inFile.Seeker != nil {
-		position, seekErr := inFile.Seek(0, io.SeekCurrent)
-		if seekErr != nil || writeSigned64(ctx, args[2], position) != nil {
-			if total == 0 {
-				return int64(EFAULT)
-			}
+	if offset != nil {
+		if finishErr := finishOffset64(ctx, offset); finishErr != nil && total == 0 {
+			return offsetError64(finishErr)
 		}
 	}
 	if transferErr != nil && total == 0 {
@@ -119,6 +109,9 @@ func splice64(ctx *Context64, args [6]uint64) int64 {
 		return int64(EFAULT)
 	}
 	if args[5]&^spliceFlags64 != 0 {
+		return int64(EINVAL)
+	}
+	if args[0] == args[2] {
 		return int64(EINVAL)
 	}
 	inFile, err := ctx.GetFile(args[0])
@@ -145,21 +138,13 @@ func splice64(ctx *Context64, args [6]uint64) int64 {
 
 	total, transferErr := copyBetween64(inFile.Reader, outFile.Writer, count)
 	if inOffset != nil {
-		if position, seekErr := inFile.Seek(0, io.SeekCurrent); seekErr == nil {
-			if writeSigned64(ctx, args[1], position) != nil && total == 0 {
-				return int64(EFAULT)
-			}
-		} else if total == 0 {
-			return int64(EIO)
+		if finishErr := finishOffset64(ctx, inOffset); finishErr != nil && total == 0 {
+			return offsetError64(finishErr)
 		}
 	}
 	if outOffset != nil {
-		if position, seekErr := outFile.Seek(0, io.SeekCurrent); seekErr == nil {
-			if writeSigned64(ctx, args[3], position) != nil && total == 0 {
-				return int64(EFAULT)
-			}
-		} else if total == 0 {
-			return int64(EIO)
+		if finishErr := finishOffset64(ctx, outOffset); finishErr != nil && total == 0 {
+			return offsetError64(finishErr)
 		}
 	}
 	if transferErr != nil && total == 0 {
@@ -216,7 +201,13 @@ func copyBetween64(src io.Reader, dst io.Writer, count int) (int, error) {
 	return total, nil
 }
 
-func prepareOffset64(ctx *Context64, file *corefd.File, address uint64) (*int64, int64) {
+type offset64State struct {
+	file    *corefd.File
+	address uint64
+	origin  int64
+}
+
+func prepareOffset64(ctx *Context64, file *corefd.File, address uint64) (*offset64State, int64) {
 	if address == 0 {
 		return nil, 0
 	}
@@ -227,10 +218,43 @@ func prepareOffset64(ctx *Context64, file *corefd.File, address uint64) (*int64,
 	if err != nil {
 		return nil, int64(EFAULT)
 	}
+	if value < 0 {
+		return nil, int64(EINVAL)
+	}
+	origin, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return nil, espipe64
+	}
 	if _, err := file.Seek(value, io.SeekStart); err != nil {
 		return nil, int64(EINVAL)
 	}
-	return &value, 0
+	return &offset64State{file: file, address: address, origin: origin}, 0
+}
+
+func finishOffset64(ctx *Context64, state *offset64State) error {
+	if state == nil || state.file == nil {
+		return nil
+	}
+	position, err := state.file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return err
+	}
+	writeErr := writeSigned64(ctx, state.address, position)
+	_, restoreErr := state.file.Seek(state.origin, io.SeekStart)
+	if writeErr != nil {
+		return writeErr
+	}
+	return restoreErr
+}
+
+func offsetError64(err error) int64 {
+	if err == nil {
+		return 0
+	}
+	if errors.Is(err, errGuestMemory64) {
+		return int64(EFAULT)
+	}
+	return int64(EIO)
 }
 
 func readSigned64(ctx *Context64, address uint64) (int64, error) {
@@ -241,13 +265,18 @@ func readSigned64(ctx *Context64, address uint64) (int64, error) {
 	return int64(binary.LittleEndian.Uint64(raw[:])), nil
 }
 
+var errGuestMemory64 = errors.New("guest offset memory access failed")
+
 func writeSigned64(ctx *Context64, address uint64, value int64) error {
 	var raw [8]byte
 	binary.LittleEndian.PutUint64(raw[:], uint64(value))
 	if ctx == nil || ctx.Memory == nil {
-		return errors.New("guest offset write failed")
+		return errGuestMemory64
 	}
-	return ctx.Memory.Write(corecpu.Address64(address), raw[:])
+	if err := ctx.Memory.Write(corecpu.Address64(address), raw[:]); err != nil {
+		return errGuestMemory64
+	}
+	return nil
 }
 
 func transferError64(err error) int64 {
