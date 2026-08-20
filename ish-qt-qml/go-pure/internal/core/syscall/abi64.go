@@ -108,6 +108,7 @@ const (
 	Sys64Prctl          Number64 = 157
 	Sys64Fchownat       Number64 = 260
 	Sys64Fchmodat       Number64 = 268
+	Sys64Utimensat      Number64 = 280
 	Sys64Faccessat2     Number64 = 439
 
 	Sys64GetRUsage Number64 = 98
@@ -523,6 +524,7 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Ftruncate, ftruncate64Guest)
 	d.Register(Sys64Statfs, statfs64Guest)
 	d.Register(Sys64Fstatfs, fstatfs64Guest)
+	d.Register(Sys64Utimensat, utimensat64)
 	d.Register(Sys64Socket, socket64)
 	d.Register(Sys64Socketpair, socketpair64)
 	d.Register(Sys64Bind, bind64)
