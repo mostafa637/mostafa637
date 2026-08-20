@@ -99,3 +99,68 @@ func TestABI64ForkAndVforkFactoryRequests(t *testing.T) {
 		t.Fatalf("unexpected lifecycle requests: %+v", requests)
 	}
 }
+
+func TestABI64CloneStartsChildAfterRegistryAndCopiesState(t *testing.T) {
+	_, memory, ctx, dispatcher, state := newABI64FilesystemTest(t)
+	ctx.PID = 77
+	ctx.TID = 77
+	ctx.Machine = state
+	childMemory := memory.Clone()
+	var request CloneRequest64
+	started := false
+	ctx.ProcessFactory = func(parent *Context64, got CloneRequest64) int64 {
+		request = got
+		child := parent.CloneForChild64(childMemory, 901)
+		if child == nil {
+			return int64(ENOMEM)
+		}
+		return 901
+	}
+	ctx.ChildStarter = func(parent *Context64, pid int64, got CloneRequest64) {
+		started = true
+		if pid != 901 || got.Flags != request.Flags {
+			t.Fatalf("unexpected child starter args: pid=%d request=%+v", pid, got)
+		}
+		if childPID, _, err := parent.Children.Wait(uint32(parent.PID), int32(pid), WaitNoHang); err != 0 || childPID != 0 {
+			t.Fatalf("child was not running in registry: pid=%d err=%d", childPID, err)
+		}
+		if !parent.Children.MarkExited(uint32(pid), 7) {
+			t.Fatal("child exit was not published")
+		}
+	}
+	flags := cloneVM64 | cloneSighand64 | cloneParentTID64
+	set64Syscall(state, Sys64Clone, flags, 0x18000, 0x10c00, 0, 0, 0)
+	if _, err := dispatcher.Dispatch(state); err != nil || int64(state.Get(corecpu.RAX)) != 901 {
+		t.Fatalf("clone: err=%v rax=%d", err, int64(state.Get(corecpu.RAX)))
+	}
+	if !started {
+		t.Fatal("ChildStarter was not called")
+	}
+	childPID, status, err := ctx.Children.Wait(uint32(ctx.PID), 901, 0)
+	if err != 0 || childPID != 901 || status != 7<<8 {
+		t.Fatalf("wait child: pid=%d status=%d err=%d", childPID, status, err)
+	}
+	if request.ChildStack != 0x18000 || request.ParentTID != 0x10c00 {
+		t.Fatalf("clone request = %+v", request)
+	}
+}
+
+func TestContext64CloneForChildCopiesProcessState(t *testing.T) {
+	memory := corecpu.NewMemory64()
+	if err := memory.MapBytes(0x4000, []byte("parent"), corecpu.PRead|corecpu.PWrite); err != nil {
+		t.Fatal(err)
+	}
+	parent := NewContext64(memory)
+	parent.PID = 77
+	parent.CWD = "/work"
+	parent.SignalMask = 0x55
+	parent.Groups = []uint32{1, 2}
+	child := parent.CloneForChild64(memory.Clone(), 901)
+	if child == nil || child.PID != 901 || child.ParentPID != 77 || child.CWD != "/work" || child.SignalMask != 0x55 {
+		t.Fatalf("unexpected child context: %+v", child)
+	}
+	child.Groups[0] = 9
+	if parent.Groups[0] != 1 {
+		t.Fatal("child groups share parent backing array")
+	}
+}

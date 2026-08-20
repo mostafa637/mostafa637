@@ -8,6 +8,7 @@ import (
 	corefs "github.com/mostafa637/mostafa637/go-pure/internal/core/fs"
 	corekernel "github.com/mostafa637/mostafa637/go-pure/internal/core/kernel"
 	coreloader "github.com/mostafa637/mostafa637/go-pure/internal/core/loader"
+	coresyscall "github.com/mostafa637/mostafa637/go-pure/internal/core/syscall"
 )
 
 type guestTransport struct {
@@ -19,14 +20,19 @@ type guestTransport struct {
 
 	stopOnce   sync.Once
 	outputOnce sync.Once
+
+	runtimeMu sync.Mutex
+	runtimes  map[*coresyscall.Context64]*guest64Runtime
+	nextPID   uint64
 }
 
 func newGuestTransport(elfPath string) *guestTransport {
 	return &guestTransport{
-		elfPath: elfPath,
-		input:   make(chan []byte, 32),
-		output:  make(chan []byte, 32),
-		done:    make(chan struct{}),
+		elfPath:  elfPath,
+		input:    make(chan []byte, 32),
+		output:   make(chan []byte, 32),
+		done:     make(chan struct{}),
+		runtimes: make(map[*coresyscall.Context64]*guest64Runtime),
 	}
 }
 
@@ -116,7 +122,10 @@ func (g *guestTransport) stop() {
 	if g == nil {
 		return
 	}
-	g.stopOnce.Do(func() { close(g.done) })
+	g.stopOnce.Do(func() {
+		g.pokeRuntimes()
+		close(g.done)
+	})
 }
 
 func (g *guestTransport) closeOutput() {

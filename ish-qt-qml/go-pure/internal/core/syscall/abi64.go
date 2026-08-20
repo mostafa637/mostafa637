@@ -243,6 +243,11 @@ type CloneRequest64 struct {
 // the owner must provide the actual memory, descriptor, and machine cloning.
 type ProcessFactory64 func(parent *Context64, request CloneRequest64) int64
 
+// ChildStarter64 is called only after the child has been inserted in the
+// parent's wait registry and parent-tid writes have succeeded. This ordering
+// prevents a fast child exit from being lost before wait4/waitid can observe it.
+type ChildStarter64 func(parent *Context64, childPID int64, request CloneRequest64)
+
 type Context64 struct {
 	Memory         *corecpu.Memory64
 	Machine        *corecpu.MachineState64
@@ -295,6 +300,8 @@ type Context64 struct {
 	ChildSubreaper bool
 	TimerSlack     uint64
 	ParentDeathSig uint64
+	Exited         bool
+	ExitCode       int32
 
 	AffinityMask uint64
 	Umask        uint32
@@ -303,6 +310,7 @@ type Context64 struct {
 	// image while preserving process identity and the descriptor table.
 	Execve         func(path string, argv, env []string) int64
 	ProcessFactory ProcessFactory64
+	ChildStarter   ChildStarter64
 
 	FDs                         *corefd.Table
 	Mappings                    []GuestMapping64
@@ -357,12 +365,8 @@ func (c *Context64) GetFile(fd uint64) (*corefd.File, error) {
 
 func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d := &Dispatcher64{Context: context, handlers: make(map[Number64]Handler64)}
-	d.Register(Sys64Exit, func(ctx *Context64, args [6]uint64) int64 {
-		return int64(args[0])
-	})
-	d.Register(Sys64ExitGroup, func(ctx *Context64, args [6]uint64) int64 {
-		return int64(args[0])
-	})
+	d.Register(Sys64Exit, exit64)
+	d.Register(Sys64ExitGroup, exitGroup64)
 	d.Register(Sys64GetPID, func(ctx *Context64, args [6]uint64) int64 {
 		return int64(ctx.PID)
 	})

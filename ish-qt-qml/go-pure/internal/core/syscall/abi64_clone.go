@@ -19,6 +19,15 @@ const (
 	cloneSupported64  uint64 = cloneSignalMask64 | cloneVM64 | cloneFS64 | cloneFiles64 | cloneSighand64 | cloneVFork64 | cloneParent64 | cloneThread64 | cloneSysvsem64 | cloneSetTLS64 | cloneParentTID64 | cloneChildClear64 | cloneChildTID64
 )
 
+// Exported flag aliases used by the session runtime when materializing a
+// child process from a validated CloneRequest64.
+const (
+	CloneVMFlag64       = cloneVM64
+	CloneFilesFlag64    = cloneFiles64
+	CloneSetTLSFlag64   = cloneSetTLS64
+	CloneChildTIDFlag64 = cloneChildTID64
+)
+
 func validateCloneFlags64(flags uint64, childStack, parentTID, childTID uint64, fork, vfork bool) int64 {
 	if flags&^cloneSupported64 != 0 {
 		return int64(EINVAL)
@@ -85,6 +94,9 @@ func cloneWithFactory64(ctx *Context64, request CloneRequest64) int64 {
 		if err := ctx.Memory.Write(corecpu.Address64(request.ParentTID), raw[:]); err != nil {
 			return int64(EFAULT)
 		}
+	}
+	if ctx.ChildStarter != nil {
+		ctx.ChildStarter(ctx, childPID, request)
 	}
 	return childPID
 }

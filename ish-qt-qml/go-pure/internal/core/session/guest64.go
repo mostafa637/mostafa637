@@ -143,6 +143,15 @@ func (g *guestTransport) start64(ctx context.Context, process *corekernel.Proces
 	jit.OnSyscall64 = func(machine *corecpu.MachineState64) (bool, error) {
 		return dispatcher.Dispatch(machine)
 	}
+	sysContext.ProcessFactory = g.createChild64
+	sysContext.ChildStarter = g.startChild64
+	g.runtimeMu.Lock()
+	if g.runtimes == nil {
+		g.runtimes = make(map[*coresyscall.Context64]*guest64Runtime)
+	}
+	g.nextPID = uint64(process.PID)
+	g.runtimes[sysContext] = &guest64Runtime{transport: g, context: sysContext, state: state, dispatcher: dispatcher, jit: jit, pid: uint64(process.PID), done: make(chan struct{})}
+	g.runtimeMu.Unlock()
 	g.process = process
 	runDone := make(chan struct{})
 	go func() {
