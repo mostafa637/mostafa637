@@ -194,6 +194,7 @@ const (
 	Sys64InotifyInit1   Number64 = 294
 	Sys64Prlimit64      Number64 = 302
 	Sys64Getrandom      Number64 = 318
+	Sys64Membarrier     Number64 = 324
 	Sys64GetCPU         Number64 = 309
 	Sys64Statx          Number64 = 332
 	Sys64Rseq           Number64 = 334
@@ -284,13 +285,17 @@ type Context64 struct {
 	Execve         func(path string, argv, env []string) int64
 	ProcessFactory ProcessFactory64
 
-	FDs          *corefd.Table
-	Mappings     []GuestMapping64
-	SharedMemory *SharedMemoryRegistry64
-	Semaphores   *SemaphoreRegistry64
-	Timers       [3]IntervalTimer64
-	TimerMu      sync.Mutex
-	signalFDs    map[*signalFD64]struct{}
+	FDs                         *corefd.Table
+	Mappings                    []GuestMapping64
+	SharedMemory                *SharedMemoryRegistry64
+	Semaphores                  *SemaphoreRegistry64
+	Timers                      [3]IntervalTimer64
+	TimerMu                     sync.Mutex
+	MembarrierMu                sync.Mutex
+	MembarrierEpoch             uint64
+	MembarrierGlobalRegistered  bool
+	MembarrierPrivateRegistered bool
+	signalFDs                   map[*signalFD64]struct{}
 }
 
 type Dispatcher64 struct {
@@ -412,6 +417,7 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64SchedSetAffinity, schedSetAffinity64)
 	d.Register(Sys64SchedGetAffinity, schedGetAffinity64)
 	d.Register(Sys64GetCPU, getcpu64)
+	d.Register(Sys64Membarrier, membarrier64)
 	d.Register(Sys64Ioctl, ioctl64)
 	d.Register(Sys64Getitimer, getitimer64)
 	d.Register(Sys64Alarm, alarm64)
