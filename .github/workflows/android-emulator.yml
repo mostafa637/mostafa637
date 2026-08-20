@@ -48,7 +48,16 @@ jobs:
             adb exec-out screencap -p > gtk-hello-android/emulator-screen-before-dismiss.png || true
             # Android API 34 may show a transient System UI ANR dialog while
             # background phone services finish booting. Dismiss it if present.
-            adb shell input tap 540 1060 || true
+            # Dismiss transient emulator ANR dialogs until the GTK surface is unobstructed.
+            for i in 1 2 3 4 5 6; do
+              adb shell uiautomator dump /sdcard/gtk-window.xml >/dev/null 2>&1 || true
+              if adb shell cat /sdcard/gtk-window.xml 2>/dev/null | grep -Eqi 'responding|system.?ui'; then
+                adb shell input tap 540 1060 || true
+                sleep 2
+              else
+                break
+              fi
+            done
             adb shell input keyevent KEYCODE_BACK || true
             sleep 8
             adb logcat -d -v threadtime > gtk-hello-android/logcat.txt || true
