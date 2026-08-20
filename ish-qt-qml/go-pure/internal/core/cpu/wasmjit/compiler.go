@@ -1,0 +1,85 @@
+package wasmjit
+
+import (
+	"context"
+	"errors"
+	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
+	"os"
+)
+
+type Compiler struct {
+	rt    wazero.Runtime
+	cache wazero.CompilationCache
+	host  api.Module
+}
+
+func NewCompiler(ctx context.Context, dir string) (*Compiler, error) {
+	return NewCompilerWithSyscall(ctx, dir, nil)
+}
+
+func NewCompilerWithSyscall(ctx context.Context, dir string, handler SyscallHandler) (*Compiler, error) {
+	cache, err := wazero.NewCompilationCacheWithDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	cfg := wazero.NewRuntimeConfigCompiler().WithCompilationCache(cache)
+	rt := wazero.NewRuntimeWithConfig(ctx, cfg)
+	host, err := installSyscall(ctx, rt, handler)
+	if err != nil {
+		rt.Close(ctx)
+		cache.Close(ctx)
+		return nil, err
+	}
+	return &Compiler{rt: rt, cache: cache, host: host}, nil
+}
+
+func (c *Compiler) Compile(ctx context.Context, block GuestBlock) (*HostBlock, error) {
+	wasm, err := EmitBlock(block)
+	if err != nil {
+		return nil, err
+	}
+	return c.compileWASM(ctx, wasm, KeyForBlock(block))
+}
+
+func (c *Compiler) CompileCached(ctx context.Context, block GuestBlock, cache *BlockCache) (*HostBlock, error) {
+	key := KeyForBlock(block)
+	wasm, err := cachedWASM(block, key, cache)
+	if err != nil {
+		return nil, err
+	}
+	return c.compileWASM(ctx, wasm, key)
+}
+
+func (c *Compiler) compileWASM(ctx context.Context, wasm []byte, key BlockKey) (*HostBlock, error) {
+	host, mod, err := compileOnRuntime(ctx, c.rt, wasm, key)
+	if err != nil {
+		return nil, err
+	}
+	host.stop = func(ctx context.Context) error { return mod.Close(ctx) }
+	return host, nil
+}
+
+func (c *Compiler) Close(ctx context.Context) error {
+	err := c.rt.Close(ctx)
+	cacheErr := c.cache.Close(ctx)
+	if err != nil {
+		return err
+	}
+	return cacheErr
+}
+
+func cachedWASM(block GuestBlock, key BlockKey, cache *BlockCache) ([]byte, error) {
+	wasm, err := cache.Load(key)
+	if err == nil {
+		return wasm, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	wasm, err = EmitBlock(block)
+	if err != nil {
+		return nil, err
+	}
+	return wasm, cache.Store(key, wasm)
+}
