@@ -124,6 +124,7 @@ const (
 	Sys64Execve    Number64 = 59
 	Sys64Exit      Number64 = 60
 	Sys64Wait4     Number64 = 61
+	Sys64Waitid    Number64 = 247
 	Sys64Kill      Number64 = 62
 	Sys64Uname     Number64 = 63
 	Sys64Fcntl     Number64 = 72
@@ -326,6 +327,7 @@ func NewDispatcher64(context *Context64) *Dispatcher64 {
 	d.Register(Sys64Fork, fork64Stub)
 	d.Register(Sys64Vfork, vfork64Stub)
 	d.Register(Sys64Wait4, wait4_64)
+	d.Register(Sys64Waitid, waitid64)
 	d.Register(Sys64SetRobust, setRobustList64)
 	d.Register(Sys64GetRobust, getRobustList64)
 	d.Register(Sys64Gettimeofday, gettimeofday64)

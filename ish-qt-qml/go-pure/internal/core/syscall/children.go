@@ -2,7 +2,11 @@ package syscall
 
 import "sync"
 
-const WaitNoHang uint32 = 1
+const (
+	WaitNoHang uint32 = 1
+	WaitExited uint32 = 4
+	WaitNoWait uint32 = 0x01000000
+)
 
 type ChildState struct {
 	PID       uint32
