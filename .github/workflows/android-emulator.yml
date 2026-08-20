@@ -70,6 +70,12 @@ jobs:
             adb shell cat /sdcard/gtk-window.xml 2>/dev/null | grep -Eqi 'responding|system.?ui' && adb shell input tap 540 1060 || true
             # Do not send BACK here: if the final dialog has already been
             # dismissed, BACK would finish the GTK Activity and show launcher.
+            # The dialog itself belongs to System UI, which is the component
+            # reported as ANR in logcat. Restart it so the final screenshot is
+            # not covered by a stale system dialog.
+            adb shell am force-stop com.android.systemui || true
+            sleep 5
+            adb shell am start -n com.example.gtkhelloworld/org.gtk.android.ToplevelActivity || true
             sleep 8
             adb logcat -d -v threadtime > gtk-hello-android/logcat.txt || true
             adb shell dumpsys window windows > gtk-hello-android/windows.txt || true
