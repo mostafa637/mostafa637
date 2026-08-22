@@ -6,22 +6,22 @@ func emitExtend(inst machinecode.Instruction) []byte {
 	out := extendSource(inst)
 	out = append(out, localCode(17)...)
 	out = append(out, constCode(widthMask(inst.Width))...)
-	out = append(out, 0x83, 0x21, 17)
+	out = append(out, WasmOpI64And, WasmOpLocalSet, 17)
 	if inst.Signed {
 		out = append(out, signExtend(17, inst.Width)...)
 	}
 	if inst.DstWidth == 4 {
 		out = append(out, localCode(17)...)
 		out = append(out, constCode(0xffffffff)...)
-		out = append(out, 0x83, 0x21, 17)
+		out = append(out, WasmOpI64And, WasmOpLocalSet, 17)
 	}
 	out = append(out, localCode(17)...)
-	return append(out, 0x21, byte(inst.Dst))
+	return append(out, WasmOpLocalSet, byte(inst.Dst))
 }
 
 func extendSource(inst machinecode.Instruction) []byte {
 	if inst.Src >= 0 {
-		out := append(localCode(inst.Src), 0x21, 17)
+		out := append(localCode(inst.Src), WasmOpLocalSet, 17)
 		return out
 	}
 	load := inst
@@ -32,10 +32,10 @@ func extendSource(inst machinecode.Instruction) []byte {
 func signExtend(local int16, width uint8) []byte {
 	shift := int64(64 - uint64(width)*8)
 	out := append(localCode(local), constCode(shift)...)
-	out = append(out, 0x86)
+	out = append(out, WasmOpI64Shl)
 	out = append(out, constCode(shift)...)
-	out = append(out, 0x87)
-	return append(out, 0x21, byte(local))
+	out = append(out, WasmOpI64ShrS)
+	return append(out, WasmOpLocalSet, byte(local))
 }
 
 func widthMask(width uint8) int64 {
@@ -49,9 +49,4 @@ func widthMask(width uint8) int64 {
 	default:
 		return -1
 	}
-}
-
-func emitLEA(inst machinecode.Instruction) []byte {
-	out := emitAddress(inst)
-	return append(out, 0x21, byte(inst.Dst))
 }

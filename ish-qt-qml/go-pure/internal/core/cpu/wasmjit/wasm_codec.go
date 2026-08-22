@@ -31,17 +31,62 @@ func appendSLEB(out []byte, value int64) []byte {
 }
 
 func emitBody(insts []machinecode.Instruction) []byte {
-	out := []byte{1, 4, 0x7e}
+	// Locals: 0-16 are params, 17-26 are temps.
+	out := appendULEB(nil, 1) // 1 group of locals
+	out = append(out, 10)     // 10 locals in this group
+	out = append(out, 0x7e)   // type i64
+
+	// Wrap instructions in a block so we can branch to the end
+	out = append(out, WasmOpBlock, 0x40)
+
 	for _, inst := range insts {
 		out = append(out, emitInstruction(inst)...)
 	}
+
+	out = append(out, WasmOpEnd) // end of block
+
+	// We always append results once at the end.
 	out = appendRegisterResults(out)
-	return append(out, 0x0b)
+	return append(out, WasmOpEnd) // end of function
 }
 
 func appendRegisterResults(out []byte) []byte {
-	for i := byte(0); i < 17; i++ {
-		out = append(out, 0x20, i)
+	for i := byte(0); i < 27; i++ {
+		out = append(out, WasmOpLocalGet, i)
 	}
 	return out
+}
+
+func decodeGuest(block GuestBlock) ([]machinecode.Instruction, error) {
+	return decodeX86(block.Bytes, block.PC)
+}
+
+func lastFlow(insts []machinecode.Instruction) (machinecode.Instruction, bool) {
+	var res machinecode.Instruction
+	var found bool
+	// Preference: last semantic op (MUL/DIV) then last flow op (RET/JMP)
+	for _, inst := range insts {
+		if isSemanticOp(inst.Op) {
+			res = inst
+			found = true
+		}
+	}
+	if found {
+		return res, true
+	}
+	for _, inst := range insts {
+		if isFlow(inst.Op) {
+			res = inst
+			found = true
+		}
+	}
+	return res, found
+}
+
+func isSemanticOp(op machinecode.Op) bool {
+	return op == machinecode.OpMUL64 || op == machinecode.OpIMUL64 || op == machinecode.OpDIV64
+}
+
+func isFlow(op machinecode.Op) bool {
+	return op == machinecode.OpJmp || op == machinecode.OpJcc || op == machinecode.OpCall || op == machinecode.OpRET
 }

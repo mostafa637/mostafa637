@@ -18,11 +18,11 @@ func decodeX86(src []byte, pc uint64) ([]machinecode.Instruction, error) {
 			return nil, err
 		}
 		out = append(out, item)
+		offset += inst.Len
+		src = src[inst.Len:]
 		if isFlow(item.Op) {
 			break
 		}
-		offset += inst.Len
-		src = src[inst.Len:]
 	}
 	return out, nil
 }
@@ -39,7 +39,6 @@ func decodeX86Inst(inst x86asm.Inst, address uint64) (machinecode.Instruction, e
 		return decodePush(inst, address)
 	case x86asm.POP:
 		return decodePop(inst, address)
-
 	case x86asm.SYSCALL:
 		return machinecode.Instruction{Op: machinecode.OpSyscall, NextPC: address + uint64(inst.Len)}, nil
 	case x86asm.JMP:
@@ -52,7 +51,6 @@ func decodeX86Inst(inst x86asm.Inst, address uint64) (machinecode.Instruction, e
 		return decodeExtend(inst, address, true)
 	case x86asm.LEA:
 		return decodeLEA(inst, address)
-
 	case x86asm.ADD:
 		return decodeArithmetic(inst, machinecode.OpADDImm)
 	case x86asm.SUB:
@@ -69,6 +67,13 @@ func decodeX86Inst(inst x86asm.Inst, address uint64) (machinecode.Instruction, e
 		return decodeTest(inst)
 	case x86asm.SHL, x86asm.SHR, x86asm.SAR, x86asm.ROL, x86asm.ROR, x86asm.RCL, x86asm.RCR:
 		return decodeShift(inst)
+	case x86asm.MUL, x86asm.IMUL:
+		if len(inst.Args) > 1 && inst.Args[1] != nil {
+			return decodeExplicitIMUL(inst)
+		}
+		return decodeMUL(inst, inst.Op)
+	case x86asm.DIV, x86asm.IDIV:
+		return decodeDIV(inst, inst.Op)
 	default:
 		if cond, ok := decodeCondition(inst.Op); ok {
 			return decodeBranch(inst, address, machinecode.OpJcc, cond)

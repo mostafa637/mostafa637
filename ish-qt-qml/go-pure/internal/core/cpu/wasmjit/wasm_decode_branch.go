@@ -15,17 +15,14 @@ func decodeBranch(inst x86asm.Inst, address uint64, op machinecode.Op, cond uint
 }
 
 func decodeCondition(op x86asm.Op) (uint8, bool) {
-	for index, item := range []x86asm.Op{x86asm.JO, x86asm.JB, x86asm.JE, x86asm.JBE, x86asm.JS, x86asm.JP, x86asm.JL, x86asm.JLE} {
-		if op == item {
-			return uint8(index), true
-		}
+	conds := map[x86asm.Op]uint8{
+		x86asm.JO: 0, x86asm.JNO: 1, x86asm.JB: 2, x86asm.JAE: 3,
+		x86asm.JE: 4, x86asm.JNE: 5, x86asm.JBE: 6, x86asm.JA: 7,
+		x86asm.JS: 8, x86asm.JNS: 9, x86asm.JP: 10, x86asm.JNP: 11,
+		x86asm.JL: 12, x86asm.JGE: 13, x86asm.JLE: 14, x86asm.JG: 15,
 	}
-	for index, item := range []x86asm.Op{x86asm.JNO, x86asm.JAE, x86asm.JNE, x86asm.JA, x86asm.JNS, x86asm.JNP, x86asm.JGE, x86asm.JG} {
-		if op == item {
-			return uint8(index) | 0x80, true
-		}
-	}
-	return 0, false
+	c, ok := conds[op]
+	return c, ok
 }
 
 func decodeReturn(inst x86asm.Inst, address uint64) (machinecode.Instruction, error) {

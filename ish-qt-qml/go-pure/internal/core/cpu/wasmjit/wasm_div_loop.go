@@ -1,0 +1,35 @@
+package wasmjit
+
+func divLoop() []byte {
+	out := []byte{WasmOpBlock, 0x40, WasmOpLoop, 0x40}
+	out = append(out, localCode(18)...)
+	out = append(out, constCode(1)...)
+	out = append(out, WasmOpI64Shl, WasmOpLocalSet, 18)
+	out = append(out, localCode(0)...)
+	out = append(out, localCode(20)...)
+	out = append(out, WasmOpI64ShrU, WasmOpI64Const, 1, WasmOpI64And)
+	out = append(out, localCode(18)...)
+	out = append(out, WasmOpI64Or, WasmOpLocalSet, 18)
+	out = append(out, localCode(17)...)
+	out = append(out, localCode(18)...)
+	out = append(out, WasmOpI64LeU, WasmOpIf, 0x40)
+	out = append(out, localCode(18)...)
+	out = append(out, localCode(17)...)
+	out = append(out, WasmOpI64Sub, WasmOpLocalSet, 18)
+	out = append(out, constCode(1)...)
+	out = append(out, WasmOpLocalSet, 25, WasmOpElse)
+	out = append(out, constCode(0)...)
+	out = append(out, WasmOpLocalSet, 25, WasmOpEnd)
+	out = append(out, localCode(19)...)
+	out = append(out, constCode(1)...)
+	out = append(out, WasmOpI64Shl)
+	out = append(out, localCode(25)...)
+	out = append(out, WasmOpI64Or, WasmOpLocalSet, 19)
+	out = append(out, localCode(20)...)
+	out = append(out, WasmOpI64Eqz, WasmOpBrIf, 1)
+	out = append(out, localCode(20)...)
+	out = append(out, constCode(1)...)
+	out = append(out, WasmOpI64Sub, WasmOpLocalSet, 20)
+	out = append(out, WasmOpBr, 0, WasmOpEnd, WasmOpEnd)
+	return out
+}

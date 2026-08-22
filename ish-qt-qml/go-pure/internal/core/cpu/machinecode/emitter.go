@@ -28,6 +28,9 @@ const (
 	OpTestImm
 	OpTestReg
 	OpShift64
+	OpMUL64
+	OpDIV64
+	OpIMUL64
 )
 
 const (
@@ -57,6 +60,7 @@ type Instruction struct {
 	DstWidth    uint8
 	Signed      bool
 	ShiftKind   uint8
+	MulSource   int16
 }
 
 type Emitter interface {

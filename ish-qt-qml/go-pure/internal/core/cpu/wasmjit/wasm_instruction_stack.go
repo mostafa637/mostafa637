@@ -13,7 +13,7 @@ func emitStackPush(inst machinecode.Instruction) []byte {
 	} else {
 		value = constCode(inst.Imm)
 	}
-	value = append(value, 0x21, 17)
+	value = append(value, WasmOpLocalSet, 17)
 	value = append(value, stackAdjust(-8)...)
 	return append(value, emitMemoryStore(stackStore(17))...)
 }
@@ -22,14 +22,14 @@ func emitStackPop(inst machinecode.Instruction) []byte {
 	value := emitMemoryLoad(stackLoad(inst, 17))
 	value = append(value, stackAdjust(8)...)
 	if inst.Dst >= 0 {
-		return append(value, 0x20, 17, 0x21, byte(inst.Dst))
+		return append(value, WasmOpLocalGet, 17, WasmOpLocalSet, byte(inst.Dst))
 	}
 	return append(value, emitMemoryStore(stackStore(17, inst))...)
 }
 
 func stackAdjust(delta int64) []byte {
 	out := append(localCode(stackReg64), constCode(delta)...)
-	return append(out, 0x7c, 0x21, stackReg64)
+	return append(out, WasmOpI64Add, WasmOpLocalSet, stackReg64)
 }
 
 func stackLoad(inst machinecode.Instruction, dst int16) machinecode.Instruction {

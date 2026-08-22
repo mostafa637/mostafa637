@@ -12,7 +12,7 @@ const (
 )
 
 const arithmeticMask = flagCF | flagPF | flagAF | flagZF | flagSF | flagOF
-const logicMask = flagCF | flagPF | flagZF | flagSF | flagOF
+const logicMask = flagPF | flagZF | flagSF
 
 func emitAddFlags(inst machinecode.Instruction) []byte {
 	return emitArithmeticFlags(inst, false, false)
@@ -43,7 +43,7 @@ func emitLogicFlags(inst machinecode.Instruction) []byte {
 }
 
 func emitLogicResultFlags(result int16) []byte {
-	out := clearFlags(nil, logicMask)
+	out := clearFlags(nil, arithmeticMask)
 	out = appendFlag(out, flagZero(localCode(result)), 6)
 	out = appendFlag(out, flagSign(localCode(result)), 7)
 	return appendFlag(out, flagParity(localCode(result)), 2)
@@ -59,18 +59,30 @@ func emitPackedFlags(op1, op2, result []byte, sub bool, mask uint64) []byte {
 	return appendFlag(out, flagOverflow(op1, op2, result, sub), 11)
 }
 
-func localCode(index int16) []byte { return []byte{0x20, byte(index)} }
+func localCode(index int16) []byte    { return []byte{WasmOpLocalGet, byte(index)} }
+func localSetCode(index int16) []byte { return []byte{WasmOpLocalSet, byte(index)} }
 
-func constCode(value int64) []byte { return appendSLEB([]byte{0x42}, value) }
+func constCode(value int64) []byte    { return appendSLEB([]byte{WasmOpI64Const}, value) }
+func i32ConstCode(value int32) []byte { return appendSLEB([]byte{WasmOpI32Const}, int64(value)) }
 
 func clearFlags(out []byte, mask uint64) []byte {
-	out = append(out, 0x20, 16, 0x42)
+	out = append(out, WasmOpLocalGet, 16, WasmOpI64Const)
 	out = appendSLEB(out, int64(^mask))
-	return append(out, 0x83, 0x21, 16)
+	return append(out, WasmOpI64And, WasmOpLocalSet, 16)
 }
 
 func appendFlag(out, expr []byte, bit byte) []byte {
 	out = append(out, expr...)
-	out = append(out, 0x42, bit, 0x86, 0x20, 16, 0x84, 0x21, 16)
+	out = append(out, constCode(int64(bit))...)
+	out = append(out, WasmOpI64Shl, WasmOpLocalGet, 16, WasmOpI64Or, WasmOpLocalSet, 16)
+	return out
+}
+
+func updateCommonFlags(reg int16, width uint8) []byte {
+	val := localCode(reg)
+	out := clearFlags(nil, arithmeticMask)
+	out = appendFlag(out, flagZero(val), 6)
+	out = appendFlag(out, flagSign(val), 7)
+	out = appendFlag(out, flagParity(val), 2)
 	return out
 }

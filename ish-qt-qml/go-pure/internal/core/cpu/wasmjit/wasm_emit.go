@@ -25,20 +25,28 @@ func emitModule(insts []machinecode.Instruction) []byte {
 }
 
 func wasmType() []byte {
-	out := []byte{4, 0x60, 17}
+	out := []byte{4} // 4 types
+	// Type 0: (17 i64) -> (27 i64) for run
+	out = append(out, 0x60)
+	out = appendULEB(out, 17)
 	for i := 0; i < 17; i++ {
 		out = append(out, 0x7e)
 	}
-	out = append(out, 17)
-	for i := 0; i < 17; i++ {
+	out = appendULEB(out, 27)
+	for i := 0; i < 27; i++ {
 		out = append(out, 0x7e)
 	}
+	// Type 1: (7 i64) -> (1 i64) for syscall64
 	out = append(out, 0x60, 7)
 	for i := 0; i < 7; i++ {
 		out = append(out, 0x7e)
 	}
-	out = append(out, 1, 0x7e, 0x60, 1, 0x7e, 1, 0x7e)
-	return append(out, 0x60, 2, 0x7e, 0x7e, 0)
+	out = append(out, 1, 0x7e)
+	// Type 2: (1 i64) -> (1 i64) for load64
+	out = append(out, 0x60, 1, 0x7e, 1, 0x7e)
+	// Type 3: (2 i64) -> (0) for store64
+	out = append(out, 0x60, 2, 0x7e, 0x7e, 0)
+	return out
 }
 
 func wasmImport() []byte {
@@ -55,6 +63,7 @@ func appendImport(out []byte, name string, typ byte) []byte {
 }
 
 func wasmExport() []byte {
+	// Function run is index 3 (after 3 imports), memory is index 0
 	return []byte{2, 3, 'r', 'u', 'n', 0, 3, 6, 'm', 'e', 'm', 'o', 'r', 'y', 2, 0}
 }
 

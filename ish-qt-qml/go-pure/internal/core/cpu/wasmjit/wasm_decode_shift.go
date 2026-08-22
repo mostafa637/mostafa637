@@ -15,7 +15,8 @@ func decodeShift(inst x86asm.Inst) (machinecode.Instruction, error) {
 		return machinecode.Instruction{}, ErrUnsupported
 	}
 	out := machinecode.Instruction{Op: machinecode.OpShift64, Dst: dst, Src: -1}
-	out.Width = uint8(regWidth(inst.Args[0]))
+	reg, _ := inst.Args[0].(x86asm.Reg)
+	out.Width = uint8(regWidth(reg))
 	out.ShiftKind = kind
 	return decodeShiftCount(out, inst.Args[1])
 }
@@ -51,24 +52,5 @@ func shiftKind(op x86asm.Op) (uint8, bool) {
 		return machinecode.ShiftRCR, true
 	default:
 		return 0, false
-	}
-}
-
-func regWidth(arg x86asm.Arg) int {
-	reg, ok := arg.(x86asm.Reg)
-	if !ok {
-		return 0
-	}
-	switch {
-	case reg >= x86asm.AL && reg <= x86asm.DIB:
-		return 1
-	case reg >= x86asm.AX && reg <= x86asm.R15W:
-		return 2
-	case reg >= x86asm.EAX && reg <= x86asm.R15L:
-		return 4
-	case reg >= x86asm.RAX && reg <= x86asm.R15:
-		return 8
-	default:
-		return 0
 	}
 }

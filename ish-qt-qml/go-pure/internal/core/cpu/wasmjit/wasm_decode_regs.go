@@ -39,3 +39,18 @@ func decodeImm(arg x86asm.Arg) (int64, bool) {
 	imm, ok := arg.(x86asm.Imm)
 	return int64(imm), ok
 }
+
+func regWidth(reg x86asm.Reg) int {
+	switch {
+	case reg >= x86asm.AL && reg <= x86asm.DIB:
+		return 1
+	case reg >= x86asm.AX && reg <= x86asm.R15W:
+		return 2
+	case reg >= x86asm.EAX && reg <= x86asm.R15L:
+		return 4
+	case reg >= x86asm.RAX && reg <= x86asm.R15:
+		return 8
+	default:
+		return 0
+	}
+}

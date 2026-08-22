@@ -1,82 +1,122 @@
 package wasmjit
 
-import "github.com/mostafa637/mostafa637/go-pure/internal/core/cpu/machinecode"
+import (
+	"github.com/mostafa637/mostafa637/go-pure/internal/core/cpu/machinecode"
+)
 
 func emitShift(inst machinecode.Instruction) []byte {
-	out := prepareShift(inst)
-	out = append(out, shiftValue(inst)...)
+	if inst.ShiftKind >= machinecode.ShiftROL {
+		return emitRotate(inst)
+	}
+	out := shiftPrepare(inst)
+	out = append(out, shiftOp(inst)...)
 	out = append(out, shiftWrite(inst)...)
 	return append(out, shiftFlags(inst)...)
 }
 
-func prepareShift(inst machinecode.Instruction) []byte {
-	out := append(localCode(inst.Dst), 0x21, 20)
-	out = append(out, localCode(inst.Dst)...)
-	out = append(out, constCode(widthMask(inst.Width))...)
-	out = append(out, 0x83, 0x21, 17)
-	return append(out, shiftCount(inst)...)
-}
-
-func shiftCount(inst machinecode.Instruction) []byte {
-	mask := int64(0x1f)
-	if inst.Width == 8 {
-		mask = 0x3f
-	}
-	var out []byte
+func shiftPrepare(inst machinecode.Instruction) []byte {
+	out := localCode(inst.Dst)
+	out = append(out, WasmOpLocalSet, 19)
 	if inst.Src >= 0 {
-		out = append(localCode(inst.Src), constCode(mask)...)
-		out = append(out, 0x83, 0x21, 18)
+		out = append(out, localCode(inst.Src)...)
 	} else {
-		out = append(constCode(inst.Imm&mask), 0x21, 18)
+		out = append(out, constCode(inst.Imm)...)
 	}
-	return appendRotateCount(out, inst)
+	out = append(out, constCode(63)...)
+	out = append(out, WasmOpI64And, WasmOpLocalSet, 21)
+	return out
 }
 
-func appendRotateCount(out []byte, inst machinecode.Instruction) []byte {
-	if inst.ShiftKind != machinecode.ShiftRCL && inst.ShiftKind != machinecode.ShiftRCR {
-		return out
-	}
-	bits := int64(inst.Width)*8 + 1
-	out = append(out, localCode(18)...)
-	out = append(out, constCode(bits)...)
-	return append(out, 0x82, 0x21, 18)
-}
-
-func shiftValue(inst machinecode.Instruction) []byte {
+func shiftOp(inst machinecode.Instruction) []byte {
+	out := localCode(19)
+	out = append(out, localCode(21)...)
 	switch inst.ShiftKind {
 	case machinecode.ShiftSHL:
-		return binaryShift(0x86)
+		out = append(out, WasmOpI64Shl)
 	case machinecode.ShiftSHR:
-		return binaryShift(0x88)
+		out = append(out, WasmOpI64ShrU)
 	case machinecode.ShiftSAR:
-		return signedShift(inst)
-	case machinecode.ShiftROL, machinecode.ShiftROR:
-		return rotateShift(inst, inst.ShiftKind == machinecode.ShiftROR)
-	case machinecode.ShiftRCL, machinecode.ShiftRCR:
-		return rotateCarryShift(inst, inst.ShiftKind == machinecode.ShiftRCR)
-	default:
-		return nil
+		out = append(out, WasmOpI64ShrS)
 	}
+	return append(out, WasmOpLocalSet, 20)
 }
 
-func binaryShift(op byte) []byte {
-	out := append(localCode(17), localCode(18)...)
-	return append(out, op, 0x21, 19)
+func shiftWrite(inst machinecode.Instruction) []byte {
+	return append(localCode(20), WasmOpLocalSet, byte(inst.Dst))
 }
 
-func signedShift(inst machinecode.Instruction) []byte {
-	out := signExtendValue(inst.Width)
+func shiftFlags(inst machinecode.Instruction) []byte {
+	out := localCode(21)
+	out = append(out, WasmOpI64Eqz)
+	out = append(out, WasmOpIf, 0x40, WasmOpElse)
+	out = append(out, shiftCarry(inst)...)
+	out = append(out, WasmOpLocalSet, 17)
+	out = append(out, shiftOverflow(inst)...)
+	out = append(out, WasmOpLocalSet, 18)
+	out = append(out, updateShiftFlags(inst)...)
+	out = append(out, WasmOpEnd)
+	return out
+}
+
+func shiftCarry(inst machinecode.Instruction) []byte {
+	out := localCode(19)
+	if inst.ShiftKind == machinecode.ShiftSHL {
+		out = append(out, constCode(64)...)
+		out = append(out, localCode(21)...)
+		out = append(out, WasmOpI64Sub, WasmOpI64ShrU)
+	} else {
+		out = append(out, localCode(21)...)
+		out = append(out, constCode(1)...)
+		out = append(out, WasmOpI64Sub, WasmOpI64ShrU)
+	}
+	out = append(out, constCode(1)...)
+	return append(out, WasmOpI64And)
+}
+
+func shiftOverflow(inst machinecode.Instruction) []byte {
+	out := localCode(21)
+	out = append(out, constCode(1)...)
+	out = append(out, WasmOpI64Ne)
+	out = append(out, WasmOpIf, 0x7e)
+	out = append(out, constCode(0)...)
+	out = append(out, WasmOpElse)
+	if inst.ShiftKind == machinecode.ShiftSHL {
+		out = append(out, carryFromTop(localCode(20), 63)...)
+		out = append(out, carryFromTop(localCode(19), 63)...)
+		out = append(out, WasmOpI64Xor)
+	} else if inst.ShiftKind == machinecode.ShiftSHR {
+		out = append(out, carryFromTop(localCode(19), 63)...)
+	} else {
+		out = append(out, constCode(0)...)
+	}
+	out = append(out, WasmOpEnd)
+	return out
+}
+
+func updateShiftFlags(inst machinecode.Instruction) []byte {
+	mask := int64(^(1 | 1<<11 | 1<<6 | 1<<7 | 1<<2))
+	out := localCode(16)
+	out = append(out, constCode(mask)...)
+	out = append(out, WasmOpI64And)
+	out = append(out, localCode(17)...)
 	out = append(out, localCode(18)...)
-	return append(out, 0x87, 0x21, 19)
+	out = append(out, constCode(11)...)
+	out = append(out, WasmOpI64Shl, WasmOpI64Or, WasmOpI64Or)
+	out = append(out, flagZero(localCode(20))...)
+	out = append(out, constCode(6)...)
+	out = append(out, WasmOpI64Shl, WasmOpI64Or)
+	out = append(out, flagSign(localCode(20))...)
+	out = append(out, constCode(7)...)
+	out = append(out, WasmOpI64Shl, WasmOpI64Or)
+	out = append(out, flagParity(localCode(20))...)
+	out = append(out, constCode(2)...)
+	out = append(out, WasmOpI64Shl, WasmOpI64Or)
+	return append(out, WasmOpLocalSet, 16)
 }
 
-func signExtendValue(width uint8) []byte {
-	shift := int64(64 - uint(width)*8)
-	if shift == 0 {
-		return localCode(17)
-	}
-	out := append(localCode(17), constCode(shift)...)
-	out = append(out, 0x86)
-	out = append(out, constCode(shift)...)
-	return append(out, 0x87)
+func carryFromTop(val []byte, bit byte) []byte {
+	out := append(val, constCode(int64(bit))...)
+	out = append(out, WasmOpI64ShrU)
+	out = append(out, constCode(1)...)
+	return append(out, WasmOpI64And)
 }
