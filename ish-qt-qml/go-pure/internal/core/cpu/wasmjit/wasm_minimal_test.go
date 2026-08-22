@@ -60,7 +60,10 @@ func TestWasmMinimal(t *testing.T) {
 	// Now test with our actual module
 	code := []byte{0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0}
 	block := GuestBlock{PC: 0, Bytes: code}
-	wasmBytes := emitModuleDebug(block)
+	wasmBytes, errBlock := EmitBlock(block)
+	if errBlock != nil {
+		t.Fatal(errBlock)
+	}
 	fmt.Printf("actual wasm len: %d\n", len(wasmBytes))
 
 	_, herr := installHost(context.Background(), rt, nil, nil, nil)
