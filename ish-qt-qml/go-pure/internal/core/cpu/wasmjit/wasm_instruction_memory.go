@@ -35,7 +35,7 @@ func emitAddress(inst machinecode.Instruction) []byte {
 		out = append(out, WasmOpLocalGet, byte(base))
 	}
 	if inst.MemRIP {
-		out = append(out, WasmOpLocalGet, 15)
+		out = append(out, constCode(int64(inst.NextPC))...)
 		if base >= 0 {
 			out = append(out, WasmOpI64Add)
 		}
@@ -81,7 +81,5 @@ func emitSyscall(inst machinecode.Instruction) []byte {
 	out = append(out, localCode(9)...)   // R9
 	out = append(out, 0x10, 0)           // call syscall64
 	out = append(out, WasmOpLocalSet, 0) // Store result back to RAX
-	out = append(out, constCode(int64(inst.NextPC))...)
-	out = append(out, WasmOpLocalSet, 15) // Update RIP
 	return out
 }

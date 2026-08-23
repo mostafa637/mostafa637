@@ -51,6 +51,8 @@ func emitControlOp(inst machinecode.Instruction) []byte {
 		return emitJcc(inst)
 	case machinecode.OpCall:
 		return emitCall(inst)
+	case machinecode.OpSyscall:
+		return emitSyscall(inst)
 	default:
 		return nil
 	}
@@ -98,7 +100,8 @@ func emitCompareOp(inst machinecode.Instruction) []byte {
 		out = saveRegisterOperands(inst)
 	}
 	if inst.Op == machinecode.OpCMPImm {
-		return append(out, emitSubFlags(inst)...)
+		out = append(out, WasmOpLocalGet, 17, WasmOpLocalGet, 18, WasmOpI64Sub, WasmOpLocalSet, 19)
+		return append(out, emitCompareFlags(inst)...)
 	}
 	out = append(out, WasmOpLocalGet, 17, WasmOpLocalGet, 18, WasmOpI64And, WasmOpLocalSet, 19)
 	return append(out, emitLogicResultFlags(19)...)

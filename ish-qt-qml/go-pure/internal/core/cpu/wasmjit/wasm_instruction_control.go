@@ -12,17 +12,9 @@ func emitReturn() []byte {
 	return []byte{WasmOpBr, 0}
 }
 
-func emitJmp(inst machinecode.Instruction) []byte {
-	out := constCode(int64(inst.Target))
-	out = append(out, WasmOpLocalSet, 15)
-	return append(out, emitReturn()...)
-}
+func emitJmp(inst machinecode.Instruction) []byte { return emitReturn() }
 
-func emitCall(inst machinecode.Instruction) []byte {
-	out := constCode(int64(inst.Fallthrough))
-	out = append(out, WasmOpLocalSet, 15)
-	return append(out, emitReturn()...)
-}
+func emitCall(inst machinecode.Instruction) []byte { return emitReturn() }
 
 func emitSyscallReturn() []byte {
 	return emitReturn()

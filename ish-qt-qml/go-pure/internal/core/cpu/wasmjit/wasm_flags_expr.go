@@ -15,10 +15,17 @@ func flagSign(result []byte) []byte {
 }
 
 func flagParity(result []byte) []byte {
-	out := append(append([]byte{}, result...), WasmOpI64Const)
-	out = appendSLEB(out, 255)
-	out = append(out, WasmOpI64And, WasmOpI64Const, 1, WasmOpI64And, WasmOpI64Eqz)
+	out := append(outLocal(result), WasmOpLocalGet, 25, WasmOpLocalGet, 25, WasmOpI64Const, 4, WasmOpI64ShrU, WasmOpI64Xor, WasmOpLocalSet, 25)
+	out = append(out, WasmOpLocalGet, 25, WasmOpLocalGet, 25, WasmOpI64Const, 2, WasmOpI64ShrU, WasmOpI64Xor, WasmOpLocalSet, 25)
+	out = append(out, WasmOpLocalGet, 25, WasmOpLocalGet, 25, WasmOpI64Const, 1, WasmOpI64ShrU, WasmOpI64Xor, WasmOpLocalSet, 25)
+	out = append(out, WasmOpLocalGet, 25, WasmOpI64Const, 1, WasmOpI64And, WasmOpI64Eqz)
 	return extendBool(out)
+}
+
+func outLocal(result []byte) []byte {
+	out := append([]byte{}, result...)
+	out = append(out, constCode(255)...)
+	return append(out, WasmOpI64And, WasmOpLocalSet, 25)
 }
 
 func flagAux(op1, op2, result []byte) []byte {
@@ -41,6 +48,4 @@ func flagOverflow(op1, op2, result []byte, sub bool) []byte {
 	return append(out, WasmOpI64Xor, WasmOpI64And, WasmOpI64Const, 63, WasmOpI64ShrU, WasmOpI64Const, 1, WasmOpI64And)
 }
 
-func extendBool(out []byte) []byte {
-	return append(out, WasmOpI64ExtendI32U)
-}
+func extendBool(out []byte) []byte { return append(out, WasmOpI64ExtendI32U) }

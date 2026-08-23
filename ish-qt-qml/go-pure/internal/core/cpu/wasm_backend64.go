@@ -85,13 +85,21 @@ func runWasmFlow(memory *Memory64, state *MachineState64, flow machinecode.Instr
 		return Flow64Interrupt, nil
 	case machinecode.OpJcc:
 		state.RIP = flow.Target
-		if !conditionValue64(state, conditionCode64(flow.Cond)) {
+		if !conditionValue64(state, decodeWasmCondition(flow.Cond)) {
 			state.RIP = flow.Fallthrough
 		}
 	default:
 		state.RIP = flow.Target
 	}
 	return Flow64Branch, nil
+}
+
+func decodeWasmCondition(cond uint8) conditionCode64 {
+	base := conditionCode64(cond >> 1)
+	if cond&1 != 0 {
+		return base | 0x80
+	}
+	return base
 }
 
 func applyPackedFlags(state *MachineState64, packed uint64) {

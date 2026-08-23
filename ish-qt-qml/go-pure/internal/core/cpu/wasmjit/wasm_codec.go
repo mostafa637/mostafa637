@@ -88,5 +88,5 @@ func isSemanticOp(op machinecode.Op) bool {
 }
 
 func isFlow(op machinecode.Op) bool {
-	return op == machinecode.OpJmp || op == machinecode.OpJcc || op == machinecode.OpCall || op == machinecode.OpRET
+	return op == machinecode.OpJmp || op == machinecode.OpJcc || op == machinecode.OpCall || op == machinecode.OpRET || op == machinecode.OpSyscall
 }
