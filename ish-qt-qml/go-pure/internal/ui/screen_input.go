@@ -1,6 +1,11 @@
 package ui
 
-import "gioui.org/io/key"
+import (
+	"io"
+
+	"gioui.org/io/key"
+	"gioui.org/io/transfer"
+)
 
 func (s *Screen) handleKey(e key.Event) {
 	if s.Input == nil {
@@ -53,6 +58,18 @@ func (s *Screen) handleControlKey(e key.Event) bool {
 func (s *Screen) writeRuneName(e key.Event) {
 	if len(string(e.Name)) == 1 {
 		s.writeString(string(e.Name))
+	}
+}
+
+func (s *Screen) consumeClipboard(e transfer.DataEvent) {
+	if e.Open == nil {
+		return
+	}
+	data := e.Open()
+	defer data.Close()
+	buf, err := io.ReadAll(data)
+	if err == nil {
+		s.writeBytes(buf)
 	}
 }
 

@@ -20,11 +20,14 @@ type InputSink interface{ Write([]byte) error }
 type ResizeSink interface{ Resize(cols, rows int) error }
 
 type Screen struct {
-	Theme                           *material.Theme
-	Terminal                        *terminal.Model
-	Input                           InputSink
-	KeyTag                          struct{}
-	Focused                         bool
+	Theme          *material.Theme
+	Terminal       *terminal.Model
+	Input          InputSink
+	KeyTag         struct{}
+	ClipboardTag   struct{}
+	PasteRequested bool
+	Focused        bool
+
 	Tab, Ctrl, Esc, Paste, Settings widget.Clickable
 }
 
@@ -51,7 +54,7 @@ func (s *Screen) toolbarItems(gtx C) D {
 		layout.Rigid(s.actionButton(gtx, &s.Ctrl, "Ctrl", func() { s.writeBytes([]byte{0x1d}) })),
 		layout.Rigid(s.actionButton(gtx, &s.Esc, "Esc", func() { s.writeBytes([]byte{0x1b}) })),
 		layout.Flexed(1, func(gtx C) D { return D{Size: gtx.Constraints.Min} }),
-		layout.Rigid(s.actionButton(gtx, &s.Paste, "Paste", func() {})),
+		layout.Rigid(s.actionButton(gtx, &s.Paste, "Paste", func() { s.PasteRequested = true })),
 		layout.Rigid(s.actionButton(gtx, &s.Settings, "Settings", func() {})),
 	)
 }

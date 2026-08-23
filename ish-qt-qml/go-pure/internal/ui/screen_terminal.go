@@ -3,7 +3,9 @@ package ui
 import (
 	"image/color"
 
+	"gioui.org/io/clipboard"
 	"gioui.org/io/key"
+	"gioui.org/io/transfer"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
@@ -13,6 +15,10 @@ func (s *Screen) layoutTerminal(gtx C) D {
 	paint.FillShape(gtx.Ops, color.NRGBA{R: 40, G: 40, B: 40, A: 255}, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	key.InputHintOp{Tag: &s.KeyTag, Hint: key.HintText}.Add(gtx.Ops)
 	s.focusKeyboard(gtx)
+	if s.PasteRequested {
+		gtx.Execute(clipboard.ReadCmd{Tag: &s.ClipboardTag})
+		s.PasteRequested = false
+	}
 	s.handleEvents(gtx)
 	cols, rows := terminalSize(gtx)
 	if current := s.Terminal.Snapshot(); current.Cols != cols || current.Rows != rows {
@@ -35,6 +41,15 @@ func (s *Screen) focusKeyboard(gtx C) {
 }
 
 func (s *Screen) handleEvents(gtx C) {
+	for {
+		event, ok := gtx.Event(transfer.TargetFilter{Target: &s.ClipboardTag, Type: "text/plain"})
+		if !ok {
+			break
+		}
+		if e, ok := event.(transfer.DataEvent); ok {
+			s.consumeClipboard(e)
+		}
+	}
 	for {
 		event, ok := gtx.Event(key.Filter{Focus: &s.KeyTag})
 		if !ok {
