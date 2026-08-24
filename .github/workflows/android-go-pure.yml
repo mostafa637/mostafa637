@@ -78,3 +78,47 @@ jobs:
           path: ish-qt-qml/go-pure/bin/ishgo.apk
           if-no-files-found: error
           retention-days: 14
+
+  emulator:
+    name: Smoke test on Android Emulator
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: ishgo-android-apk
+          path: ish-qt-qml/go-pure/bin
+      - name: Run app and capture screenshots
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            set -e
+            adb install -r "$GITHUB_WORKSPACE/ish-qt-qml/go-pure/bin/ishgo.apk"
+            adb shell monkey -p com.mostafa637.ishgo 1
+            mkdir -p "$GITHUB_WORKSPACE/emulator-results"
+            sleep 5
+            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/01-after-launch.png"
+            adb logcat -d -t 300 > "$GITHUB_WORKSPACE/emulator-results/01-after-launch.log"
+            sleep 10
+            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/02-after-15s.png"
+            adb logcat -d -t 600 > "$GITHUB_WORKSPACE/emulator-results/02-after-15s.log"
+            sleep 15
+            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/03-after-30s.png"
+            adb logcat -d -t 900 > "$GITHUB_WORKSPACE/emulator-results/03-after-30s.log"
+      - name: Upload emulator screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishgo-emulator-results
+          path: emulator-results
+          if-no-files-found: warn
+          retention-days: 14
