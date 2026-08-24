@@ -1,13 +1,7 @@
 package ui
 
 import (
-	"image"
-	"image/color"
-
 	"gioui.org/layout"
-	"gioui.org/op/clip"
-	"gioui.org/op/paint"
-	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"github.com/mostafa637/mostafa637/go-pure/internal/terminal"
@@ -37,8 +31,8 @@ type Screen struct {
 	Focused        bool
 	Sessions       SessionActions
 
-	Tab, Ctrl, Esc, Up, Down, Left, Right, Paste, Hide, Settings widget.Clickable
-	New, Close, Restart                                          widget.Clickable
+	Tab, Ctrl, Esc, Arrows, Info, Paste, Hide widget.Clickable
+	New, Close, Restart                       widget.Clickable
 }
 
 func NewScreen(model *terminal.Model, input InputSink) *Screen {
@@ -54,8 +48,5 @@ func (s *Screen) Layout(gtx C) D {
 }
 
 func (s *Screen) layoutAccessory(gtx C) D {
-	height := gtx.Dp(unit.Dp(62))
-	gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = height, height
-	paint.FillShape(gtx.Ops, color.NRGBA{R: 42, G: 42, B: 46, A: 255}, clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, height)}.Op())
-	return s.accessoryRows(gtx)
+	return s.accessoryBar(gtx)
 }
