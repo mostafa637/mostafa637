@@ -11,7 +11,7 @@ permissions:
 
 defaults:
   run:
-    working-directory: go-pure
+    working-directory: ish-qt-qml/go-pure
 
 env:
   ANDROID_PLATFORM: android-35
@@ -28,8 +28,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go-pure/go.mod
-          cache-dependency-path: go-pure/go.sum
+          go-version-file: ish-qt-qml/go-pure/go.mod
+          cache-dependency-path: ish-qt-qml/go-pure/go.sum
       - name: Format check
         run: test -z "$(gofmt -l cmd internal)"
       - name: Core tests without CGo
@@ -52,8 +52,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go-pure/go.mod
-          cache-dependency-path: go-pure/go.sum
+          go-version-file: ish-qt-qml/go-pure/go.mod
+          cache-dependency-path: ish-qt-qml/go-pure/go.sum
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -75,6 +75,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ishgo-android-apk
-          path: go-pure/bin/ishgo.apk
+          path: ish-qt-qml/go-pure/bin/ishgo.apk
           if-no-files-found: error
           retention-days: 14
