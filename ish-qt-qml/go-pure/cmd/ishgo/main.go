@@ -16,17 +16,25 @@ import (
 
 func main() {
 	ctx := context.Background()
-	sess, err := newSession(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
+	factory := newSessionFactory(ctx)
 	go func() {
-		if err := ishapp.Run(ctx, sess); err != nil {
+		if err := ishapp.RunManaged(ctx, factory); err != nil {
 			log.Printf("iSH application stopped: %v", err)
 		}
 		os.Exit(0)
 	}()
 	app.Main()
+}
+
+func newSessionFactory(ctx context.Context) transport.Factory {
+	return func() transport.Session {
+		sess, err := newSession(ctx)
+		if err != nil {
+			log.Printf("create session: %v", err)
+			return nil
+		}
+		return sess
+	}
 }
 
 func newSession(ctx context.Context) (transport.Session, error) {
