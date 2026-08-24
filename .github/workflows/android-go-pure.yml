@@ -120,17 +120,23 @@ jobs:
             timeout 60s adb install -r "$GITHUB_WORKSPACE/ish-qt-qml/go-pure/bin/ishgo.apk"
             timeout 30s adb shell monkey -p com.mostafa637.ishgo 1
             adb shell settings put secure show_ime_with_hard_keyboard 1 || true
-            adb shell input tap 500 500
             mkdir -p "$GITHUB_WORKSPACE/emulator-results"
-            sleep 5
+            for i in $(seq 1 30); do
+              focus=$(adb shell dumpsys window windows | grep -m1 'mCurrentFocus' || true)
+              echo "$focus"
+              case "$focus" in *com.mostafa637.ishgo*) break;; esac
+              sleep 2
+            done
+            adb shell input tap 500 500 || true
+            sleep 20
             adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/01-after-launch.png"
-            adb logcat -d -t 300 > "$GITHUB_WORKSPACE/emulator-results/01-after-launch.log"
-            sleep 10
-            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/02-after-15s.png"
-            adb logcat -d -t 600 > "$GITHUB_WORKSPACE/emulator-results/02-after-15s.log"
+            adb logcat -d -t 500 > "$GITHUB_WORKSPACE/emulator-results/01-after-launch.log"
             sleep 15
-            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/03-after-30s.png"
-            adb logcat -d -t 900 > "$GITHUB_WORKSPACE/emulator-results/03-after-30s.log"
+            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/02-after-35s.png"
+            adb logcat -d -t 800 > "$GITHUB_WORKSPACE/emulator-results/02-after-35s.log"
+            sleep 25
+            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/03-after-60s.png"
+            adb logcat -d -t 1200 > "$GITHUB_WORKSPACE/emulator-results/03-after-60s.log"
       - name: Upload emulator screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
