@@ -18,6 +18,11 @@ type D = layout.Dimensions
 
 type InputSink interface{ Write([]byte) error }
 type ResizeSink interface{ Resize(cols, rows int) error }
+type SessionActions interface {
+	NewSession()
+	CloseSession()
+	RestartSession()
+}
 
 type Screen struct {
 	Theme          *material.Theme
@@ -30,8 +35,9 @@ type Screen struct {
 	settingsState  *settingsState
 	SettingsPath   string
 	Focused        bool
+	Sessions       SessionActions
 
-	Tab, Ctrl, Esc, Paste, Settings widget.Clickable
+	Tab, Ctrl, Esc, Paste, Settings, New, Close, Restart widget.Clickable
 }
 
 func NewScreen(model *terminal.Model, input InputSink) *Screen {
@@ -62,6 +68,7 @@ func (s *Screen) toolbarItems(gtx C) D {
 		layout.Rigid(s.actionButton(gtx, &s.Esc, "Esc", func() { s.writeBytes([]byte{0x1b}) })),
 		layout.Flexed(1, func(gtx C) D { return D{Size: gtx.Constraints.Min} }),
 		layout.Rigid(s.actionButton(gtx, &s.Paste, "Paste", func() { s.PasteRequested = true })),
+		layout.Rigid(func(gtx C) D { return s.sessionButtons(gtx) }),
 		layout.Rigid(s.actionButton(gtx, &s.Settings, "Settings", func() { s.SettingsOpen = true })),
 	)
 }
