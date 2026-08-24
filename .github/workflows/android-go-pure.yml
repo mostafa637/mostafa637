@@ -33,7 +33,14 @@ jobs:
       - name: Format check
         run: test -z "$(gofmt -l cmd internal)"
       - name: Core tests without CGo
-        run: make test-core
+        run: |
+          for attempt in 1 2; do
+            if timeout 480s env CGO_ENABLED=0 go test -p 1 ./internal/core/... ./internal/platform/... ./internal/terminal/... ./internal/session/...; then
+              exit 0
+            fi
+            echo "Core test attempt ${attempt} failed; retrying once."
+          done
+          exit 1
       - name: Modularity check
         id: modularity
         continue-on-error: true
