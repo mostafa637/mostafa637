@@ -37,12 +37,23 @@ func newSessionFactory(ctx context.Context) transport.Factory {
 	}
 }
 
+func defaultShell() string {
+	if shell := os.Getenv("ISH_SHELL"); shell != "" {
+		return shell
+	}
+	if _, err := os.Stat("/system/bin/sh"); err == nil {
+		return "/system/bin/sh"
+	}
+	return "/bin/sh"
+}
+
 func newSession(ctx context.Context) (transport.Session, error) {
 	rootfs := os.Getenv("ISH_ROOTFS")
 	if rootfs == "" {
 		// Host PTY remains useful for Linux renderer development when a rootfs has
 		// not been supplied. Production/rootfs runs use the GoFactory below.
-		return platform.NewPTYSession(os.Getenv("ISH_SHELL")), nil
+		return platform.NewPTYSession(defaultShell()), nil
+
 	}
 	factory := core.GoFactory{Config: coresession.Config{
 		Rootfs:    rootfs,

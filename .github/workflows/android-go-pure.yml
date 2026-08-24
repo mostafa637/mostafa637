@@ -129,10 +129,15 @@ jobs:
             adb shell settings put secure show_ime_with_hard_keyboard 1 || true
             mkdir -p "$GITHUB_WORKSPACE/emulator-results"
             sleep 20
-            adb shell input tap 500 500 || true
+            adb shell input tap 500 300 || true
             sleep 3
             adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/01-before-apk-add.png"
             adb logcat -d -t 500 > "$GITHUB_WORKSPACE/emulator-results/01-before-apk-add.log"
+            adb shell input text 'echo%ssISH_INPUT_READY'
+            adb shell input keyevent 66
+            sleep 3
+            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/01-after-input.png"
+            adb logcat -d -t 700 > "$GITHUB_WORKSPACE/emulator-results/01-after-input.log"
             adb shell input text 'apk%ssadd%spython3'
             adb shell input keyevent 66
             sleep 60
