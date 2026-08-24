@@ -165,4 +165,3 @@ func readFileHandle64(ctx *Context64, address corecpu.Address64) (fileHandle64, 
 		Inode: binary.LittleEndian.Uint64(raw[8:16]),
 	}, nil
 }
-
