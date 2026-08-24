@@ -28,6 +28,7 @@ type Screen struct {
 	PasteRequested bool
 	SettingsOpen   bool
 	settingsState  *settingsState
+	SettingsPath   string
 	Focused        bool
 
 	Tab, Ctrl, Esc, Paste, Settings widget.Clickable

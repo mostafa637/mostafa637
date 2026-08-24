@@ -19,8 +19,7 @@ var defaultSettings = settingsState{FontSize: 14, Cursor: true}
 
 func (s *Screen) settings() *settingsState {
 	if s.settingsState == nil {
-		v := defaultSettings
-		s.settingsState = &v
+		s.settingsState = loadSettings(s.SettingsPath)
 	}
 	return s.settingsState
 }
@@ -32,12 +31,15 @@ func (s *Screen) layoutSettings(gtx C) D {
 	}
 	if state.FontDown.Clicked(gtx) && state.FontSize > 8 {
 		state.FontSize--
+		s.saveSettings()
 	}
 	if state.FontUp.Clicked(gtx) && state.FontSize < 32 {
 		state.FontSize++
+		s.saveSettings()
 	}
 	if state.CursorFlip.Clicked(gtx) {
 		state.Cursor = !state.Cursor
+		s.saveSettings()
 	}
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(s.settingsTitle),
