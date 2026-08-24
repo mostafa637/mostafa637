@@ -129,7 +129,6 @@ jobs:
             adb shell settings put secure show_ime_with_hard_keyboard 1 || true
             mkdir -p "$GITHUB_WORKSPACE/emulator-results"
             sleep 20
-            adb shell dumpsys window windows | grep -m1 'mCurrentFocus' || true
             adb shell input tap 500 500 || true
             sleep 20
             adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/01-after-launch.png"
