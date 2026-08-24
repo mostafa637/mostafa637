@@ -12,7 +12,7 @@ import (
 )
 
 func (s *Screen) layoutTerminal(gtx C) D {
-	paint.FillShape(gtx.Ops, color.NRGBA{R: 40, G: 40, B: 40, A: 255}, clip.Rect{Max: gtx.Constraints.Max}.Op())
+	paint.FillShape(gtx.Ops, color.NRGBA{R: 250, G: 250, B: 250, A: 255}, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	key.InputHintOp{Tag: &s.KeyTag, Hint: key.HintText}.Add(gtx.Ops)
 	s.focusKeyboard(gtx)
 	if s.PasteRequested {
