@@ -100,7 +100,7 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -accel off
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
           script: |
             set -e
             timeout 60s adb install -r "$GITHUB_WORKSPACE/ish-qt-qml/go-pure/bin/ishgo.apk"
