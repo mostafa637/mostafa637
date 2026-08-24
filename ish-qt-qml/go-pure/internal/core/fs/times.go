@@ -23,7 +23,7 @@ func (f *FS) Times(name string, noFollow bool) (time.Time, time.Time, error) {
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
-	return time.Unix(stat.Atim.Sec, stat.Atim.Nsec), time.Unix(stat.Mtim.Sec, stat.Mtim.Nsec), nil
+	return time.Unix(int64(stat.Atim.Sec), int64(stat.Atim.Nsec)), time.Unix(int64(stat.Mtim.Sec), int64(stat.Mtim.Nsec)), nil
 }
 
 // SetTimes updates atime and mtime. A nil value preserves the existing time,
@@ -50,7 +50,7 @@ func (f *FS) SetTimes(name string, atime, mtime *time.Time, noFollow bool) error
 		flags = unix.AT_SYMLINK_NOFOLLOW
 	}
 	return unix.UtimesNanoAt(unix.AT_FDCWD, host, []unix.Timespec{
-		{Sec: atime.Unix(), Nsec: int64(atime.Nanosecond())},
-		{Sec: mtime.Unix(), Nsec: int64(mtime.Nanosecond())},
+		unix.NsecToTimespec(atime.UnixNano()),
+		unix.NsecToTimespec(mtime.UnixNano()),
 	}, flags)
 }
