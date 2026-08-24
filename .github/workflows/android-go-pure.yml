@@ -131,7 +131,7 @@ jobs:
             for i in $(seq 1 30); do
               focus=$(adb shell dumpsys window windows | grep -m1 'mCurrentFocus' || true)
               echo "$focus"
-              case "$focus" in *com.mostafa637.ishgo*) break;; esac
+              if echo "$focus" | grep -q 'com.mostafa637.ishgo'; then break; fi
               sleep 2
             done
             adb shell input tap 500 500 || true
