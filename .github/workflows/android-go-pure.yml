@@ -130,15 +130,19 @@ jobs:
             mkdir -p "$GITHUB_WORKSPACE/emulator-results"
             sleep 20
             adb shell input tap 500 500 || true
-            sleep 20
-            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/01-after-launch.png"
-            adb logcat -d -t 500 > "$GITHUB_WORKSPACE/emulator-results/01-after-launch.log"
+            sleep 3
+            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/01-before-apk-add.png"
+            adb logcat -d -t 500 > "$GITHUB_WORKSPACE/emulator-results/01-before-apk-add.log"
+            adb shell input text 'apk%ssadd%spython3'
+            adb shell input keyevent 66
+            sleep 60
+            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/02-after-apk-add.png"
+            adb logcat -d -t 1200 > "$GITHUB_WORKSPACE/emulator-results/02-after-apk-add.log"
+            adb shell input text 'python3%ss--version'
+            adb shell input keyevent 66
             sleep 15
-            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/02-after-35s.png"
-            adb logcat -d -t 800 > "$GITHUB_WORKSPACE/emulator-results/02-after-35s.log"
-            sleep 25
-            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/03-after-60s.png"
-            adb logcat -d -t 1200 > "$GITHUB_WORKSPACE/emulator-results/03-after-60s.log"
+            adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/03-python-version.png"
+            adb logcat -d -t 1600 > "$GITHUB_WORKSPACE/emulator-results/03-python-version.log"
       - name: Upload emulator screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
