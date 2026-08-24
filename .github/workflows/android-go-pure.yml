@@ -119,6 +119,8 @@ jobs:
             set -e
             timeout 60s adb install -r "$GITHUB_WORKSPACE/ish-qt-qml/go-pure/bin/ishgo.apk"
             timeout 30s adb shell monkey -p com.mostafa637.ishgo 1
+            adb shell settings put secure show_ime_with_hard_keyboard 1 || true
+            adb shell input tap 500 500
             mkdir -p "$GITHUB_WORKSPACE/emulator-results"
             sleep 5
             adb exec-out screencap -p > "$GITHUB_WORKSPACE/emulator-results/01-after-launch.png"
