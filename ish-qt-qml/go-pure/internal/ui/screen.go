@@ -37,8 +37,8 @@ type Screen struct {
 	Focused        bool
 	Sessions       SessionActions
 
-	Tab, Ctrl, Esc, Arrows, Paste, Hide, Settings widget.Clickable
-	New, Close, Restart                           widget.Clickable
+	Tab, Ctrl, Esc, Up, Down, Left, Right, Paste, Hide, Settings widget.Clickable
+	New, Close, Restart                                          widget.Clickable
 }
 
 func NewScreen(model *terminal.Model, input InputSink) *Screen {
