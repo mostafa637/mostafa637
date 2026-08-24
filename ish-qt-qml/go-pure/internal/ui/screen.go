@@ -26,6 +26,8 @@ type Screen struct {
 	KeyTag         struct{}
 	ClipboardTag   struct{}
 	PasteRequested bool
+	SettingsOpen   bool
+	settingsState  *settingsState
 	Focused        bool
 
 	Tab, Ctrl, Esc, Paste, Settings widget.Clickable
@@ -36,8 +38,12 @@ func NewScreen(model *terminal.Model, input InputSink) *Screen {
 }
 
 func (s *Screen) Layout(gtx C) D {
+	content := s.layoutTerminal
+	if s.SettingsOpen {
+		content = s.layoutSettings
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(s.layoutToolbar), layout.Flexed(1, s.layoutTerminal))
+		layout.Rigid(s.layoutToolbar), layout.Flexed(1, content))
 }
 
 func (s *Screen) layoutToolbar(gtx C) D {
@@ -55,7 +61,7 @@ func (s *Screen) toolbarItems(gtx C) D {
 		layout.Rigid(s.actionButton(gtx, &s.Esc, "Esc", func() { s.writeBytes([]byte{0x1b}) })),
 		layout.Flexed(1, func(gtx C) D { return D{Size: gtx.Constraints.Min} }),
 		layout.Rigid(s.actionButton(gtx, &s.Paste, "Paste", func() { s.PasteRequested = true })),
-		layout.Rigid(s.actionButton(gtx, &s.Settings, "Settings", func() {})),
+		layout.Rigid(s.actionButton(gtx, &s.Settings, "Settings", func() { s.SettingsOpen = true })),
 	)
 }
 
