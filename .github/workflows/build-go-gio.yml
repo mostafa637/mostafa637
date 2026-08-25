@@ -44,7 +44,7 @@ jobs:
       - name: Install Linux and LLVM dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm-18 clang-18 lld-18 libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          sudo apt-get install -y llvm-18 clang-18 lld-18 libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
 
       - name: Download Go modules
         working-directory: ${{ env.GO_MODULE_DIR }}
@@ -140,9 +140,9 @@ jobs:
         working-directory: ${{ env.GO_MODULE_DIR }}
         run: go mod download
 
-      - name: Test Go packages
+      - name: Test non-GUI Go packages on the Linux runner
         working-directory: ${{ env.GO_MODULE_DIR }}
-        run: go test ./...
+        run: go test ./internal/... ./cmd/ish-go-rootfs ./cmd/ish-go-translator
 
       - name: Build signed Gio APK
         working-directory: ${{ env.GO_MODULE_DIR }}
