@@ -67,7 +67,8 @@ func run(w *app.Window) error {
 		e := w.Event()
 		switch e := e.(type) {
 		case app.FrameEvent:
-			gtx := layout.Context{Ops: &state.ops, Now: e.Now, Metric: e.Metric, Source: e.Source}
+			gtx := app.NewContext(&state.ops, e)
+
 			state.drainOutput()
 			state.layout(gtx)
 			e.Frame(&state.ops)
