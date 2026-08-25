@@ -69,11 +69,12 @@ func goIshOutput(cookie unsafe.Pointer, bytes *C.char, length C.size_t) {
 		if len(s.markerBuf) > maxMarkerWindow {
 			s.markerBuf = append([]byte(nil), s.markerBuf[len(s.markerBuf)-maxMarkerWindow:]...)
 		}
-		if bytespkg.Count(s.markerBuf, []byte("GO_ALPINE_AVD_OK")) >= 2 ||
-			bytespkg.Count(s.markerBuf, []byte("GO-ALPINE-AVD-OK")) >= 2 ||
-			bytespkg.Count(s.markerBuf, []byte("GO-ALPINE")) >= 2 {
+		markerCount := bytespkg.Count(s.markerBuf, []byte("GO_ALPINE_AVD_OK"))
+		markerCount += bytespkg.Count(s.markerBuf, []byte("GO-ALPINE-AVD-OK"))
+		markerCount += bytespkg.Count(s.markerBuf, []byte("GO-ALPINE"))
+		if markerCount >= 2 && bytespkg.Contains(s.markerBuf, []byte("3.19.0")) {
 			s.markerSeen = true
-			log.Print("iSH Alpine smoke marker received")
+			log.Print("iSH Alpine smoke marker received; Alpine release 3.19.0")
 		}
 	}
 	closed := s.closed
