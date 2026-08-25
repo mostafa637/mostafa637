@@ -13,8 +13,10 @@ find_package(Threads REQUIRED)
 if(NOT ANDROID)
     find_package(ZLIB REQUIRED)
     set(ISH_ZLIB_LIB ZLIB::ZLIB)
+    set(ISH_ANDROID_LOG_LIB)
 else()
     set(ISH_ZLIB_LIB z)
+    set(ISH_ANDROID_LOG_LIB log)
 endif()
 
 set(ISH_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
@@ -206,7 +208,7 @@ target_compile_options(ish_core_session PRIVATE
     -Wno-switch -Wno-unused-parameter -Wno-sign-compare
     -Wno-pointer-sign -Wno-implicit-fallthrough
 )
-target_link_libraries(ish_core_session PUBLIC ish_kernel ish_emu ish_fakefs ish_sqlite Threads::Threads ${ISH_ZLIB_LIB} m)
+target_link_libraries(ish_core_session PUBLIC ish_kernel ish_emu ish_fakefs ish_sqlite Threads::Threads ${ISH_ZLIB_LIB} ${ISH_ANDROID_LOG_LIB} m)
 
 add_library(ish_native INTERFACE)
 target_link_libraries(ish_native INTERFACE ish_core_session)
@@ -214,4 +216,4 @@ target_include_directories(ish_native INTERFACE "${ISH_SOURCE_DIR}/app/core")
 
 add_executable(ish-core-smoke "${ISH_SOURCE_DIR}/main.c")
 target_include_directories(ish-core-smoke PRIVATE "${ISH_SOURCE_DIR}" "${ISH_CORE_BUILD_DIR}")
-target_link_libraries(ish-core-smoke PRIVATE ish_core_session ish_kernel ish_emu ish_fakefs ish_sqlite Threads::Threads ${ISH_ZLIB_LIB} m)
+target_link_libraries(ish-core-smoke PRIVATE ish_core_session ish_kernel ish_emu ish_fakefs ish_sqlite Threads::Threads ${ISH_ZLIB_LIB} ${ISH_ANDROID_LOG_LIB} m)

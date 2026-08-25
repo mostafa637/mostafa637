@@ -1,5 +1,8 @@
 #include <string.h>
 #include <sys/stat.h>
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+#include <android/log.h>
+#endif
 #include "kernel/calls.h"
 #include "kernel/fs.h"
 #include "fs/path.h"
@@ -27,15 +30,26 @@ struct mount *mount_find(char *path) {
     assert(path_is_normalized(path));
     lock(&mounts_lock);
     struct mount *mount = NULL;
-    assert(!list_empty(&mounts)); // this would mean there's no root FS mounted
+    struct mount *found = NULL;
     list_for_each_entry(&mounts, mount, mounts) {
+        if (mount->point == NULL)
+            continue;
         size_t n = strlen(mount->point);
-        if (strncmp(path, mount->point, n) == 0 && (path[n] == '/' || path[n] == '\0'))
+        if (strncmp(path, mount->point, n) == 0 && (path[n] == '/' || path[n] == '\0')) {
+            found = mount;
             break;
+        }
     }
-    mount->refcount++;
+    if (found == NULL) {
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+        __android_log_print(ANDROID_LOG_ERROR, "iSHCore", "mount lookup failed path=%s mounts=%lu", path, list_size(&mounts));
+#endif
+        unlock(&mounts_lock);
+        return ERR_PTR(_ENOENT);
+    }
+    found->refcount++;
     unlock(&mounts_lock);
-    return mount;
+    return found;
 }
 
 void mount_retain(struct mount *mount) {

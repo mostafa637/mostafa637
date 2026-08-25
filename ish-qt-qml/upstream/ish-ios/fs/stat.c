@@ -36,6 +36,8 @@ int generic_statat(struct fd *at, const char *path_raw, struct statbuf *stat, bo
     if (err < 0)
         return err;
     struct mount *mount = find_mount_and_trim_path(path);
+    if (IS_ERR(mount))
+        return PTR_ERR(mount);
     memset(stat, 0, sizeof(*stat));
     err = mount->fs->stat(mount, path, stat);
     mount_release(mount);

@@ -14,6 +14,9 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+#include <android/log.h>
+#endif
 
 #include "fs/fd.h"
 #include "fs/tty.h"
@@ -52,6 +55,26 @@ struct IshCoreSession {
 };
 
 static _Thread_local struct IshCoreSession *active_session;
+
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+static void log_core_mount_state(const char *phase, const struct IshCoreSession *session, int result) {
+    struct fd *root = NULL;
+    struct mount *mount = NULL;
+    if (current != NULL && current->fs != NULL)
+        root = current->fs->root;
+    if (root != NULL)
+        mount = root->mount;
+    lock(&mounts_lock);
+    unsigned long count = list_size(&mounts);
+    __android_log_print(ANDROID_LOG_INFO, "iSHCore",
+                        "phase=%s result=%d root_path=%s root_fd=%d point=%s source=%s mounts=%lu",
+                        phase, result, session != NULL && session->root_path != NULL ? session->root_path : "",
+                        mount != NULL ? mount->root_fd : -1,
+                        mount != NULL && mount->point != NULL ? mount->point : "<null>",
+                        mount != NULL && mount->source != NULL ? mount->source : "<null>", count);
+    unlock(&mounts_lock);
+}
+#endif
 
 static char *copy_string(const char *value) {
     if (value == NULL)
@@ -370,6 +393,9 @@ static void *core_worker(void *opaque) {
     int result = xX_main_Xx((int)argc, argv, envp);
     if (result < 0)
         goto finish;
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+    log_core_mount_state("after-main", session, result);
+#endif
 
 #if defined(ISH_CORE_SESSION)
     /*
@@ -378,6 +404,9 @@ static void *core_worker(void *opaque) {
      * CoreSession owns the PTY and leaves the console driver uninitialised.
      */
     create_some_device_nodes();
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+    log_core_mount_state("after-devices", session, result);
+#endif
     (void)do_mount(&procfs, "proc", "/proc", "", 0);
     (void)do_mount(&devptsfs, "devpts", "/dev/pts", "", 0);
     tty_drivers[TTY_CONSOLE_MAJOR] = &real_tty_driver;

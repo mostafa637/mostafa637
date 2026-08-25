@@ -1,6 +1,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+#include <android/log.h>
+#endif
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -275,8 +278,17 @@ int realfs_getpath(struct fd *fd, char *buf) {
     if (err < 0)
         return err;
     if (strcmp(fd->mount->source, "/") != 0 || strcmp(buf, "/") == 0) {
-        size_t source_len = strlen(fd->mount->source);
-        memmove(buf, buf + source_len, MAX_PATH - source_len);
+        const char *source = fd->mount->source;
+        size_t source_len = strlen(source);
+        if (source_len > (size_t)err || strncmp(buf, source, source_len) != 0) {
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+            __android_log_print(ANDROID_LOG_ERROR, "iSHCore", "fd path mismatch source=%s actual=%s", source, buf);
+#endif
+            return _EIO;
+        }
+        memmove(buf, buf + source_len, (size_t)err - source_len + 1);
+        if (buf[0] == '\0')
+            strcpy(buf, "/");
     }
     return 0;
 }
@@ -434,13 +446,27 @@ int realfs_mount(struct mount *mount) {
 #if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
     /*
      * Android's seccomp policy on x86_64 rejects the legacy lstat syscall
-     * used by bionic realpath().  The Go layer passes an absolute,
-     * app-private rootfs directory, so canonicalising it is unnecessary.
-     * Open it directly and keep the path supplied by the app.
+     * used by bionic realpath(). Open the app-private directory directly,
+     * then resolve its spelling through the already-open fd. This preserves
+     * the relative-path contract of realfs_getpath even when Android exposes
+     * the same directory through an alias such as /data/user/0 or /data/data.
      */
     int root_fd = open(mount->source, O_DIRECTORY | O_CLOEXEC);
     if (root_fd < 0)
         return errno_map();
+    char actual_source[MAX_PATH];
+    int actual_size = getpath(root_fd, actual_source);
+    if (actual_size < 0) {
+        close(root_fd);
+        return errno_map();
+    }
+    char *source = strdup(actual_source);
+    if (source == NULL) {
+        close(root_fd);
+        return _ENOMEM;
+    }
+    free((void *)mount->source);
+    mount->source = source;
     mount->root_fd = root_fd;
     return 0;
 #else

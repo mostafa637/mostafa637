@@ -71,6 +71,8 @@ static int __path_normalize(const char *at_path, const char *path, char *out, in
             *o = '\0';
             strcpy(possible_symlink, out);
             struct mount *mount = find_mount_and_trim_path(possible_symlink);
+            if (IS_ERR(mount))
+                return PTR_ERR(mount);
             assert(path_is_normalized(possible_symlink));
             int res = _EINVAL;
             if (mount->fs->readlink)
