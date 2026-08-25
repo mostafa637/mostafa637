@@ -56,6 +56,12 @@ func run(w *app.Window) error {
 	state.input.InputHint = key.HintText
 
 	shell := os.Getenv("ISH_SHELL")
+	if shell == "" {
+		shell = "/system/bin/sh"
+		if _, statErr := os.Stat(shell); statErr != nil {
+			shell = "/bin/sh"
+		}
+	}
 	started, err := session.Start(context.Background(), shell)
 	if err != nil {
 		return err
@@ -120,6 +126,10 @@ func (s *appState) layout(gtx C) {
 			return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx C) D {
 				style := material.Editor(s.theme, &s.input, "command")
 				style.TextSize = unit.Sp(15)
+				style.Color = color.NRGBA{R: 236, G: 236, B: 240, A: 255}
+				style.HintColor = color.NRGBA{R: 150, G: 150, B: 156, A: 255}
+				style.SelectionColor = color.NRGBA{R: 72, G: 86, B: 160, A: 255}
+
 				if event, changed := s.input.Update(gtx); changed {
 					if submit, ok := event.(widget.SubmitEvent); ok {
 						_ = s.session.Write([]byte(submit.Text + "\n"))
