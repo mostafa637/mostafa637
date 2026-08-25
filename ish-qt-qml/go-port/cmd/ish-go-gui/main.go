@@ -29,6 +29,13 @@ import (
 //go:embed assets/root.tar.gz
 var embeddedRootfs []byte
 
+// This database is generated from the same rootfs archive on Linux. Android
+// installs it as-is to avoid the modernc SQLite VFS lstat syscall rejected by
+// Android x86_64 seccomp.
+//
+//go:embed assets/meta.db
+var embeddedMetadata []byte
+
 type C = layout.Context
 type D = layout.Dimensions
 
@@ -154,12 +161,22 @@ func prepareRootfs(ctx context.Context) (string, error) {
 	// supported openat path.
 	if f, err := os.Open(marker); err == nil {
 		_ = f.Close()
-		if err := rootfs.Validate(ctx, base); err == nil {
+		if runtime.GOOS == "android" {
+			if err := rootfs.ValidateBundled(base); err == nil {
+				return base, nil
+			}
+		} else if err := rootfs.Validate(ctx, base); err == nil {
 			return base, nil
 		}
 	}
-	if err := rootfs.Install(ctx, bytes.NewReader(embeddedRootfs), base); err != nil {
-		return "", err
+	var installErr error
+	if runtime.GOOS == "android" {
+		installErr = rootfs.InstallBundled(ctx, bytes.NewReader(embeddedRootfs), bytes.NewReader(embeddedMetadata), base)
+	} else {
+		installErr = rootfs.Install(ctx, bytes.NewReader(embeddedRootfs), base)
+	}
+	if installErr != nil {
+		return "", installErr
 	}
 	if err := os.WriteFile(marker, []byte("go-gio-alpine-v1\n"), 0o600); err != nil {
 		return "", errors.New("write rootfs marker: " + err.Error())
