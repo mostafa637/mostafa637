@@ -6,6 +6,7 @@ require (
 	gioui.org v0.10.2
 	github.com/creack/pty/v2 v2.0.1
 	github.com/llir/llvm v0.3.6
+	github.com/viktomas/gritty v0.0.0-20231008101841-e77d027024e3
 	golang.org/x/arch v0.30.0
 	modernc.org/sqlite v1.57.0
 )

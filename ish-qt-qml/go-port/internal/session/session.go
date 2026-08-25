@@ -12,21 +12,24 @@ import (
 	"github.com/creack/pty/v2"
 )
 
-// Session is a small PTY-backed shell session for the Go/Gio port. It is an
-// integration seam: the current implementation starts a host shell, while a
-// future iSH backend can implement the same interface over Asbestos/fakefs.
-type Session struct {
-	cmd *exec.Cmd
-	pty *os.File
-
-	mu     sync.Mutex
-	closed bool
-	out    chan []byte
-	done   chan error
+type backend interface {
+	Output() <-chan []byte
+	Done() <-chan error
+	Write([]byte) error
+	Resize(cols, rows uint16) error
+	Close() error
 }
 
-// Start launches shell in a PTY. It intentionally does not invoke a shell
-// through a string, so the program and arguments remain explicit.
+// Session is the stable terminal-session API used by Gio. The implementation
+// can be the host PTY fallback or the native iSH/Asbestos backend.
+type Session struct {
+	impl backend
+}
+
+func newSession(impl backend) *Session { return &Session{impl: impl} }
+
+// Start launches a host shell in a PTY. It remains useful for Linux development
+// builds that do not link the native iSH core.
 func Start(ctx context.Context, shell string, args ...string) (*Session, error) {
 	if shell == "" {
 		shell = "/bin/sh"
@@ -37,61 +40,77 @@ func Start(ctx context.Context, shell string, args ...string) (*Session, error) 
 	if err != nil {
 		return nil, fmt.Errorf("session: start %s: %w", shell, err)
 	}
-	s := &Session{cmd: cmd, pty: file, out: make(chan []byte, 32), done: make(chan error, 1)}
-	go s.readLoop()
-	return s, nil
+	p := &ptyBackend{cmd: cmd, pty: file, out: make(chan []byte, 32), done: make(chan error, 1)}
+	go p.readLoop()
+	return newSession(p), nil
 }
 
-func (s *Session) readLoop() {
+type ptyBackend struct {
+	cmd *exec.Cmd
+	pty *os.File
+
+	mu     sync.Mutex
+	closed bool
+	out    chan []byte
+	done   chan error
+}
+
+func (p *ptyBackend) readLoop() {
 	buf := make([]byte, 32*1024)
 	for {
-		n, err := s.pty.Read(buf)
+		n, err := p.pty.Read(buf)
 		if n > 0 {
 			chunk := append([]byte(nil), buf[:n]...)
-			s.out <- chunk
+			p.out <- chunk
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				s.done <- err
+				p.done <- err
 			} else {
-				s.done <- nil
+				p.done <- nil
 			}
-			close(s.out)
+			close(p.out)
 			return
 		}
 	}
 }
 
-func (s *Session) Output() <-chan []byte { return s.out }
-func (s *Session) Done() <-chan error    { return s.done }
+func (s *Session) Output() <-chan []byte          { return s.impl.Output() }
+func (s *Session) Done() <-chan error             { return s.impl.Done() }
+func (s *Session) Write(data []byte) error        { return s.impl.Write(data) }
+func (s *Session) Resize(cols, rows uint16) error { return s.impl.Resize(cols, rows) }
+func (s *Session) Close() error                   { return s.impl.Close() }
 
-func (s *Session) Write(data []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
+func (p *ptyBackend) Output() <-chan []byte { return p.out }
+func (p *ptyBackend) Done() <-chan error    { return p.done }
+
+func (p *ptyBackend) Write(data []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
 		return io.ErrClosedPipe
 	}
-	_, err := s.pty.Write(data)
+	_, err := p.pty.Write(data)
 	return err
 }
 
-func (s *Session) Resize(cols, rows uint16) error {
+func (p *ptyBackend) Resize(cols, rows uint16) error {
 	if cols == 0 || rows == 0 {
 		return errors.New("session: PTY dimensions must be non-zero")
 	}
-	return pty.Setsize(s.pty, &pty.Winsize{Cols: cols, Rows: rows})
+	return pty.Setsize(p.pty, &pty.Winsize{Cols: cols, Rows: rows})
 }
 
-func (s *Session) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
+func (p *ptyBackend) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
 		return nil
 	}
-	s.closed = true
-	if err := s.pty.Close(); err != nil {
-		_ = s.cmd.Process.Kill()
+	p.closed = true
+	if err := p.pty.Close(); err != nil {
+		_ = p.cmd.Process.Kill()
 		return err
 	}
-	return s.cmd.Process.Kill()
+	return p.cmd.Process.Kill()
 }

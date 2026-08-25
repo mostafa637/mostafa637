@@ -44,7 +44,7 @@ jobs:
       - name: Install Linux and LLVM dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm-18 clang-18 lld-18 libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
+          sudo apt-get install -y llvm-18 clang-18 lld-18 cmake ninja-build python3 libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
 
       - name: Download Go modules
         working-directory: ${{ env.GO_MODULE_DIR }}
@@ -69,11 +69,28 @@ jobs:
           test -s /tmp/ish-go-sample.o
           file /tmp/ish-go-sample.o
 
+      - name: Build native iSH core for Linux
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: |
+          rm -rf /tmp/ish-go-native-linux native/lib
+          cmake -S native -B /tmp/ish-go-native-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/ish-go-native-linux --target ish_core_session ish_kernel ish_emu ish_fakefs ish_sqlite -j2
+          mkdir -p native/lib
+          cp /tmp/ish-go-native-linux/lib/libish_*.a native/lib/
+          test -s native/lib/libish_core_session.a
+
+      - name: Run Alpine CoreSession functional test
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: |
+          rm -rf /tmp/ish-go-alpine-root
+          go run ./cmd/ish-go-rootfs -archive cmd/ish-go-gui/assets/root.tar.gz -base /tmp/ish-go-alpine-root
+          ISH_TEST_ROOTFS=/tmp/ish-go-alpine-root CGO_ENABLED=1 go test -count=1 -tags ishcore ./internal/session
+
       - name: Build Linux Gio executable
         working-directory: ${{ env.GO_MODULE_DIR }}
         run: |
           mkdir -p dist
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath \
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -tags ishcore \
             -ldflags "-s -w -X gioui.org/app.ID=org.ish.go" \
             -o dist/ish-go-linux-x86_64 ./cmd/ish-go-gui
           test -x dist/ish-go-linux-x86_64
@@ -136,6 +153,20 @@ jobs:
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
           gogio -h
 
+      - name: Build native iSH core for Android
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: |
+          rm -rf /tmp/ish-go-native-android native/lib
+          cmake -S native -B /tmp/ish-go-native-android -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="${{ matrix.abi }}" \
+            -DANDROID_PLATFORM="android-${ANDROID_MIN_SDK}"
+          cmake --build /tmp/ish-go-native-android --target ish_core_session ish_kernel ish_emu ish_fakefs ish_sqlite -j2
+          mkdir -p native/lib
+          cp /tmp/ish-go-native-android/lib/libish_*.a native/lib/
+          test -s native/lib/libish_core_session.a
+
       - name: Download Go modules
         working-directory: ${{ env.GO_MODULE_DIR }}
         run: go mod download
@@ -157,6 +188,7 @@ jobs:
             -targetsdk "${ANDROID_TARGET_SDK}" \
             -appid org.ish.go \
             -version 0.1.0.1 \
+            -tags ishcore \
             -signkey "${GITHUB_WORKSPACE}/ish-qt-qml/ci/keys/ish-qt-ci-release.keystore" \
             -signpass "${GOGIO_SIGNPASS}" \
             -o "dist/ish-go-${{ matrix.abi }}.apk" \
@@ -224,7 +256,7 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 300
           script: |
-            set -e; trap 'status=$?; adb devices > avd-adb-devices.txt 2>&1 || true; adb -s emulator-5554 shell getprop > avd-getprop.txt 2>&1 || true; adb -s emulator-5554 shell dumpsys activity activities > avd-activities.txt 2>&1 || true; adb -s emulator-5554 logcat -d > avd-logcat.txt 2>&1 || true; adb -s emulator-5554 shell screencap -p /sdcard/ish-go-diagnostic.png >/dev/null 2>&1 || true; adb -s emulator-5554 pull /sdcard/ish-go-diagnostic.png avd-ish-go-diagnostic.png >/dev/null 2>&1 || true; exit "$status"' 0; adb devices; test -s apk/ish-go-x86_64.apk; adb -s emulator-5554 install -r apk/ish-go-x86_64.apk; adb -s emulator-5554 shell pm list packages > avd-packages.txt; grep -q 'org.ish.go' avd-packages.txt; adb -s emulator-5554 shell monkey -p org.ish.go -c android.intent.category.LAUNCHER 1; sleep 8; test -n "$(adb -s emulator-5554 shell pidof org.ish.go | tr -d '\r')"; adb -s emulator-5554 shell input tap 220 2135; adb -s emulator-5554 shell input text 'echo%sgo-port-smoke'; adb -s emulator-5554 shell input keyevent 66; sleep 2; adb -s emulator-5554 shell input keyevent 4; sleep 1; adb -s emulator-5554 shell dumpsys activity activities | grep -q 'org.ish.go'; adb -s emulator-5554 shell screencap -p /sdcard/ish-go.png; adb -s emulator-5554 pull /sdcard/ish-go.png avd-ish-go.png
+            set -e; trap 'status=$?; adb devices > avd-adb-devices.txt 2>&1 || true; adb -s emulator-5554 shell getprop > avd-getprop.txt 2>&1 || true; adb -s emulator-5554 shell dumpsys activity activities > avd-activities.txt 2>&1 || true; adb -s emulator-5554 logcat -d > avd-logcat.txt 2>&1 || true; adb -s emulator-5554 shell screencap -p /sdcard/ish-go-diagnostic.png >/dev/null 2>&1 || true; adb -s emulator-5554 pull /sdcard/ish-go-diagnostic.png avd-ish-go-diagnostic.png >/dev/null 2>&1 || true; exit "$status"' 0; adb devices; test -s apk/ish-go-x86_64.apk; adb -s emulator-5554 install -r apk/ish-go-x86_64.apk; adb -s emulator-5554 shell pm list packages > avd-packages.txt; grep -q 'org.ish.go' avd-packages.txt; adb -s emulator-5554 shell monkey -p org.ish.go -c android.intent.category.LAUNCHER 1; sleep 8; test -n "$(adb -s emulator-5554 shell pidof org.ish.go | tr -d '\r')"; adb -s emulator-5554 shell input tap 220 2135; adb -s emulator-5554 shell input text 'echo%sGO_ALPINE_AVD_OK'; adb -s emulator-5554 shell input keyevent 66; sleep 3; adb -s emulator-5554 shell input keyevent 4; sleep 1; adb -s emulator-5554 shell dumpsys activity activities | grep -q 'org.ish.go'; adb -s emulator-5554 logcat -d > avd-logcat.txt; grep -q 'iSH Alpine smoke marker received' avd-logcat.txt; adb -s emulator-5554 shell screencap -p /sdcard/ish-go.png; adb -s emulator-5554 pull /sdcard/ish-go.png avd-ish-go.png
 
       - name: Upload AVD screenshot
         if: always()

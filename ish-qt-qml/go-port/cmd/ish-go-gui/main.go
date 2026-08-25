@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
+	"errors"
 	"image/color"
 	"log"
 	"os"
-	"strings"
+	"path/filepath"
+	"runtime"
 
 	"gioui.org/app"
 	"gioui.org/io/event"
@@ -17,21 +21,27 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
+	"github.com/mostafa637/ish-qt-qml/go-port/internal/rootfs"
 	"github.com/mostafa637/ish-qt-qml/go-port/internal/session"
+	"github.com/mostafa637/ish-qt-qml/go-port/internal/terminal"
 )
+
+//go:embed assets/root.tar.gz
+var embeddedRootfs []byte
 
 type C = layout.Context
 type D = layout.Dimensions
 
 type appState struct {
-	theme  *material.Theme
-	input  widget.Editor
-	output string
+	theme *material.Theme
+	input widget.Editor
+	term  *terminal.Terminal
 
 	buttons    [7]widget.Clickable
 	buttonText [7]string
 	ops        op.Ops
 	session    *session.Session
+	startTried bool
 }
 
 func main() {
@@ -50,36 +60,35 @@ func run(w *app.Window) error {
 	state := &appState{
 		theme:      material.NewTheme(),
 		buttonText: [7]string{"ESC", "CTRL", "ALT", "TAB", "↑↓←→", "粘贴", "⌫"},
+		term:       terminal.New(100, 30),
 	}
 	state.input.SingleLine = true
 	state.input.Submit = true
 	state.input.InputHint = key.HintText
-
-	shell := os.Getenv("ISH_SHELL")
-	if shell == "" {
-		shell = "/system/bin/sh"
-		if _, statErr := os.Stat(shell); statErr != nil {
-			shell = "/bin/sh"
-		}
-	}
-	started, err := session.Start(context.Background(), shell)
-	if err != nil {
-		return err
-	}
-	state.session = started
-	defer state.session.Close()
 
 	for {
 		e := w.Event()
 		switch e := e.(type) {
 		case app.FrameEvent:
 			gtx := app.NewContext(&state.ops, e)
-
+			if !state.startTried {
+				state.startTried = true
+				started, err := startApplicationSession()
+				if err != nil {
+					state.term.Feed([]byte("\r\n[Alpine startup failed] " + err.Error() + "\r\n"))
+				} else {
+					state.session = started
+					_ = state.session.Resize(100, 30)
+				}
+			}
 			state.drainOutput()
 			state.layout(gtx)
 			e.Frame(&state.ops)
 			w.Invalidate()
 		case app.DestroyEvent:
+			if state.session != nil {
+				_ = state.session.Close()
+			}
 			return e.Err
 		case key.Event:
 			state.handleKey(e)
@@ -87,17 +96,62 @@ func run(w *app.Window) error {
 	}
 }
 
+func startApplicationSession() (*session.Session, error) {
+	if session.NativeCoreAvailable() {
+		base, err := prepareRootfs(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		return session.StartAlpine(context.Background(), base)
+	}
+	if runtime.GOOS == "android" {
+		return nil, errors.New("APK was built without the native iSH/Asbestos core")
+	}
+	shell := os.Getenv("ISH_SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	return session.Start(context.Background(), shell, "-i")
+}
+
+func prepareRootfs(ctx context.Context) (string, error) {
+	if override := os.Getenv("ISH_ROOTFS_BASE"); override != "" {
+		if err := rootfs.Validate(ctx, override); err != nil {
+			return "", err
+		}
+		return override, nil
+	}
+	dataDir, err := app.DataDir()
+	if err != nil {
+		return "", errors.New("cannot locate application data directory: " + err.Error())
+	}
+	base := filepath.Join(dataDir, "ish-rootfs")
+	marker := filepath.Join(base, ".installed-v1")
+	if _, err := os.Stat(marker); err == nil {
+		if err := rootfs.Validate(ctx, base); err == nil {
+			return base, nil
+		}
+	}
+	if err := rootfs.Install(ctx, bytes.NewReader(embeddedRootfs), base); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(marker, []byte("go-gio-alpine-v1\n"), 0o600); err != nil {
+		return "", errors.New("write rootfs marker: " + err.Error())
+	}
+	return base, nil
+}
+
 func (s *appState) drainOutput() {
+	if s.session == nil {
+		return
+	}
 	for {
 		select {
 		case chunk, ok := <-s.session.Output():
 			if !ok {
 				return
 			}
-			s.output += string(chunk)
-			if len(s.output) > 256*1024 {
-				s.output = s.output[len(s.output)-256*1024:]
-			}
+			s.term.Feed(chunk)
 		default:
 			return
 		}
@@ -105,7 +159,7 @@ func (s *appState) drainOutput() {
 }
 
 func (s *appState) handleKey(e key.Event) {
-	if e.State != key.Press || e.Name != key.NameEscape {
+	if s.session == nil || e.State != key.Press || e.Name != key.NameEscape {
 		return
 	}
 	_ = s.session.Write([]byte("\x1b"))
@@ -116,7 +170,7 @@ func (s *appState) layout(gtx C) {
 	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx C) D {
 			return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx C) D {
-				label := material.Label(s.theme, unit.Sp(14), s.output)
+				label := material.Label(s.theme, unit.Sp(14), s.term.String())
 				label.Color = color.NRGBA{R: 236, G: 236, B: 240, A: 255}
 				label.LineHeightScale = 1.15
 				return label.Layout(gtx)
@@ -130,8 +184,8 @@ func (s *appState) layout(gtx C) {
 				style.HintColor = color.NRGBA{R: 150, G: 150, B: 156, A: 255}
 				style.SelectionColor = color.NRGBA{R: 72, G: 86, B: 160, A: 255}
 
-				if event, changed := s.input.Update(gtx); changed {
-					if submit, ok := event.(widget.SubmitEvent); ok {
+				if editorEvent, changed := s.input.Update(gtx); changed {
+					if submit, ok := editorEvent.(widget.SubmitEvent); ok && s.session != nil {
 						_ = s.session.Write([]byte(submit.Text + "\n"))
 						s.input.SetText("")
 					}
@@ -169,13 +223,14 @@ func (s *appState) button(gtx C, index int) layout.FlexChild {
 }
 
 func (s *appState) sendAccessory(index int) {
+	if s.session == nil {
+		return
+	}
 	seq := []byte{}
 	switch index {
 	case 0:
 		seq = []byte("\x1b")
 	case 1:
-		// The next typed rune is handled by the terminal editor/session in a
-		// future modifier model; keep a visible state marker for now.
 		seq = []byte("\x1b[27;5u")
 	case 2:
 		seq = []byte("\x1b")
@@ -183,8 +238,6 @@ func (s *appState) sendAccessory(index int) {
 		seq = []byte("\t")
 	case 4:
 		seq = []byte("\x1b[A")
-	case 5:
-		seq = []byte{}
 	case 6:
 		seq = []byte("\x7f")
 	}
@@ -192,9 +245,7 @@ func (s *appState) sendAccessory(index int) {
 		_ = s.session.Write(seq)
 	}
 	if index == 5 {
-		// Gio clipboard integration is platform-specific; leave the button
-		// operational without inventing a clipboard payload.
-		s.output = strings.TrimSuffix(s.output, "\n") + "\n[paste requested]\n"
+		s.term.Feed([]byte("\n[paste requested]\n"))
 	}
 }
 
