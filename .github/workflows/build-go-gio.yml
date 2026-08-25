@@ -44,7 +44,7 @@ jobs:
       - name: Install Linux and LLVM dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm-18 clang-18 lld-18 libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+          sudo apt-get install -y llvm-18 clang-18 lld-18 libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
 
       - name: Download Go modules
         working-directory: ${{ env.GO_MODULE_DIR }}
@@ -224,13 +224,22 @@ jobs:
           disable-animations: true
           script: |
             set -euo pipefail
-            adb install -r apk/ish-go-x86_64.apk
-            adb shell pm list packages | grep -q org.ish.go
-            adb shell monkey -p org.ish.go 1
+            SERIAL=emulator-5554
+            adb -s "$SERIAL" wait-for-device
+            for _ in $(seq 1 90); do
+              if [ "$(adb -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+                break
+              fi
+              sleep 2
+            done
+            test "$(adb -s "$SERIAL" shell getprop sys.boot_completed | tr -d '\r')" = "1"
+            adb -s "$SERIAL" install -r apk/ish-go-x86_64.apk
+            adb -s "$SERIAL" shell pm list packages | grep -q org.ish.go
+            adb -s "$SERIAL" shell monkey -p org.ish.go 1
             sleep 8
-            adb shell dumpsys window windows | grep -q org.ish.go
-            adb shell screencap -p /sdcard/ish-go.png
-            adb pull /sdcard/ish-go.png avd-ish-go.png
+            adb -s "$SERIAL" shell dumpsys window windows | grep -q org.ish.go
+            adb -s "$SERIAL" shell screencap -p /sdcard/ish-go.png
+            adb -s "$SERIAL" pull /sdcard/ish-go.png avd-ish-go.png
 
       - name: Upload AVD screenshot
         if: always()
