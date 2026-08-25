@@ -5,9 +5,19 @@ package session
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../../upstream/ish-ios/app/core -I${SRCDIR}/../../../upstream/ish-ios -I${SRCDIR}/../../native
 #cgo LDFLAGS: -L${SRCDIR}/../../native/lib -Wl,--start-group -lish_core_session -lish_kernel -lish_emu -lish_fakefs -lish_sqlite -Wl,--end-group -lz -lm -pthread
+#cgo android LDFLAGS: -llog
 #include <stdint.h>
 #include <stdlib.h>
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
 #include "CoreSession.h"
+
+static void ishGoSmokeLog(void) {
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, "iSHCore", "iSH Alpine smoke marker received; Alpine release 3.19.0");
+#endif
+}
 
 extern void goIshOutput(void *cookie, char *bytes, size_t length);
 extern void goIshState(void *cookie, int exit_code);
@@ -75,7 +85,9 @@ func goIshOutput(cookie unsafe.Pointer, bytes *C.char, length C.size_t) {
 		markerCount += bytespkg.Count(s.markerBuf, []byte("ALP"))
 		if markerCount >= 2 && bytespkg.Contains(s.markerBuf, []byte("3.19.0")) {
 			s.markerSeen = true
+			C.ishGoSmokeLog()
 			log.Print("iSH Alpine smoke marker received; Alpine release 3.19.0")
+
 		}
 	}
 	closed := s.closed
