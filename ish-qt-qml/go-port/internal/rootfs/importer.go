@@ -283,7 +283,16 @@ func normalizePath(raw string) (string, error) {
 
 // Validate checks the same structural invariants used by the Qt importer.
 func Validate(ctx context.Context, base string) error {
-	if info, err := os.Stat(filepath.Join(base, "data")); err != nil || !info.IsDir() {
+	// Do not use os.Stat(path) here: Android x86_64's seccomp policy rejects
+	// the legacy lstat syscall that Go uses for path-based Stat. Opening the
+	// directory and calling File.Stat uses fstat on an already-open descriptor.
+	dataDir, err := os.Open(filepath.Join(base, "data"))
+	if err != nil {
+		return fmt.Errorf("rootfs: data directory is missing")
+	}
+	info, statErr := dataDir.Stat()
+	closeErr := dataDir.Close()
+	if statErr != nil || closeErr != nil || !info.IsDir() {
 		return fmt.Errorf("rootfs: data directory is missing")
 	}
 	db, err := sql.Open("sqlite", filepath.Join(base, "meta.db"))

@@ -127,7 +127,11 @@ func prepareRootfs(ctx context.Context) (string, error) {
 	}
 	base := filepath.Join(dataDir, "ish-rootfs")
 	marker := filepath.Join(base, ".installed-v1")
-	if _, err := os.Stat(marker); err == nil {
+	// Android x86_64 rejects the legacy lstat syscall used by os.Stat.
+	// Opening the marker is sufficient here and keeps first launch on the
+	// supported openat path.
+	if f, err := os.Open(marker); err == nil {
+		_ = f.Close()
 		if err := rootfs.Validate(ctx, base); err == nil {
 			return base, nil
 		}
