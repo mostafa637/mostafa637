@@ -222,16 +222,19 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
+          emulator-boot-timeout: 300
           script: |
             set -euo pipefail
             SERIAL=emulator-5554
             adb -s "$SERIAL" wait-for-device
-            for _ in $(seq 1 90); do
-              if [ "$(adb -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+            for _ in $(seq 1 150); do
+              state="$(adb devices | awk -v serial="$SERIAL" '$1 == serial {print $2}')"
+              if [ "$state" = "device" ] && [ "$(adb -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
                 break
               fi
               sleep 2
             done
+            test "$(adb devices | awk -v serial="$SERIAL" '$1 == serial {print $2}')" = "device"
             test "$(adb -s "$SERIAL" shell getprop sys.boot_completed | tr -d '\r')" = "1"
             adb -s "$SERIAL" install -r apk/ish-go-x86_64.apk
             adb -s "$SERIAL" shell pm list packages | grep -q org.ish.go
