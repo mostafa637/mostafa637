@@ -12,6 +12,15 @@
 #include "kernel/personality.h"
 
 int mount_root(const struct fs_ops *fs, const char *source) {
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+    /*
+     * The Android x86_64 seccomp policy rejects legacy lstat, which bionic's
+     * realpath() uses. xX_main_Xx supplies an absolute app-private path on
+     * Android, so canonicalising it here is unnecessary. do_mount duplicates
+     * the source string before retaining it.
+     */
+    return do_mount(fs, source, "", "", 0);
+#else
     char source_realpath[MAX_PATH + 1];
     if (realpath(source, source_realpath) == NULL)
         return errno_map();
@@ -19,6 +28,7 @@ int mount_root(const struct fs_ops *fs, const char *source) {
     if (err < 0)
         return err;
     return 0;
+#endif
 }
 
 static void establish_signal_handlers(void) {
