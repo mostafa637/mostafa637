@@ -15,11 +15,24 @@
 
 void real_tty_reset_term(void);
 
+/*
+ * CoreSession may bind the real tty to its private host PTY. This avoids
+ * redirecting the process-wide Gio/Android descriptors with dup2.
+ */
+static int real_tty_input_fd = STDIN_FILENO;
+static int real_tty_output_fd = STDOUT_FILENO;
+
+void real_tty_set_fds(int input_fd, int output_fd) {
+    real_tty_input_fd = input_fd >= 0 ? input_fd : STDIN_FILENO;
+    real_tty_output_fd = output_fd >= 0 ? output_fd : STDOUT_FILENO;
+}
+
 static void *real_tty_read_thread(void *_tty) {
     struct tty *tty = _tty;
+    const int input_fd = real_tty_input_fd;
     char ch;
     for (;;) {
-        int err = read(STDIN_FILENO, &ch, 1);
+        int err = read(input_fd, &ch, 1);
         if (err != 1) {
             if (err == 0)
                 break;
@@ -89,7 +102,7 @@ static int real_tty_init(struct tty *tty) {
         return 0;
 
     struct winsize winsz;
-    if (ioctl(STDIN_FILENO, TIOCGWINSZ, &winsz) < 0) {
+    if (ioctl(real_tty_input_fd, TIOCGWINSZ, &winsz) < 0) {
         if (errno == ENOTTY)
             goto notty;
         return errno_map();
@@ -100,7 +113,7 @@ static int real_tty_init(struct tty *tty) {
     tty->winsize.ypixel = winsz.ws_ypixel;
 
     struct termios termios;
-    if (tcgetattr(STDIN_FILENO, &termios) < 0)
+    if (tcgetattr(real_tty_input_fd, &termios) < 0)
         return errno_map();
     tty->termios = termios_from_real(termios);
 
@@ -109,7 +122,7 @@ static int real_tty_init(struct tty *tty) {
 #ifdef NO_CRLF
     termios.c_oflag |= OPOST | ONLCR;
 #endif
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &termios) < 0)
+    if (tcsetattr(real_tty_input_fd, TCSANOW, &termios) < 0)
         ERRNO_DIE("failed to set terminal to raw mode");
 notty:
 
@@ -124,12 +137,12 @@ notty:
 static int real_tty_write(struct tty *tty, const void *buf, size_t len, bool UNUSED(blocking)) {
     if (tty->num != REAL_TTY_NUM)
         return len;
-    return write(STDOUT_FILENO, buf, len);
+    return write(real_tty_output_fd, buf, len);
 }
 
 void real_tty_reset_term(void) {
     if (!real_tty_is_open) return;
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &old_termios) < 0 && errno != ENOTTY) {
+    if (tcsetattr(real_tty_input_fd, TCSANOW, &old_termios) < 0 && errno != ENOTTY) {
         printk("failed to reset terminal: %s\n", strerror(errno));
         abort();
     }

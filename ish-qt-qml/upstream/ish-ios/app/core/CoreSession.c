@@ -193,6 +193,9 @@ static void core_thread_cleanup(void *opaque) {
         }
     }
     if (session->pty_slave >= 0) {
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+        real_tty_set_fds(STDIN_FILENO, STDOUT_FILENO);
+#endif
         close(session->pty_slave);
         session->pty_slave = -1;
     }
@@ -363,25 +366,23 @@ static void *core_worker(void *opaque) {
     if (saved[0] < 0 || saved[1] < 0 || saved[2] < 0)
         goto finish;
 
-    // On Android the app has no terminal of its own, so establish the PTY
-    // slave as the controlling terminal as Termux does. The Linux host
-    // smoke process must keep its Qt/launcher session unchanged; the PTY
-    // still provides tty line discipline there, but setsid is omitted.
+    // The Android core is embedded in the Gio process and must not redirect
+    // the process-wide descriptors; the host path keeps the original PTY
+    // descriptor setup for the standalone smoke executable.
 #if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
-    struct sigaction ignore_sighup;
-    memset(&ignore_sighup, 0, sizeof(ignore_sighup));
-    sigemptyset(&ignore_sighup.sa_mask);
-    ignore_sighup.sa_handler = SIG_IGN;
-    if (sigaction(SIGHUP, &ignore_sighup, &session->saved_sighup) == 0)
-        session->sighup_saved = true;
-    (void)setsid();
-    (void)ioctl(session->pty_slave, TIOCSCTTY, 0);
-#endif
+    /*
+     * CoreSession is embedded in the Gio process. Do not redirect the
+     * process-wide descriptors: Gio's renderer and Android runtime share
+     * them. The real tty driver talks to the private PTY slave directly.
+     */
+    real_tty_set_fds(session->pty_slave, session->pty_slave);
+#else
     (void)dup2(session->pty_slave, STDIN_FILENO);
     (void)dup2(session->pty_slave, STDOUT_FILENO);
     (void)dup2(session->pty_slave, STDERR_FILENO);
     close(session->pty_slave);
     session->pty_slave = -1;
+#endif
     signal(SIGPIPE, SIG_IGN);
 
     if (make_core_argv(session, &argv, &argc) != 0)
@@ -431,7 +432,8 @@ static void *core_worker(void *opaque) {
         memcpy(guest_argv + guest_bytes, argv[i], part);
         guest_bytes += part;
     }
-    if (do_execve(argv[guest_first], argc - guest_first, guest_argv, envp) < 0)
+    result = do_execve(argv[guest_first], argc - guest_first, guest_argv, envp);
+    if (result < 0)
         goto finish;
     free_argv(argv, argc);
     argv = NULL;

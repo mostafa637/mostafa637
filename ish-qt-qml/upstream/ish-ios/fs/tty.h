@@ -102,6 +102,7 @@ struct tty_driver_ops {
 // indexed by major number
 extern struct tty_driver *tty_drivers[256];
 extern struct tty_driver real_tty_driver;
+void real_tty_set_fds(int input_fd, int output_fd);
 
 struct tty {
     unsigned refcount;
