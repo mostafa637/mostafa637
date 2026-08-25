@@ -45,10 +45,12 @@ type nativeSession struct {
 	core   *C.IshCoreSession
 	handle cgo.Handle
 
-	mu     sync.Mutex
-	closed bool
-	out    chan []byte
-	done   chan error
+	mu         sync.Mutex
+	closed     bool
+	markerSeen bool
+	markerBuf  []byte
+	out        chan []byte
+	done       chan error
 }
 
 //export goIshOutput
@@ -59,12 +61,20 @@ func goIshOutput(cookie unsafe.Pointer, bytes *C.char, length C.size_t) {
 		return
 	}
 	chunk := C.GoBytes(unsafe.Pointer(bytes), C.int(length))
-	if bytespkg.Contains(chunk, []byte("GO_ALPINE_AVD_OK")) ||
-		bytespkg.Contains(chunk, []byte("GO-ALPINE-AVD-OK")) {
-		log.Print("iSH Alpine smoke marker received")
-	}
 
 	s.mu.Lock()
+	if !s.markerSeen {
+		s.markerBuf = append(s.markerBuf, chunk...)
+		const maxMarkerWindow = 64
+		if len(s.markerBuf) > maxMarkerWindow {
+			s.markerBuf = append([]byte(nil), s.markerBuf[len(s.markerBuf)-maxMarkerWindow:]...)
+		}
+		if bytespkg.Contains(s.markerBuf, []byte("GO_ALPINE_AVD_OK")) ||
+			bytespkg.Contains(s.markerBuf, []byte("GO-ALPINE-AVD-OK")) {
+			s.markerSeen = true
+			log.Print("iSH Alpine smoke marker received")
+		}
+	}
 	closed := s.closed
 	s.mu.Unlock()
 	if closed {
