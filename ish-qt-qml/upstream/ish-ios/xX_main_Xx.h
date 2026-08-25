@@ -121,6 +121,15 @@ static inline int xX_main_Xx(int argc, char *const argv[], const char *envp) {
         fs_chdir(current->fs, pwd);
     }
 
+#if defined(ISH_CORE_SESSION)
+    /*
+     * CoreSession follows the native iSH application bootstrap.  Leave the
+     * current task and root filesystem ready for the caller to install the
+     * console/devices and execute the guest only after stdio is connected.
+     */
+    return 0;
+#endif
+
     char argv_copy[4096];
     int i = optind;
     size_t p = 0;

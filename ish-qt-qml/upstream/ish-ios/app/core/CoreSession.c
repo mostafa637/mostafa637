@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "fs/fd.h"
+#include "fs/tty.h"
 #include "kernel/task.h"
 #include "kernel/calls.h"
 #include "kernel/errno.h"
@@ -367,26 +368,61 @@ static void *core_worker(void *opaque) {
     optind = 1;
     opterr = 0;
     int result = xX_main_Xx((int)argc, argv, envp);
-    free_argv(argv, argc);
-    argv = NULL;
     if (result < 0)
         goto finish;
 
+#if defined(ISH_CORE_SESSION)
     /*
-     * Keep the same bootstrap sequence as upstream iSH's main.c.  xX_main_Xx
-     * creates and mounts the real rootfs, but Alpine still needs the guest
-     * device nodes plus procfs/devpts before /bin/ash can start correctly.
+     * Match AppDelegate.m: connect the iSH console before execve.  The old
+     * CLI helper execs first and then creates stdio, which is not safe when a
+     * CoreSession owns the PTY and leaves the console driver uninitialised.
      */
     create_some_device_nodes();
     (void)do_mount(&procfs, "proc", "/proc", "", 0);
     (void)do_mount(&devptsfs, "devpts", "/dev/pts", "", 0);
+    tty_drivers[TTY_CONSOLE_MAJOR] = &real_tty_driver;
+    set_console_device(TTY_CONSOLE_MAJOR, 1);
 
-    /* xX_main_Xx installs the iSH process-exit handler; replace only the hook. */
-    /* Keep the resolver configuration inside fakefs, just like iSH iOS. */
+    result = create_stdio("/dev/console", TTY_CONSOLE_MAJOR, 1);
+    if (result < 0)
+        goto finish;
     (void)configure_dns(session);
     exit_hook = core_exit_hook;
+
+    /* xX_main_Xx already parsed the options; execute the selected guest argv. */
+    char guest_argv[4096];
+    size_t guest_bytes = 0;
+    const size_t guest_first = (size_t)optind;
+    if (guest_first >= argc || argv[guest_first] == NULL)
+        goto finish;
+    for (size_t i = guest_first; i < argc; ++i) {
+        size_t part = strlen(argv[i]) + 1;
+        if (guest_bytes + part >= sizeof(guest_argv))
+            goto finish;
+        memcpy(guest_argv + guest_bytes, argv[i], part);
+        guest_bytes += part;
+    }
+    if (do_execve(argv[guest_first], argc - guest_first, guest_argv, envp) < 0)
+        goto finish;
+    free_argv(argv, argc);
+    argv = NULL;
     status = 0;
     task_run_current();
+#else
+    free_argv(argv, argc);
+    argv = NULL;
+    /*
+     * Keep the same bootstrap sequence as upstream iSH's main.c for the
+     * standalone host smoke binary.
+     */
+    create_some_device_nodes();
+    (void)do_mount(&procfs, "proc", "/proc", "", 0);
+    (void)do_mount(&devptsfs, "devpts", "/dev/pts", "", 0);
+    exit_hook = core_exit_hook;
+    (void)configure_dns(session);
+    status = 0;
+    task_run_current();
+#endif
 
 finish:
     free_argv(argv, argc);

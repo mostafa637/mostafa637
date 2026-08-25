@@ -198,7 +198,7 @@ target_include_directories(ish_core_session PUBLIC
     "${ISH_SOURCE_DIR}/deps/sqlite"
     "${ISH_CORE_BUILD_DIR}"
 )
-target_compile_definitions(ish_core_session PRIVATE ENGINE_ASBESTOS=1 LOG_HANDLER_DPRINTF=1)
+target_compile_definitions(ish_core_session PRIVATE ENGINE_ASBESTOS=1 LOG_HANDLER_DPRINTF=1 ISH_CORE_SESSION=1)
 if(NOT ANDROID)
     target_compile_definitions(ish_core_session PRIVATE __ANDROID__=1 ISH_CORE_HOST=1)
 endif()
