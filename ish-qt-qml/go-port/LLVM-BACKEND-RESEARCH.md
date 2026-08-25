@@ -1,42 +1,58 @@
-# LLVM backend research
+# LLVM backend وواجهة الترجمة
 
-## القرار
-لن يُكتب مولّد كود آلة مخصص داخل المشروع. سيُستخدم LLVM backend الجاهز عبر bindings Go، بينما تُستخدم `golang.org/x/arch/x86/x86asm` لفك تعليمات x86_64 فقط.
+## القرار النهائي
 
-## المكتبات
+لن يُكتب مولّد كود آلة مخصص داخل المشروع. تستخدم طبقة Go مكتبة `github.com/llir/llvm` لبناء LLVM IR وكتابته، ثم تستدعي أداة LLVM الجاهزة `llc-18` لتحويل ذلك الـIR إلى object code للمضيف. وبذلك يبقى توليد كود الآلة مسؤولية backend LLVM الرسمي، لا مسؤولية encoder جديد داخل هذا المشروع.
 
-| الاستخدام | المكتبة | الملاحظة |
+يُستخدم `golang.org/x/arch/x86/x86asm` لفك تعليمات x86-64 إلى تمثيل Go (`x86asm.Inst` و`Args`) قبل مرحلة lowering المحدودة إلى LLVM IR.
+
+## مكوّنات المسار
+
+| المرحلة | التنفيذ | الحدود الحالية |
 |---|---|---|
-| فك تعليمات x86_64 | `golang.org/x/arch/x86/x86asm` | توفر `Decode(src, 64)` وتمثيل `Inst` و`Args` وصيغ Intel/GNU/Go؛ لا تولد كود آلة. |
-| LLVM من Go | `tinygo.org/x/go-llvm` | bindings إلى LLVM مثبت على النظام، وتدعم إصدارات LLVM 14–20 بحسب README الحالي، مع build tags مثل `llvm20`. |
-| backend الجاهز | LLVM TargetMachine أو ORC/MCJIT من خلال go-llvm | LLVM يتولى تحسين LLVM IR وتوليد object/machine code أو JIT؛ لا نعيد تنفيذ instruction encoder داخل Go. |
+| فك x86-64 | `golang.org/x/arch/x86/x86asm` | decoder؛ لا ينشئ LLVM IR ولا كود آلة تلقائيًا. |
+| بناء LLVM IR | `github.com/llir/llvm` (`llir/llvm`) | مكتبة Pure Go لتمثيل وكتابة LLVM IR؛ ليست backend ولا تتضمن TargetMachine مستقلًا. |
+| توليد object/machine code | `llc-18` من LLVM | backend جاهز خارجي يُستدعى من CLI؛ لا يوجد code generator يدوي في Go. |
 
-## قيود مهمة
+## معنى Pure Go في هذا التصميم
 
-`go-llvm` يستخدم cgo ويربط LLVM النظامي، لذلك المقصود بـPure Go هنا هو أن طبقة التطبيق والمترجم مكتوبة بـGo، وليس أن LLVM نفسه أو الربط معه خالٍ من C/C++. يلزم تثبيت LLVM development package مناسب لكل منصة، أو بناء LLVM مخصصًا مع `byollvm` وضبط CFLAGS/LDFLAGS.
+`llir/llvm` مكتوبة بالكامل بلغة Go ولا تحتاج إلى cgo لبناء LLVM IR. أما `llc-18` فهو برنامج LLVM مستقل يُثبت في بيئة البناء ويُستدعى كعملية خارجية. لذلك فإن طبقة الترجمة التي يملكها المشروع Pure Go، بينما يعتمد إخراج كود الآلة على تثبيت LLVM backend الجاهز، وهو المقصود بمتطلب استخدام مكتبة Go مع backend جاهز بدل إعادة تنفيذ code generation.
 
-`x86asm` decoder لا يترجم تلقائيًا كل تعليمات x86 إلى LLVM IR. يجب أن يقتصر front-end الأول على مجموعة تعليمات مدعومة ومعلنة، أو استخدام decoder/translator جاهز آخر إذا كان الهدف توافقًا كاملًا مع x86_64. أما توليد كود الآلة بعد تكوين IR فسيتم حصريًا بواسطة LLVM TargetMachine/ORC.
+هذا التصميم مختلف عن استخدام `tinygo.org/x/go-llvm`: ذلك المشروع عبارة عن bindings إلى LLVM النظامي ويتطلب عادةً cgo ومكتبات تطوير LLVM، ولم يعد جزءًا من التنفيذ الحالي. لا ينبغي توثيق TargetMachine أو ORC/MCJIT عبر go-llvm كأنها مستخدمة هنا.
 
-## المصادر
+## نطاق lowering الحالي
 
-1. https://github.com/tinygo-org/go-llvm — Go bindings to system LLVM، وإصدارات LLVM المدعومة وbuild tags.
-2. https://pkg.go.dev/golang.org/x/arch/x86/x86asm — توثيق فك تعليمات x86، `Decode`, `Inst`, `Args` والصيغ النصية.
-3. https://pkg.go.dev/tinygo.org/x/go-llvm — توثيق API Go لـLLVM، بما فيه Builder وTarget/JIT APIs.
+لا يدّعي `x86asm` أو هذا المشروع توافقًا كاملًا مع x86-64. طبقة `internal/ir` تقبل مجموعة صغيرة ومعلنة وقابلة للاختبار: `NOP` و`PAUSE`، و`MOV RAX, imm`، و`ADD/SUB/XOR RAX, imm`، و`RET`. تُرفض التعليمات الأخرى بخطأ صريح بدل إنتاج IR غير صحيح أو الإيحاء بدعم كامل.
 
-## Gio
+تُختبر العينة التالية في CI:
 
-Gio هو إطار immediate-mode مكتوبًا بـGo ويدعم Linux وAndroid ومنصات أخرى. دورة التطبيق تعتمد على `app.Window` وقراءة الأحداث من `Window.Event()`، بينما تُحفظ حالة widgets في Go وتُرسم في كل دورة. لذلك ستكون طبقة الواجهة الجديدة Gio مستقلة عن QML/WebView، مع مكوّن terminal يرسم النص والحالة، وشريط ملحقات يستخدم widgets وgestures من Gio.
+```sh
+go run ./cmd/ish-go-translator \
+  -hex 48c7c0010000004883c002c3 \
+  -llc llc-18 \
+  -o /tmp/ish-go-sample.o
+```
 
-المصدر الرسمي: https://gioui.org/ — Gio cross-platform immediate-mode GUI.
-المصدر الرسمي: https://pkg.go.dev/gioui.org/app — دورة نافذة Gio والأحداث.
-المصدر الرسمي: https://gioui.org/doc/architecture/widget — widgets وحالة الإدخال.
+وتحوّل تقريبًا:
 
-## Gio Android CI research (2026-08-25)
+```asm
+mov rax, 1
+add rax, 2
+ret
+```
 
-المراجع الرسمية توضح أن `gogio` هو أداة تغليف برامج Gio إلى Android APK، وأن Android يحتاج Android SDK مع NDK و`ANDROID_HOME`، بينما يتطلب تشغيل المحاكي دعم OpenGL ES 3. صفحة التثبيت الرسمية تذكر `go install gioui.org/cmd/gogio@latest` ثم `gogio -target android <package>` و`adb install <apk>`. كما توضح وثائق `gioui.org/app` أن حلقة أحداث `Window.Event()` يجب أن تعمل مع `app.FrameEvent` حتى وصول `app.DestroyEvent`، وأن `app.DataDir()` هو مسار بيانات التطبيق (وعلى Android يستخدم `Context.getFilesDir`).
+## Gio وAndroid CI
 
-المصادر:
+واجهة `cmd/ish-go-gui` مستقلة عن Qt/QML وتستخدم Gio. تُغلّف Android عبر `gogio`، بينما يثبت workflow حزم Android SDK/NDK ويوقّع APK الناتج ثم يتحقق من التوقيع. يختبر CI Linux، وينتج APK لـ`arm64-v8a` و`x86_64`، ويشغّل APK x86_64 على AVD Linux مع KVM ويلتقط لقطة شاشة.
 
-1. https://gioui.org/doc/install/android — Gio Android installation and packaging.
-2. https://pkg.go.dev/gioui.org/cmd/gogio — gogio command documentation.
-3. https://pkg.go.dev/gioui.org/app — Gio application event loop and DataDir API.
+نجح التشغيل المثبت في commit `3944fd26f5e4c5efca197fc71dc9e2df4eeb989b` ضمن run [32841449796](https://github.com/mostafa637/mostafa637/actions/runs/32841449796)، بما في ذلك وظائف Linux وAndroid للمعماريتين واختبار AVD.
+
+## مراجع
+
+1. [llir/llvm — LLVM IR in Go](https://github.com/llir/llvm)
+2. [x86asm package documentation](https://pkg.go.dev/golang.org/x/arch/x86/x86asm)
+3. [LLVM llc command documentation](https://llvm.org/docs/CommandGuide/llc.html)
+4. [Gio Android installation](https://gioui.org/doc/install/android)
+5. [gogio command documentation](https://pkg.go.dev/gioui.org/cmd/gogio)
+6. [Gio application package](https://pkg.go.dev/gioui.org/app)
+7. [tinygo-org/go-llvm — bindings reference only](https://github.com/tinygo-org/go-llvm)
