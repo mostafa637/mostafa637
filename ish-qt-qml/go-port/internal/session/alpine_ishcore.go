@@ -72,6 +72,7 @@ func goIshOutput(cookie unsafe.Pointer, bytes *C.char, length C.size_t) {
 		markerCount := bytespkg.Count(s.markerBuf, []byte("GO_ALPINE_AVD_OK"))
 		markerCount += bytespkg.Count(s.markerBuf, []byte("GO-ALPINE-AVD-OK"))
 		markerCount += bytespkg.Count(s.markerBuf, []byte("GO-ALPINE"))
+		markerCount += bytespkg.Count(s.markerBuf, []byte("ALP"))
 		if markerCount >= 2 && bytespkg.Contains(s.markerBuf, []byte("3.19.0")) {
 			s.markerSeen = true
 			log.Print("iSH Alpine smoke marker received; Alpine release 3.19.0")
