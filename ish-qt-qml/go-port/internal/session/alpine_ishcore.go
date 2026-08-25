@@ -59,9 +59,11 @@ func goIshOutput(cookie unsafe.Pointer, bytes *C.char, length C.size_t) {
 		return
 	}
 	chunk := C.GoBytes(unsafe.Pointer(bytes), C.int(length))
-	if bytespkg.Contains(chunk, []byte("GO_ALPINE_AVD_OK")) {
+	if bytespkg.Contains(chunk, []byte("GO_ALPINE_AVD_OK")) ||
+		bytespkg.Contains(chunk, []byte("GO-ALPINE-AVD-OK")) {
 		log.Print("iSH Alpine smoke marker received")
 	}
+
 	s.mu.Lock()
 	closed := s.closed
 	s.mu.Unlock()
