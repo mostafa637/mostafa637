@@ -42,6 +42,13 @@ type appState struct {
 	ops        op.Ops
 	session    *session.Session
 	startTried bool
+	startDone  bool
+	startCh    chan sessionStartResult
+}
+
+type sessionStartResult struct {
+	session *session.Session
+	err     error
 }
 
 func main() {
@@ -65,6 +72,7 @@ func run(w *app.Window) error {
 	state.input.SingleLine = true
 	state.input.Submit = true
 	state.input.InputHint = key.HintText
+	state.startCh = make(chan sessionStartResult, 1)
 
 	for {
 		e := w.Event()
@@ -73,12 +81,26 @@ func run(w *app.Window) error {
 			gtx := app.NewContext(&state.ops, e)
 			if !state.startTried {
 				state.startTried = true
-				started, err := startApplicationSession()
-				if err != nil {
-					state.term.Feed([]byte("\r\n[Alpine startup failed] " + err.Error() + "\r\n"))
-				} else {
-					state.session = started
-					_ = state.session.Resize(100, 30)
+				// Rootfs extraction and CoreSession startup can take several seconds
+				// on a fresh Android install. Never block Gio's frame/UI goroutine,
+				// otherwise Android reports an input-channel ANR before the first
+				// window becomes focusable.
+				go func() {
+					started, err := startApplicationSession()
+					state.startCh <- sessionStartResult{session: started, err: err}
+				}()
+			}
+			if !state.startDone {
+				select {
+				case result := <-state.startCh:
+					state.startDone = true
+					if result.err != nil {
+						state.term.Feed([]byte("\r\n[Alpine startup failed] " + result.err.Error() + "\r\n"))
+					} else {
+						state.session = result.session
+						_ = state.session.Resize(100, 30)
+					}
+				default:
 				}
 			}
 			state.drainOutput()
