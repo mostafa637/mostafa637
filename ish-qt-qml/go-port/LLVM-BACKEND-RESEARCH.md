@@ -30,3 +30,13 @@ Gio هو إطار immediate-mode مكتوبًا بـGo ويدعم Linux وAndroi
 المصدر الرسمي: https://gioui.org/ — Gio cross-platform immediate-mode GUI.
 المصدر الرسمي: https://pkg.go.dev/gioui.org/app — دورة نافذة Gio والأحداث.
 المصدر الرسمي: https://gioui.org/doc/architecture/widget — widgets وحالة الإدخال.
+
+## Gio Android CI research (2026-08-25)
+
+المراجع الرسمية توضح أن `gogio` هو أداة تغليف برامج Gio إلى Android APK، وأن Android يحتاج Android SDK مع NDK و`ANDROID_HOME`، بينما يتطلب تشغيل المحاكي دعم OpenGL ES 3. صفحة التثبيت الرسمية تذكر `go install gioui.org/cmd/gogio@latest` ثم `gogio -target android <package>` و`adb install <apk>`. كما توضح وثائق `gioui.org/app` أن حلقة أحداث `Window.Event()` يجب أن تعمل مع `app.FrameEvent` حتى وصول `app.DestroyEvent`، وأن `app.DataDir()` هو مسار بيانات التطبيق (وعلى Android يستخدم `Context.getFilesDir`).
+
+المصادر:
+
+1. https://gioui.org/doc/install/android — Gio Android installation and packaging.
+2. https://pkg.go.dev/gioui.org/cmd/gogio — gogio command documentation.
+3. https://pkg.go.dev/gioui.org/app — Gio application event loop and DataDir API.
