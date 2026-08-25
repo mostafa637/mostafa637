@@ -263,32 +263,56 @@ func mkdirAllNoStat(path string, perm os.FileMode) error {
 	if clean == "." || clean == string(filepath.Separator) {
 		return nil
 	}
-	current := string(filepath.Separator)
-	for _, part := range strings.Split(strings.TrimPrefix(clean, current), string(filepath.Separator)) {
-		if part == "" {
-			continue
-		}
-		current = filepath.Join(current, part)
-		if err := os.Mkdir(current, perm); err == nil {
-			continue
-		} else if !errors.Is(err, os.ErrExist) {
-			return err
-		}
-		f, err := os.Open(current)
-		if err != nil {
-			return err
-		}
-		info, statErr := f.Stat()
-		closeErr := f.Close()
-		if statErr != nil {
-			return statErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("%s exists and is not a directory", current)
-		}
+
+	// Try the final component first. This is important for Android app paths:
+	// /data itself is not readable by the app, but the app-private parent is
+	// already present and the final mkdir is allowed. Walking from /data would
+	// therefore produce a false permission error.
+	if err := mkdirPathNoStat(clean, perm); err != nil {
+		return err
+	}
+	return verifyDirectoryNoStat(clean)
+}
+
+func mkdirPathNoStat(path string, perm os.FileMode) error {
+	err := os.Mkdir(path, perm)
+	if err == nil || errors.Is(err, os.ErrExist) {
+		// Do not open existing ancestor components. Android may deliberately
+		// deny read access to /data while allowing traversal into the app path.
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	parent := filepath.Dir(path)
+	if parent == path {
+		return err
+	}
+	if err := mkdirPathNoStat(parent, perm); err != nil {
+		return err
+	}
+	if err := os.Mkdir(path, perm); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	return nil
+}
+
+func verifyDirectoryNoStat(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	info, statErr := f.Stat()
+	closeErr := f.Close()
+	if statErr != nil {
+		return statErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s exists and is not a directory", path)
 	}
 	return nil
 }
