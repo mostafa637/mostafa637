@@ -431,6 +431,19 @@ int realfs_statfs(struct mount *mount, struct statfsbuf *stat) {
 }
 
 int realfs_mount(struct mount *mount) {
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+    /*
+     * Android's seccomp policy on x86_64 rejects the legacy lstat syscall
+     * used by bionic realpath().  The Go layer passes an absolute,
+     * app-private rootfs directory, so canonicalising it is unnecessary.
+     * Open it directly and keep the path supplied by the app.
+     */
+    int root_fd = open(mount->source, O_DIRECTORY | O_CLOEXEC);
+    if (root_fd < 0)
+        return errno_map();
+    mount->root_fd = root_fd;
+    return 0;
+#else
     char *source_realpath = realpath(mount->source, NULL);
     if (source_realpath == NULL)
         return errno_map();
@@ -441,6 +454,7 @@ int realfs_mount(struct mount *mount) {
     if (mount->root_fd < 0)
         return errno_map();
     return 0;
+#endif
 }
 
 int realfs_fsync(struct fd *fd) {
