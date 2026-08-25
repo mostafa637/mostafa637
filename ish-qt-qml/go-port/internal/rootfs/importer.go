@@ -58,18 +58,18 @@ func Install(ctx context.Context, archive io.Reader, base string) error {
 	if base == "" {
 		return errors.New("rootfs: empty base path")
 	}
-	if err := os.MkdirAll(base, 0o755); err != nil {
+	if err := mkdirAllNoStat(base, 0o755); err != nil {
 		return fmt.Errorf("rootfs: create base: %w", err)
 	}
 
 	stage := filepath.Join(base, ".rootfs-import")
-	if err := os.RemoveAll(stage); err != nil {
+	if err := removeAllNoStat(stage); err != nil {
 		return fmt.Errorf("rootfs: clear stage: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Join(stage, "data"), 0o755); err != nil {
+	if err := mkdirAllNoStat(filepath.Join(stage, "data"), 0o755); err != nil {
 		return fmt.Errorf("rootfs: create stage data: %w", err)
 	}
-	defer os.RemoveAll(stage)
+	defer func() { _ = removeAllNoStat(stage) }()
 
 	dbPath := filepath.Join(stage, "meta.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -127,7 +127,7 @@ func Install(ctx context.Context, archive io.Reader, base string) error {
 
 		switch h.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(out, 0o755); err != nil {
+			if err := mkdirAllNoStat(out, 0o755); err != nil {
 				return fmt.Errorf("rootfs: mkdir %q: %w", path, err)
 			}
 		case tar.TypeReg, tar.TypeRegA, tar.TypeSymlink, tar.TypeBlock, tar.TypeChar, tar.TypeFifo:
@@ -187,7 +187,7 @@ func Install(ctx context.Context, archive io.Reader, base string) error {
 
 	data := filepath.Join(base, "data")
 	meta := filepath.Join(base, "meta.db")
-	if err := os.RemoveAll(data); err != nil {
+	if err := removeAllNoStat(data); err != nil {
 		return fmt.Errorf("rootfs: replace data: %w", err)
 	}
 	if err := os.Remove(meta); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -248,10 +248,88 @@ func insertHardlink(ctx context.Context, db *sql.DB, path, target string) error 
 }
 
 func materializeParents(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := mkdirAllNoStat(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("rootfs: create parent %q: %w", filepath.Dir(path), err)
 	}
 	return nil
+}
+
+// mkdirAllNoStat creates a path without os.MkdirAll. The latter performs
+// path-based Stat calls while walking existing components; on Android x86_64
+// those become the legacy lstat syscall rejected by the platform seccomp
+// policy. Existing components are checked through an open descriptor instead.
+func mkdirAllNoStat(path string, perm os.FileMode) error {
+	clean := filepath.Clean(path)
+	if clean == "." || clean == string(filepath.Separator) {
+		return nil
+	}
+	current := string(filepath.Separator)
+	for _, part := range strings.Split(strings.TrimPrefix(clean, current), string(filepath.Separator)) {
+		if part == "" {
+			continue
+		}
+		current = filepath.Join(current, part)
+		if err := os.Mkdir(current, perm); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		f, err := os.Open(current)
+		if err != nil {
+			return err
+		}
+		info, statErr := f.Stat()
+		closeErr := f.Close()
+		if statErr != nil {
+			return statErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%s exists and is not a directory", current)
+		}
+	}
+	return nil
+}
+
+// removeAllNoStat removes the importer staging tree without path-based
+// lstat. Staging entries are created by this importer, so descriptor-based
+// directory traversal is sufficient and keeps Android's seccomp policy happy.
+func removeAllNoStat(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	info, statErr := f.Stat()
+	if statErr != nil {
+		_ = f.Close()
+		return statErr
+	}
+	if !info.IsDir() {
+		closeErr := f.Close()
+		if closeErr != nil {
+			return closeErr
+		}
+		return os.Remove(path)
+	}
+	names, readErr := f.Readdirnames(-1)
+	closeErr := f.Close()
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return readErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	for _, name := range names {
+		if err := removeAllNoStat(filepath.Join(path, name)); err != nil {
+			return err
+		}
+	}
+	return os.Remove(path)
 }
 
 func dataPath(stage, path string) string {
