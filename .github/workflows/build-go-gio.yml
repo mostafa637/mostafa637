@@ -224,15 +224,34 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 300
           script: |
-            set -euo pipefail
+            set -eu
+            SERIAL="${ANDROID_SERIAL:-emulator-5554}"
+            diagnose() {
+              status=$?
+              adb devices > avd-adb-devices.txt 2>&1 || true
+              adb -s "$SERIAL" shell getprop > avd-getprop.txt 2>&1 || true
+              adb -s "$SERIAL" shell dumpsys activity activities > avd-activities.txt 2>&1 || true
+              adb -s "$SERIAL" logcat -d > avd-logcat.txt 2>&1 || true
+              adb -s "$SERIAL" shell screencap -p /sdcard/ish-go-diagnostic.png >/dev/null 2>&1 || true
+              adb -s "$SERIAL" pull /sdcard/ish-go-diagnostic.png avd-ish-go-diagnostic.png >/dev/null 2>&1 || true
+              return "$status"
+            }
+            trap diagnose EXIT
             adb devices
-            SERIAL="${ANDROID_SERIAL:-$(adb devices | awk '$2 == "device" {print $1; exit}')}"
-            test -n "$SERIAL"
+            test -s apk/ish-go-x86_64.apk
             adb -s "$SERIAL" install -r apk/ish-go-x86_64.apk
-            adb -s "$SERIAL" shell pm list packages | grep -q org.ish.go
-            adb -s "$SERIAL" shell monkey -p org.ish.go 1
-            sleep 8
-            adb -s "$SERIAL" shell dumpsys window windows | grep -q org.ish.go
+            adb -s "$SERIAL" shell pm list packages > avd-packages.txt
+            grep -q 'org.ish.go' avd-packages.txt
+            adb -s "$SERIAL" shell monkey -p org.ish.go -c android.intent.category.LAUNCHER 1
+            i=0
+            while [ "$i" -lt 20 ]; do
+              if adb -s "$SERIAL" shell pidof org.ish.go 2>/dev/null | tr -d '\r' | grep -q '[0-9]'; then
+                break
+              fi
+              i=$((i + 1))
+              sleep 1
+            done
+            test -n "$(adb -s "$SERIAL" shell pidof org.ish.go | tr -d '\r')"
             adb -s "$SERIAL" shell screencap -p /sdcard/ish-go.png
             adb -s "$SERIAL" pull /sdcard/ish-go.png avd-ish-go.png
 
@@ -241,5 +260,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ish-go-gio-android-avd-screenshot
-          path: avd-ish-go.png
+          path: |
+            avd-ish-go.png
+            avd-ish-go-diagnostic.png
+            avd-adb-devices.txt
+            avd-getprop.txt
+            avd-activities.txt
+            avd-packages.txt
+            avd-logcat.txt
           if-no-files-found: warn
