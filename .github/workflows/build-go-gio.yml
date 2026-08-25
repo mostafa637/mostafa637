@@ -226,17 +226,6 @@ jobs:
           script: |
             set -eu
             SERIAL="${ANDROID_SERIAL:-emulator-5554}"
-            diagnose() {
-              status=$?
-              adb devices > avd-adb-devices.txt 2>&1 || true
-              adb -s "$SERIAL" shell getprop > avd-getprop.txt 2>&1 || true
-              adb -s "$SERIAL" shell dumpsys activity activities > avd-activities.txt 2>&1 || true
-              adb -s "$SERIAL" logcat -d > avd-logcat.txt 2>&1 || true
-              adb -s "$SERIAL" shell screencap -p /sdcard/ish-go-diagnostic.png >/dev/null 2>&1 || true
-              adb -s "$SERIAL" pull /sdcard/ish-go-diagnostic.png avd-ish-go-diagnostic.png >/dev/null 2>&1 || true
-              return "$status"
-            }
-            trap diagnose EXIT
             adb devices
             test -s apk/ish-go-x86_64.apk
             adb -s "$SERIAL" install -r apk/ish-go-x86_64.apk
