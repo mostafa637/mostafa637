@@ -19,6 +19,7 @@
 #include "kernel/task.h"
 #include "kernel/calls.h"
 #include "kernel/errno.h"
+#include "kernel/init.h"
 #include "xX_main_Xx.h"
 
 struct IshCoreSession {
@@ -370,6 +371,15 @@ static void *core_worker(void *opaque) {
     argv = NULL;
     if (result < 0)
         goto finish;
+
+    /*
+     * Keep the same bootstrap sequence as upstream iSH's main.c.  xX_main_Xx
+     * creates and mounts the real rootfs, but Alpine still needs the guest
+     * device nodes plus procfs/devpts before /bin/ash can start correctly.
+     */
+    create_some_device_nodes();
+    (void)do_mount(&procfs, "proc", "/proc", "", 0);
+    (void)do_mount(&devptsfs, "devpts", "/dev/pts", "", 0);
 
     /* xX_main_Xx installs the iSH process-exit handler; replace only the hook. */
     /* Keep the resolver configuration inside fakefs, just like iSH iOS. */

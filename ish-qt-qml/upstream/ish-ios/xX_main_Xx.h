@@ -71,12 +71,36 @@ static inline int xX_main_Xx(int argc, char *const argv[], const char *envp) {
     openlog(argv[0], 0, LOG_USER);
 
     char root_realpath[MAX_PATH + 1] = "/";
-    if (root != NULL && realpath(root, root_realpath) == NULL) {
-        perror(root);
-        exit(1);
+    if (root != NULL) {
+#if defined(__ANDROID__) && !defined(ISH_CORE_HOST)
+        /*
+         * Android's x86_64 seccomp policy rejects the legacy lstat syscall
+         * used by bionic realpath().  The Go layer supplies an absolute,
+         * app-private path, so canonicalisation is unnecessary here.
+         */
+        size_t root_len = strnlen(root, MAX_PATH);
+        if (root_len == 0 || root_len >= sizeof(root_realpath)) {
+            errno = ENAMETOOLONG;
+            perror(root);
+            exit(1);
+        }
+        memcpy(root_realpath, root, root_len + 1);
+#else
+        if (realpath(root, root_realpath) == NULL) {
+            perror(root);
+            exit(1);
+        }
+#endif
     }
-    if (fs == &fakefs)
+    if (fs == &fakefs) {
+        size_t root_len = strlen(root_realpath);
+        if (root_len + 5 >= sizeof(root_realpath)) {
+            errno = ENAMETOOLONG;
+            perror(root_realpath);
+            exit(1);
+        }
         strcat(root_realpath, "/data");
+    }
     int err = mount_root(fs, root_realpath);
     if (err < 0)
         return err;
