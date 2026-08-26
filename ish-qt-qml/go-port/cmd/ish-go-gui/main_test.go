@@ -61,18 +61,24 @@ func TestTerminalInputBytes(t *testing.T) {
 
 func TestMetricsForWidth(t *testing.T) {
 	tests := []struct {
-		width, button, horizontal, vertical, barHeight float32
+		width, button, horizontal, vertical, barHeight, gap float32
 	}{
-		{width: 320, button: 32, horizontal: 6, vertical: 2, barHeight: 36},
-		{width: 429, button: 32, horizontal: 6, vertical: 2, barHeight: 36},
-		{width: 430, button: 36, horizontal: 10, vertical: 0, barHeight: 36},
-		{width: 599, button: 36, horizontal: 10, vertical: 0, barHeight: 36},
-		{width: 600, button: 43, horizontal: 15, vertical: 0, barHeight: 43},
+		{width: 320, button: 32, horizontal: 6, vertical: 6, barHeight: 36, gap: 6},
+		{width: 429, button: 32, horizontal: 6, vertical: 6, barHeight: 36, gap: 6},
+		{width: 430, button: 36, horizontal: 10, vertical: 8, barHeight: 36, gap: 6},
+		{width: 599, button: 36, horizontal: 10, vertical: 8, barHeight: 36, gap: 6},
+		{width: 600, button: 43, horizontal: 15, vertical: 8, barHeight: 43, gap: 6},
 	}
 	for _, test := range tests {
 		got := metricsForWidth(test.width)
-		if got.button != test.button || got.horizontal != test.horizontal || got.vertical != test.vertical || got.barHeight != test.barHeight {
-			t.Errorf("metricsForWidth(%v) = %+v; want button=%v horizontal=%v vertical=%v barHeight=%v", test.width, got, test.button, test.horizontal, test.vertical, test.barHeight)
+		if got.button != test.button || got.horizontal != test.horizontal || got.vertical != test.vertical || got.barHeight != test.barHeight || got.gap != test.gap {
+			t.Errorf("metricsForWidth(%v) = %+v; want button=%v horizontal=%v vertical=%v barHeight=%v gap=%v", test.width, got, test.button, test.horizontal, test.vertical, test.barHeight, test.gap)
 		}
+	}
+	if !metricsForWidth(390).showHideKeyboard {
+		t.Fatal("phone layout must retain the hide-keyboard control")
+	}
+	if metricsForWidth(700).showHideKeyboard {
+		t.Fatal("wide iPad layout must omit the hide-keyboard control")
 	}
 }

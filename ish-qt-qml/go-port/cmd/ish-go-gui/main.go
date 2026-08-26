@@ -468,24 +468,25 @@ func ansiColor(c buffer.Color) color.NRGBA {
 }
 
 type barMetrics struct {
-	button     float32
-	horizontal float32
-	vertical   float32
-	barHeight  float32
+	button           float32
+	horizontal       float32
+	vertical         float32
+	barHeight        float32
+	gap              float32
+	showHideKeyboard bool
 }
 
 func metricsForWidth(widthDp float32) barMetrics {
-	// These are the compact sizes selected by TerminalViewController:
-	// phone 36pt bar with 6pt side padding and 32pt keys; medium width uses
-	// 36pt keys and 10pt side padding; wide iPad uses a 43pt bar/key and 15pt
-	// side padding.
+	// These values come from TerminalViewController.resizeBar. The Gio
+	// implementation uses width as a practical proxy for phone/narrow-iPad/
+	// wide-iPad traits, while keeping the original dimensions and 6pt stack gap.
 	switch {
 	case widthDp >= 600:
-		return barMetrics{button: 43, horizontal: 15, vertical: 0, barHeight: 43}
+		return barMetrics{button: 43, horizontal: 15, vertical: 8, barHeight: 43, gap: 6, showHideKeyboard: false}
 	case widthDp >= 430:
-		return barMetrics{button: 36, horizontal: 10, vertical: 0, barHeight: 36}
+		return barMetrics{button: 36, horizontal: 10, vertical: 8, barHeight: 36, gap: 6, showHideKeyboard: false}
 	default:
-		return barMetrics{button: 32, horizontal: 6, vertical: 2, barHeight: 36}
+		return barMetrics{button: 32, horizontal: 6, vertical: 6, barHeight: 36, gap: 6, showHideKeyboard: true}
 	}
 }
 
@@ -493,118 +494,135 @@ func (s *appState) accessory(gtx C) D {
 	paint.Fill(gtx.Ops, barBackground)
 	metrics := metricsForWidth(float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp)
 	button := metrics.button
+	height := metrics.barHeight
 	return layout.Inset{
 		Top: unit.Dp(metrics.vertical), Bottom: unit.Dp(metrics.vertical),
 		Left: unit.Dp(metrics.horizontal), Right: unit.Dp(metrics.horizontal),
 	}.Layout(gtx, func(gtx C) D {
+		gap := gtx.Dp(unit.Dp(metrics.gap))
 		return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
-				return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx,
-					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 0, "", button) }),
-					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 1, "", button) }),
-					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 2, "", button) }),
-					layout.Rigid(func(gtx C) D { return s.arrowButton(gtx, button) }),
+				return layout.Flex{Axis: layout.Horizontal, Gap: gap}.Layout(gtx,
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 0, button, height) }),
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 1, button, height) }),
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 2, button, height) }),
+					layout.Rigid(func(gtx C) D { return s.arrowButton(gtx, button, height) }),
 				)
 			}),
 			layout.Rigid(func(gtx C) D {
-				return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx,
-					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 5, "", button) }),
-					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 4, "", button) }),
-					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 6, "", button) }),
-				)
+				children := []layout.FlexChild{
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 5, button, height) }),
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 4, button, height) }),
+				}
+				if metrics.showHideKeyboard {
+					children = append(children, layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 6, button, height) }))
+				}
+				return layout.Flex{Axis: layout.Horizontal, Gap: gap}.Layout(gtx, children...)
 			}),
 		)
 	})
 }
 
-func (s *appState) accessoryButton(gtx C, index int, glyph string, width float32) D {
-	return layout.Inset{Left: unit.Dp(3), Right: unit.Dp(3)}.Layout(gtx, func(gtx C) D {
-		gtx.Constraints.Min.X = gtx.Dp(unit.Dp(width))
-		gtx.Constraints.Max.X = gtx.Dp(unit.Dp(width))
-		gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(width))
-		gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(width))
-		return s.buttons[index].Layout(gtx, func(gtx C) D {
-			pressed := s.buttons[index].Pressed() || s.buttons[index].Hovered()
-			if s.buttons[index].Clicked(gtx) {
-				if index == 4 {
-					gtx.Execute(clipboard.ReadCmd{Tag: &s.input})
-				} else if index == 6 {
-					gtx.Execute(key.SoftKeyboardCmd{Show: false})
-				}
-				s.sendAccessory(index)
+func (s *appState) accessoryButton(gtx C, index int, width, height float32) D {
+	gtx.Constraints.Min.X = gtx.Dp(unit.Dp(width))
+	gtx.Constraints.Max.X = gtx.Dp(unit.Dp(width))
+	gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(height))
+	gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(height))
+	return s.buttons[index].Layout(gtx, func(gtx C) D {
+		pressed := s.buttons[index].Pressed() || s.buttons[index].Hovered()
+		if s.buttons[index].Clicked(gtx) {
+			if index == 4 {
+				gtx.Execute(clipboard.ReadCmd{Tag: &s.input})
+			} else if index == 6 {
+				gtx.Execute(key.SoftKeyboardCmd{Show: false})
 			}
+			s.sendAccessory(index)
+		}
+		face := clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}
+		paint.FillShape(gtx.Ops, keyShadow, clip.RRect{Rect: image.Rect(0, 1, gtx.Constraints.Max.X, gtx.Constraints.Max.Y+1), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, keyBackground, face.Op(gtx.Ops))
+		if pressed || (index == 1 && s.controlActive) {
+			paint.FillShape(gtx.Ops, keySecondary, clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
+		}
+		s.drawBarIcon(gtx, index)
+		return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
+	})
+}
+
+func (s *appState) arrowButton(gtx C, width, height float32) D {
+	gtx.Constraints.Min.X = gtx.Dp(unit.Dp(width))
+	gtx.Constraints.Max.X = gtx.Dp(unit.Dp(width))
+	gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(height))
+	gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(height))
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
 			face := clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}
 			paint.FillShape(gtx.Ops, keyShadow, clip.RRect{Rect: image.Rect(0, 1, gtx.Constraints.Max.X, gtx.Constraints.Max.Y+1), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
 			paint.FillShape(gtx.Ops, keyBackground, face.Op(gtx.Ops))
-			if pressed || (index == 1 && s.controlActive) {
-				paint.FillShape(gtx.Ops, keySecondary, clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
-			}
-			s.drawBarIcon(gtx, index)
 			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
-		})
-	})
+		}),
+		layout.Stacked(func(gtx C) D {
+			width := gtx.Constraints.Max.X
+			height := gtx.Constraints.Max.Y
+			col := width / 3
+			row := height / 3
+			colWidth := func(index int) int {
+				if index == 2 {
+					return width - 2*col
+				}
+				return maxInt(1, col)
+			}
+			rowHeight := func(index int) int {
+				if index == 2 {
+					return height - 2*row
+				}
+				return maxInt(1, row)
+			}
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx C) D {
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+						layout.Rigid(func(gtx C) D { return arrowBlank(gtx, colWidth(0), rowHeight(0)) }),
+						layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 0, colWidth(1), rowHeight(0)) }),
+						layout.Rigid(func(gtx C) D { return arrowBlank(gtx, colWidth(2), rowHeight(0)) }),
+					)
+				}),
+				layout.Rigid(func(gtx C) D {
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+						layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 2, colWidth(0), rowHeight(1)) }),
+						layout.Rigid(func(gtx C) D { return arrowBlank(gtx, colWidth(1), rowHeight(1)) }),
+						layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 3, colWidth(2), rowHeight(1)) }),
+					)
+				}),
+				layout.Rigid(func(gtx C) D {
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+						layout.Rigid(func(gtx C) D { return arrowBlank(gtx, colWidth(0), rowHeight(2)) }),
+						layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 1, colWidth(1), rowHeight(2)) }),
+						layout.Rigid(func(gtx C) D { return arrowBlank(gtx, colWidth(2), rowHeight(2)) }),
+					)
+				}),
+			)
+		}),
+	)
 }
 
-func (s *appState) arrowButton(gtx C, width float32) D {
-	return layout.Inset{Left: unit.Dp(3), Right: unit.Dp(3)}.Layout(gtx, func(gtx C) D {
-		gtx.Constraints.Min.X = gtx.Dp(unit.Dp(width))
-		gtx.Constraints.Max.X = gtx.Dp(unit.Dp(width))
-		gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(width))
-		gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(width))
-		return layout.Stack{}.Layout(gtx,
-			layout.Expanded(func(gtx C) D {
-				face := clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}
-				paint.FillShape(gtx.Ops, keyShadow, clip.RRect{Rect: image.Rect(0, 1, gtx.Constraints.Max.X, gtx.Constraints.Max.Y+1), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
-				paint.FillShape(gtx.Ops, keyBackground, face.Op(gtx.Ops))
-				return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
-			}),
-			layout.Stacked(func(gtx C) D {
-				cell := maxInt(1, gtx.Constraints.Max.X/3)
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(func(gtx C) D {
-						return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-							layout.Rigid(func(gtx C) D { return arrowBlank(gtx, cell) }),
-							layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 0, "↑", cell) }),
-							layout.Rigid(func(gtx C) D { return arrowBlank(gtx, cell) }),
-						)
-					}),
-					layout.Rigid(func(gtx C) D {
-						return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-							layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 2, "←", cell) }),
-							layout.Rigid(func(gtx C) D { return arrowBlank(gtx, cell) }),
-							layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 3, "→", cell) }),
-						)
-					}),
-					layout.Rigid(func(gtx C) D {
-						return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-							layout.Rigid(func(gtx C) D { return arrowBlank(gtx, cell) }),
-							layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 1, "↓", cell) }),
-							layout.Rigid(func(gtx C) D { return arrowBlank(gtx, cell) }),
-						)
-					}),
-				)
-			}),
-		)
-	})
+func arrowBlank(gtx C, width, height int) D {
+	gtx.Constraints.Min = image.Pt(width, height)
+	gtx.Constraints.Max = image.Pt(width, height)
+	return layout.Dimensions{Size: image.Pt(width, height)}
 }
 
-func arrowBlank(gtx C, cell int) D {
-	gtx.Constraints.Min = image.Pt(cell, cell)
-	gtx.Constraints.Max = image.Pt(cell, cell)
-	return layout.Dimensions{Size: image.Pt(cell, cell)}
-}
-
-func (s *appState) arrowPart(gtx C, index int, glyph string, cell int) D {
-	gtx.Constraints.Min = image.Pt(cell, cell)
-	gtx.Constraints.Max = image.Pt(cell, cell)
+func (s *appState) arrowPart(gtx C, index int, width, height int) D {
+	gtx.Constraints.Min = image.Pt(width, height)
+	gtx.Constraints.Max = image.Pt(width, height)
 	return s.arrows[index].Layout(gtx, func(gtx C) D {
 		if s.arrows[index].Clicked(gtx) {
 			s.sendArrow(index)
 		}
 		if s.arrows[index].Pressed() || s.arrows[index].Hovered() {
-			paint.FillShape(gtx.Ops, keySecondary, clip.Rect{Max: image.Pt(cell, cell)}.Op())
+			paint.FillShape(gtx.Ops, keySecondary, clip.Rect{Max: image.Pt(width, height)}.Op())
 		}
-		label := material.Label(s.theme, unit.Sp(10), glyph)
+		glyphs := []string{"↑", "↓", "←", "→"}
+		label := material.Label(s.theme, unit.Sp(10), glyphs[index])
 		label.Color = keyForeground
 		label.Alignment = text.Middle
 		return layout.Center.Layout(gtx, label.Layout)
