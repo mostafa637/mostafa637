@@ -16,6 +16,7 @@ import (
 	"gioui.org/app"
 	giofont "gioui.org/font"
 	"gioui.org/io/clipboard"
+	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -271,7 +272,13 @@ func (s *appState) terminalView(gtx C) D {
 			style.Color = color.NRGBA{A: 0}
 			style.HintColor = color.NRGBA{A: 0}
 			style.SelectionColor = color.NRGBA{A: 0}
-			return style.Layout(gtx)
+			dims := style.Layout(gtx)
+			// widget.Editor clips its event.Op to the rendered text dimensions.
+			// With an empty, transparent buffer that can be smaller than the
+			// terminal, so add a full-surface target like iSH's first responder.
+			event.Op(gtx.Ops, &s.input)
+			key.InputHintOp{Tag: &s.input, Hint: key.HintText}.Add(gtx.Ops)
+			return layout.Dimensions{Size: dims.Size}
 		}),
 	)
 }
@@ -286,6 +293,7 @@ func (s *appState) forwardEditorEvent(ev widget.EditorEvent) {
 		// the widget behaves like iSH's first responder, not a command box.
 		value := s.input.Text()
 		if value != "" {
+			log.Printf("iSH GUI editor change: %q", value)
 			s.forwardTerminalText(value)
 			s.input.SetText("")
 		}
@@ -303,7 +311,11 @@ func (s *appState) forwardTerminalText(value string) {
 	payload, nextControl := terminalInputBytes(value, s.controlActive)
 	s.controlActive = nextControl
 	if len(payload) > 0 || value == " " {
-		_ = s.session.Write(payload)
+		if err := s.session.Write(payload); err != nil {
+			log.Printf("iSH GUI terminal input failed: %v", err)
+		} else {
+			log.Printf("iSH GUI terminal input forwarded: %q", payload)
+		}
 	}
 }
 
