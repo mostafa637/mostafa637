@@ -31,15 +31,15 @@ git restore --source ef46ed8 -- .
 
 ## تحقق Android وAlpine
 
-تم التحقق من التشغيل الفعلي عبر GitHub Actions في التشغيل `32902130382` للالتزام `b5c5a3c0c8e00ccb7b8ab43d5c423a713ffc2760` على فرع `ish-qt-qml`. نجحت اختبارات Linux وLLVM/Gio، وبناءا Android الموقّعان للمعماريتين `arm64-v8a` و`x86_64`، واختبار Android x86_64 AVD باستخدام Linux وKVM.
+تم التحقق من التشغيل الفعلي النهائي عبر [GitHub Actions run 32937182527](https://github.com/mostafa637/mostafa637/actions/runs/32937182527) للالتزام `a2c57759544b43a495a4a5cda75d20ab28445e3d` على فرع `ish-qt-qml`. نجحت اختبارات Go وLLVM/Gio وبناء Linux، ونجح بناء APKين موقّعين للمعماريتين `arm64-v8a` و`x86_64`، كما نجح اختبار Android x86_64 AVD باستخدام Linux وKVM. هذا التشغيل يتضمن إصلاح readiness الذي ينتظر بدء rootfs و`ash` الحقيقي قبل إرسال أوامر smoke.
 
-أثبت اختبار AVD أن `GioActivity` بقيت في حالة `RESUMED` ومركّزة، وأن rootfs فُك داخل مجلد التطبيق الخاص `/data/user/0/org.ish.go/files/ish-rootfs`. سجّل iSH Core نجاح `after-main` و`after-devices`، ثم ظهر داخل الطرفية ناتج `/etc/alpine-release` بالقيمة `3.19.0`، كما سُجّلت الرسالة `iSH Alpine smoke marker received; Alpine release 3.19.0` في logcat. لم يسجّل artifact الخاص بالـAVD أي crash.
+أثبت اختبار AVD أن `GioActivity` كانت في حالة `RESUMED` ومركّزة، وأن rootfs فُك داخل مجلد التطبيق الخاص `/data/user/0/org.ish.go/files/ish-rootfs`. سجّل iSH Core أولاً `iSH Alpine session ready; rootfs and ash started`، ثم ظهر داخل logcat marker `iSH Alpine smoke marker received; Alpine release 3.19.0` بعد إرسال أوامر الاختبار، مع بقاء سجل crash فارغاً. يتضمن artifact الخاص بالـAVD لقطة الشاشة النهائية و`avd-activities.txt` و`avd-logcat.txt` وملفات تشخيص التوقّف.
 
-هذه النتيجة تثبت تشغيل Alpine i386 الحقيقي عبر محرك iSH/Asbestos المضمّن خلف طبقة cgo، وليست تشغيل `/system/bin/sh` الخاص بالمضيف. كما أن gritty مستخدم لمعالجة parser/buffer الخاصة بالطرفية، وليس بديلًا عن محرك Alpine.
+هذه النتيجة تثبت تشغيل Alpine i386 الحقيقي عبر محرك iSH/Asbestos المضمّن خلف طبقة cgo، وليست تشغيل `/system/bin/sh` الخاص بالمضيف. كما أن gritty مستخدم لمعالجة parser/buffer الخاصة بالطرفية، وليس بديلاً عن محرك Alpine. واجهة Gio الحالية تطابق بنية iSH الأساسية: canvas طرفية داكن، إدخال مباشر إلى PTY، شريط accessory مضغوط بترتيب Tab/Control/Escape/Arrow ثم gear/Paste/Hide Keyboard، ومناطق لمس مستقلة للأسهم. أما صفحات الإعدادات/الملفات المتقدمة في iSH iOS فليست مدّعاة كمطابقة كاملة في هذا المسار.
 
-لإعادة التحقق من التوقيع، نفّذ workflow خطوة `apksigner verify --verbose` ونجحت للـAPKين؛ التوقيع الموثق هو APK Signature Scheme v3 بموقّع واحد. بصمات SHA-256 للـartifacts في ذلك التشغيل هي:
+نفّذ workflow خطوة `apksigner verify --verbose` ونجحت للـAPKين؛ التوقيع الموثق هو APK Signature Scheme v3 بموقّع واحد. بصمات SHA-256 للـartifacts في التشغيل النهائي هي:
 
 | ABI | SHA-256 |
 | --- | --- |
-| `arm64-v8a` | `f143ac2fc2f851f411198e63f6c3299da8368264ce2662711cbe3a6bea4780b6` |
-| `x86_64` | `0f65880e80271c40772330e76d43d6a1ed620d5e7334b6b2501c224a666bdbc1` |
+| `arm64-v8a` | `83beab4158281709d058283e067b0672bef7e5aa23bcfdb702c0e123f4fbd9e5` |
+| `x86_64` | `f9d122e1e1c9afde3530b828717198746fd96b4cc67510cdf692ea9f760e38c4` |
