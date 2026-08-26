@@ -61,12 +61,13 @@ type nativeSession struct {
 	core   *C.IshCoreSession
 	handle cgo.Handle
 
-	mu         sync.Mutex
-	closed     bool
-	markerSeen bool
-	markerBuf  []byte
-	out        chan []byte
-	done       chan error
+	mu          sync.Mutex
+	closed      bool
+	markerSeen  bool
+	readyLogged bool
+	markerBuf   []byte
+	out         chan []byte
+	done        chan error
 }
 
 //export goIshOutput
@@ -79,6 +80,11 @@ func goIshOutput(cookie unsafe.Pointer, bytes *C.char, length C.size_t) {
 	chunk := C.GoBytes(unsafe.Pointer(bytes), C.int(length))
 
 	s.mu.Lock()
+	if !s.readyLogged {
+		s.readyLogged = true
+		C.ishGoReadyLog()
+		log.Print("iSH Alpine session ready; ash produced initial output")
+	}
 	if !s.markerSeen {
 		s.markerBuf = append(s.markerBuf, chunk...)
 		// Line editing and terminal control sequences can place several hundred bytes
@@ -151,7 +157,6 @@ func startAlpine(ctx context.Context, rootPath string) (*Session, error) {
 		s.handle.Delete()
 		return nil, errors.New("session: iSH core failed to start")
 	}
-	C.ishGoReadyLog()
 	return newSession(s), nil
 }
 
