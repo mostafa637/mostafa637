@@ -5,18 +5,23 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"image"
 	"image/color"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"gioui.org/app"
-	"gioui.org/io/event"
+	giofont "gioui.org/font"
+	"gioui.org/io/clipboard"
 	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -24,6 +29,7 @@ import (
 	"github.com/mostafa637/ish-qt-qml/go-port/internal/rootfs"
 	"github.com/mostafa637/ish-qt-qml/go-port/internal/session"
 	"github.com/mostafa637/ish-qt-qml/go-port/internal/terminal"
+	"github.com/viktomas/gritty/buffer"
 )
 
 //go:embed assets/root.tar.gz
@@ -44,13 +50,18 @@ type appState struct {
 	input widget.Editor
 	term  *terminal.Terminal
 
-	buttons    [7]widget.Clickable
-	buttonText [7]string
-	ops        op.Ops
-	session    *session.Session
-	startTried bool
-	startDone  bool
-	startCh    chan sessionStartResult
+	buttons [7]widget.Clickable
+	arrows  [4]widget.Clickable
+	ops     op.Ops
+	session *session.Session
+
+	startTried    bool
+	startDone     bool
+	startCh       chan sessionStartResult
+	focused       bool
+	controlActive bool
+	termCols      int
+	termRows      int
 }
 
 type sessionStartResult struct {
@@ -58,10 +69,22 @@ type sessionStartResult struct {
 	err     error
 }
 
+var (
+	terminalBlack = color.NRGBA{R: 0, G: 0, B: 0, A: 255}
+	// iSH follows the keyboard appearance. The reference UI is the dark
+	// variant: charcoal accessory strip, translucent light key faces, and
+	// white SF-Symbol-like glyphs.
+	barBackground = color.NRGBA{R: 37, G: 37, B: 42, A: 255}
+	keyBackground = color.NRGBA{R: 255, G: 255, B: 255, A: 55}
+	keySecondary  = color.NRGBA{R: 147, G: 147, B: 147, A: 66}
+	keyForeground = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	keyShadow     = color.NRGBA{R: 0, G: 0, B: 0, A: 105}
+)
+
 func main() {
 	go func() {
 		window := new(app.Window)
-		window.Option(app.Title("iSH Go"), app.Size(unit.Dp(900), unit.Dp(600)))
+		window.Option(app.Title("iSH"), app.Size(unit.Dp(900), unit.Dp(600)))
 		if err := run(window); err != nil {
 			log.Print(err)
 			os.Exit(1)
@@ -72,14 +95,15 @@ func main() {
 
 func run(w *app.Window) error {
 	state := &appState{
-		theme:      material.NewTheme(),
-		buttonText: [7]string{"ESC", "CTRL", "ALT", "TAB", "↑↓←→", "粘贴", "⌫"},
-		term:       terminal.New(100, 30),
+		theme:   material.NewTheme(),
+		term:    terminal.New(100, 30),
+		startCh: make(chan sessionStartResult, 1),
 	}
-	state.input.SingleLine = true
-	state.input.Submit = true
+	state.input.SingleLine = false
+	state.input.Submit = false
 	state.input.InputHint = key.HintText
-	state.startCh = make(chan sessionStartResult, 1)
+	state.input.LineHeight = unit.Sp(17)
+	state.input.LineHeightScale = 1
 
 	for {
 		e := w.Event()
@@ -89,9 +113,7 @@ func run(w *app.Window) error {
 			if !state.startTried {
 				state.startTried = true
 				// Rootfs extraction and CoreSession startup can take several seconds
-				// on a fresh Android install. Never block Gio's frame/UI goroutine,
-				// otherwise Android reports an input-channel ANR before the first
-				// window becomes focusable.
+				// on a fresh Android install. Never block Gio's frame/UI goroutine.
 				go func() {
 					started, err := startApplicationSession()
 					state.startCh <- sessionStartResult{session: started, err: err}
@@ -102,10 +124,12 @@ func run(w *app.Window) error {
 				case result := <-state.startCh:
 					state.startDone = true
 					if result.err != nil {
-						state.term.Feed([]byte("\r\n[Alpine startup failed] " + result.err.Error() + "\r\n"))
+						state.term.Feed([]byte("\r\n[iSH] Alpine startup failed: " + result.err.Error() + "\r\n"))
 					} else {
 						state.session = result.session
-						_ = state.session.Resize(100, 30)
+						if state.termCols > 0 && state.termRows > 0 {
+							_ = state.session.Resize(uint16(state.termCols), uint16(state.termRows))
+						}
 					}
 				default:
 				}
@@ -157,8 +181,6 @@ func prepareRootfs(ctx context.Context) (string, error) {
 	base := filepath.Join(dataDir, "ish-rootfs")
 	marker := filepath.Join(base, ".installed-v1")
 	// Android x86_64 rejects the legacy lstat syscall used by os.Stat.
-	// Opening the marker is sufficient here and keeps first launch on the
-	// supported openat path.
 	if f, err := os.Open(marker); err == nil {
 		_ = f.Close()
 		if runtime.GOOS == "android" {
@@ -202,94 +224,458 @@ func (s *appState) drainOutput() {
 }
 
 func (s *appState) handleKey(e key.Event) {
-	if s.session == nil || e.State != key.Press || e.Name != key.NameEscape {
+	if s.session == nil || e.State != key.Press {
 		return
 	}
-	_ = s.session.Write([]byte("\x1b"))
+	if e.Name == key.NameEscape {
+		_ = s.session.Write([]byte("\x1b"))
+	}
 }
 
 func (s *appState) layout(gtx C) {
-	paint.Fill(gtx.Ops, color.NRGBA{R: 20, G: 20, B: 22, A: 255})
+	paint.Fill(gtx.Ops, terminalBlack)
 	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx C) D {
-			return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx C) D {
-				label := material.Label(s.theme, unit.Sp(14), s.term.String())
-				label.Color = color.NRGBA{R: 236, G: 236, B: 240, A: 255}
-				label.LineHeightScale = 1.15
-				return label.Layout(gtx)
-			})
+			return s.terminalView(gtx)
 		}),
 		layout.Rigid(func(gtx C) D {
-			return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx C) D {
-				style := material.Editor(s.theme, &s.input, "command")
-				style.TextSize = unit.Sp(15)
-				style.Color = color.NRGBA{R: 236, G: 236, B: 240, A: 255}
-				style.HintColor = color.NRGBA{R: 150, G: 150, B: 156, A: 255}
-				style.SelectionColor = color.NRGBA{R: 72, G: 86, B: 160, A: 255}
-
-				if editorEvent, changed := s.input.Update(gtx); changed {
-					if submit, ok := editorEvent.(widget.SubmitEvent); ok && s.session != nil {
-						_ = s.session.Write([]byte(submit.Text + "\n"))
-						s.input.SetText("")
-					}
-				}
-				return style.Layout(gtx)
-			})
+			return s.accessory(gtx)
 		}),
-		layout.Rigid(func(gtx C) D { return s.accessory(gtx) }),
+	)
+	if !s.focused {
+		gtx.Execute(key.FocusCmd{Tag: &s.input})
+		s.focused = true
+	}
+}
+
+func (s *appState) terminalView(gtx C) D {
+	paint.Fill(gtx.Ops, terminalBlack)
+	// iSH's terminal is the first responder; it does not show a separate
+	// command-entry bar. Gio still needs an Editor to connect to Android IME,
+	// so keep a one-pixel transparent editor over the terminal surface.
+	if editorEvent, changed := s.input.Update(gtx); changed {
+		s.forwardEditorEvent(editorEvent)
+	}
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			return layout.UniformInset(unit.Dp(8)).Layout(gtx, s.renderTerminal)
+		}),
+		layout.Stacked(func(gtx C) D {
+			gtx.Constraints.Min = image.Pt(1, 1)
+			gtx.Constraints.Max = image.Pt(1, 1)
+			style := material.Editor(s.theme, &s.input, "")
+			style.TextSize = unit.Sp(1)
+			style.LineHeight = unit.Sp(1)
+			style.Color = color.NRGBA{A: 0}
+			style.HintColor = color.NRGBA{A: 0}
+			style.SelectionColor = color.NRGBA{A: 0}
+			return style.Layout(gtx)
+		}),
 	)
 }
 
+func (s *appState) forwardEditorEvent(ev widget.EditorEvent) {
+	if s.session == nil {
+		return
+	}
+	switch e := ev.(type) {
+	case widget.ChangeEvent:
+		// Editor.Text is the complete edit buffer. Clear it after every change so
+		// the widget behaves like iSH's first responder, not a command box.
+		value := s.input.Text()
+		if value != "" {
+			s.forwardTerminalText(value)
+			s.input.SetText("")
+		}
+	case widget.SubmitEvent:
+		if e.Text != "" {
+			s.forwardTerminalText(e.Text)
+		}
+	}
+}
+
+func (s *appState) forwardTerminalText(value string) {
+	if value == "" || s.session == nil {
+		return
+	}
+	payload, nextControl := terminalInputBytes(value, s.controlActive)
+	s.controlActive = nextControl
+	if len(payload) > 0 || value == " " {
+		_ = s.session.Write(payload)
+	}
+}
+
+func terminalInputBytes(value string, controlActive bool) ([]byte, bool) {
+	if value == "" {
+		return nil, controlActive
+	}
+	if controlActive {
+		runes := []rune(value)
+		if len(runes) == 1 {
+			if b, ok := controlByte(runes[0]); ok {
+				return []byte{b}, false
+			}
+			// iSH consumes an unsupported one-rune Control insertion without
+			// sending it to the terminal.
+			return nil, false
+		}
+		// Like iSH, a multi-character IME insertion is sent as ordinary text;
+		// the one-shot Control state is consumed by that insertion.
+		controlActive = false
+	}
+	return []byte(strings.ReplaceAll(value, "\n", "\r")), controlActive
+}
+
+func controlByte(ch rune) (byte, bool) {
+	validation := ch
+	if validation >= 'A' && validation <= 'Z' {
+		validation += 'a' - 'A'
+	}
+	if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz@^26-=[]\\ ", validation) {
+		return 0, false
+	}
+	if ch == ' ' {
+		return 0, true
+	}
+	if ch == '2' {
+		ch = '@'
+	}
+	if ch == '6' {
+		ch = '^'
+	}
+	if ch >= 'a' && ch <= 'z' {
+		ch -= 'a' - 'A'
+	}
+	return byte(ch) ^ 0x40, true
+}
+
+func (s *appState) renderTerminal(gtx C) D {
+	const (
+		cellWidthDp  = float32(9)
+		cellHeightDp = float32(17)
+	)
+	widthDp := float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp
+	heightDp := float32(gtx.Constraints.Max.Y) / gtx.Metric.PxPerDp
+	cols := maxInt(1, int(widthDp/cellWidthDp))
+	rows := maxInt(1, int(heightDp/cellHeightDp))
+	if cols != s.termCols || rows != s.termRows {
+		s.termCols, s.termRows = cols, rows
+		s.term.Resize(cols, rows)
+		if s.session != nil {
+			_ = s.session.Resize(uint16(cols), uint16(rows))
+		}
+	}
+
+	runes := s.term.Runes()
+	if len(runes) < cols*rows {
+		runes = append(runes, make([]buffer.BrushedRune, cols*rows-len(runes))...)
+	}
+	if len(runes) > cols*rows {
+		runes = runes[:cols*rows]
+	}
+	fontStyle := material.Label(s.theme, unit.Sp(15), "")
+	fontStyle.Font.Typeface = "monospace"
+	fontStyle.LineHeight = unit.Sp(17)
+	fontStyle.LineHeightScale = 1
+
+	cellWidth := maxInt(1, int(cellWidthDp*gtx.Metric.PxPerDp))
+	cellHeight := maxInt(1, int(cellHeightDp*gtx.Metric.PxPerDp))
+	for row := 0; row < rows; row++ {
+		line := runes[row*cols : (row+1)*cols]
+		for col := 0; col < cols; {
+			start := col
+			brush := line[col].Brush
+			for col < cols && line[col].Brush == brush {
+				col++
+			}
+			textValue := cellsText(line[start:col])
+			if textValue == "" {
+				continue
+			}
+			x := start * cellWidth
+			y := row * cellHeight
+			w := (col - start) * cellWidth
+			push := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
+			paint.FillShape(gtx.Ops, cellBackground(line[start]), clip.Rect{Max: image.Pt(w, cellHeight)}.Op())
+			fontStyle.Text = textValue
+			fontStyle.Color = cellForeground(line[start])
+			if brush.Bold {
+				fontStyle.Font.Weight = giofont.Bold
+			} else {
+				fontStyle.Font.Weight = giofont.Normal
+			}
+			local := gtx
+			local.Constraints.Min = image.Point{}
+			local.Constraints.Max = image.Pt(w, cellHeight)
+			fontStyle.Layout(local)
+			push.Pop()
+		}
+	}
+
+	cursor := s.term.Cursor()
+	if cursor.X >= 0 && cursor.X < cols && cursor.Y >= 0 && cursor.Y < rows {
+		push := op.Offset(image.Pt(cursor.X*cellWidth, cursor.Y*cellHeight)).Push(gtx.Ops)
+		paint.FillShape(gtx.Ops, color.NRGBA{R: 235, G: 235, B: 235, A: 145}, clip.Rect{Max: image.Pt(cellWidth, cellHeight)}.Op())
+		push.Pop()
+	}
+	return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func cellsText(cells []buffer.BrushedRune) string {
+	var b strings.Builder
+	for _, cell := range cells {
+		if cell.R == 0 {
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(cell.R)
+		}
+	}
+	return b.String()
+}
+
+func cellForeground(cell buffer.BrushedRune) color.NRGBA {
+	if cell.Brush.Invert {
+		return cellBackground(cell)
+	}
+	if cell.Brush.FG == buffer.DefaultFG {
+		return color.NRGBA{R: 235, G: 235, B: 235, A: 255}
+	}
+	return ansiColor(cell.Brush.FG)
+}
+
+func cellBackground(cell buffer.BrushedRune) color.NRGBA {
+	if cell.Brush.Invert {
+		if cell.Brush.FG == buffer.DefaultFG {
+			return color.NRGBA{R: 235, G: 235, B: 235, A: 255}
+		}
+		return ansiColor(cell.Brush.FG)
+	}
+	if cell.Brush.BG == buffer.DefaultBG {
+		return terminalBlack
+	}
+	return ansiColor(cell.Brush.BG)
+}
+
+func ansiColor(c buffer.Color) color.NRGBA {
+	return color.NRGBA{R: c.R, G: c.G, B: c.B, A: 255}
+}
+
+type barMetrics struct {
+	button     float32
+	horizontal float32
+	vertical   float32
+	barHeight  float32
+}
+
+func metricsForWidth(widthDp float32) barMetrics {
+	// These are the compact sizes selected by TerminalViewController:
+	// phone 36pt bar with 6pt side padding and 32pt keys; medium width uses
+	// 36pt keys and 10pt side padding; wide iPad uses a 43pt bar/key and 15pt
+	// side padding.
+	switch {
+	case widthDp >= 600:
+		return barMetrics{button: 43, horizontal: 15, vertical: 0, barHeight: 43}
+	case widthDp >= 430:
+		return barMetrics{button: 36, horizontal: 10, vertical: 0, barHeight: 36}
+	default:
+		return barMetrics{button: 32, horizontal: 6, vertical: 2, barHeight: 36}
+	}
+}
+
 func (s *appState) accessory(gtx C) D {
-	return layout.UniformInset(unit.Dp(6)).Layout(gtx, func(gtx C) D {
-		return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEvenly}.Layout(gtx,
-			s.button(gtx, 0),
-			s.button(gtx, 1),
-			s.button(gtx, 2),
-			s.button(gtx, 3),
-			s.button(gtx, 4),
-			s.button(gtx, 5),
-			s.button(gtx, 6),
+	paint.Fill(gtx.Ops, barBackground)
+	metrics := metricsForWidth(float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp)
+	button := metrics.button
+	return layout.Inset{
+		Top: unit.Dp(metrics.vertical), Bottom: unit.Dp(metrics.vertical),
+		Left: unit.Dp(metrics.horizontal), Right: unit.Dp(metrics.horizontal),
+	}.Layout(gtx, func(gtx C) D {
+		return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
+			layout.Rigid(func(gtx C) D {
+				return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx,
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 0, "⇥", button) }),
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 1, "⌃", button) }),
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 2, "⎋", button) }),
+					layout.Rigid(func(gtx C) D { return s.arrowButton(gtx, button) }),
+				)
+			}),
+			layout.Rigid(func(gtx C) D {
+				return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx,
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 5, "", button) }),
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 4, "", button) }),
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 6, "", button) }),
+				)
+			}),
 		)
 	})
 }
 
-func (s *appState) button(gtx C, index int) layout.FlexChild {
-	return layout.Rigid(func(gtx C) D {
-		style := material.Button(s.theme, &s.buttons[index], s.buttonText[index])
-		style.TextSize = unit.Sp(12)
-		if s.buttons[index].Clicked(gtx) {
-			s.sendAccessory(index)
-		}
-		return style.Layout(gtx)
+func (s *appState) accessoryButton(gtx C, index int, glyph string, width float32) D {
+	return layout.Inset{Left: unit.Dp(3), Right: unit.Dp(3)}.Layout(gtx, func(gtx C) D {
+		gtx.Constraints.Min.X = gtx.Dp(unit.Dp(width))
+		gtx.Constraints.Max.X = gtx.Dp(unit.Dp(width))
+		gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(width))
+		gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(width))
+		return s.buttons[index].Layout(gtx, func(gtx C) D {
+			pressed := s.buttons[index].Hovered()
+			if s.buttons[index].Clicked(gtx) {
+				if index == 4 {
+					gtx.Execute(clipboard.ReadCmd{Tag: &s.input})
+				} else if index == 6 {
+					gtx.Execute(key.SoftKeyboardCmd{Show: false})
+				}
+				s.sendAccessory(index)
+			}
+			paint.FillShape(gtx.Ops, keyBackground, clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
+			if pressed || (index == 1 && s.controlActive) {
+				paint.FillShape(gtx.Ops, keySecondary, clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
+			}
+			if index >= 4 {
+				drawBarIcon(gtx, index)
+				return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
+			}
+			label := material.Label(s.theme, unit.Sp(20), glyph)
+			label.Color = keyForeground
+			label.Alignment = text.Middle
+			return layout.Center.Layout(gtx, label.Layout)
+		})
 	})
+}
+
+func (s *appState) arrowButton(gtx C, width float32) D {
+	return layout.Inset{Left: unit.Dp(3), Right: unit.Dp(3)}.Layout(gtx, func(gtx C) D {
+		gtx.Constraints.Min.X = gtx.Dp(unit.Dp(width))
+		gtx.Constraints.Max.X = gtx.Dp(unit.Dp(width))
+		gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(width))
+		gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(width))
+		return layout.Stack{}.Layout(gtx,
+			layout.Expanded(func(gtx C) D {
+				face := clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}
+				paint.FillShape(gtx.Ops, keyShadow, clip.RRect{Rect: image.Rect(0, 1, gtx.Constraints.Max.X, gtx.Constraints.Max.Y+1), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
+				paint.FillShape(gtx.Ops, keyBackground, face.Op(gtx.Ops))
+				return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
+			}),
+			layout.Stacked(func(gtx C) D {
+				cell := maxInt(1, gtx.Constraints.Max.X/3)
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx C) D {
+						return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+							layout.Rigid(func(gtx C) D { return arrowBlank(gtx, cell) }),
+							layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 0, "↑", cell) }),
+							layout.Rigid(func(gtx C) D { return arrowBlank(gtx, cell) }),
+						)
+					}),
+					layout.Rigid(func(gtx C) D {
+						return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+							layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 2, "←", cell) }),
+							layout.Rigid(func(gtx C) D { return arrowBlank(gtx, cell) }),
+							layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 3, "→", cell) }),
+						)
+					}),
+					layout.Rigid(func(gtx C) D {
+						return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+							layout.Rigid(func(gtx C) D { return arrowBlank(gtx, cell) }),
+							layout.Rigid(func(gtx C) D { return s.arrowPart(gtx, 1, "↓", cell) }),
+							layout.Rigid(func(gtx C) D { return arrowBlank(gtx, cell) }),
+						)
+					}),
+				)
+			}),
+		)
+	})
+}
+
+func arrowBlank(gtx C, cell int) D {
+	gtx.Constraints.Min = image.Pt(cell, cell)
+	gtx.Constraints.Max = image.Pt(cell, cell)
+	return layout.Dimensions{Size: image.Pt(cell, cell)}
+}
+
+func (s *appState) arrowPart(gtx C, index int, glyph string, cell int) D {
+	gtx.Constraints.Min = image.Pt(cell, cell)
+	gtx.Constraints.Max = image.Pt(cell, cell)
+	return s.arrows[index].Layout(gtx, func(gtx C) D {
+		if s.arrows[index].Clicked(gtx) {
+			s.sendArrow(index)
+		}
+		if s.arrows[index].Pressed() || s.arrows[index].Hovered() {
+			paint.FillShape(gtx.Ops, keySecondary, clip.Rect{Max: image.Pt(cell, cell)}.Op())
+		}
+		label := material.Label(s.theme, unit.Sp(10), glyph)
+		label.Color = keyForeground
+		label.Alignment = text.Middle
+		return layout.Center.Layout(gtx, label.Layout)
+	})
+}
+
+func drawBarIcon(gtx C, index int) {
+	w, h := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
+	icon := keyForeground
+	centerX, centerY := w/2, h/2
+	switch index {
+	case 4: // doc.on.clipboard
+		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-7, centerY-6, centerX+7, centerY+8), SE: 2, SW: 2, NE: 2, NW: 2}.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, keyBackground, clip.RRect{Rect: image.Rect(centerX-4, centerY-3, centerX+5, centerY+5), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-3, centerY-9, centerX+4, centerY-5), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+	case 5: // gear
+		for _, tooth := range []image.Rectangle{
+			image.Rect(centerX-2, centerY-10, centerX+2, centerY-4), image.Rect(centerX-2, centerY+4, centerX+2, centerY+10),
+			image.Rect(centerX-10, centerY-2, centerX-4, centerY+2), image.Rect(centerX+4, centerY-2, centerX+10, centerY+2),
+		} {
+			paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: tooth, SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+		}
+		paint.FillShape(gtx.Ops, icon, clip.Ellipse(image.Rect(centerX-7, centerY-7, centerX+7, centerY+7)).Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, keyBackground, clip.Ellipse(image.Rect(centerX-3, centerY-3, centerX+3, centerY+3)).Op(gtx.Ops))
+	case 6: // keyboard.chevron.compact.down
+		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-11, centerY-7, centerX+11, centerY+4), SE: 2, SW: 2, NE: 2, NW: 2}.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, keyBackground, clip.RRect{Rect: image.Rect(centerX-7, centerY-4, centerX+7, centerY-2), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-5, centerY+5, centerX-2, centerY+9), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX+2, centerY+5, centerX+5, centerY+9), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+	}
+}
+
+func (s *appState) sendArrow(index int) {
+	if s.session == nil {
+		return
+	}
+	seq := [][]byte{[]byte("\x1b[A"), []byte("\x1b[B"), []byte("\x1b[D"), []byte("\x1b[C")}
+	if index >= 0 && index < len(seq) {
+		_ = s.session.Write(seq[index])
+	}
 }
 
 func (s *appState) sendAccessory(index int) {
 	if s.session == nil {
 		return
 	}
-	seq := []byte{}
+	var seq []byte
 	switch index {
 	case 0:
-		seq = []byte("\x1b")
+		seq = []byte("\t")
 	case 1:
-		seq = []byte("\x1b[27;5u")
+		s.controlActive = !s.controlActive
+		return
 	case 2:
 		seq = []byte("\x1b")
-	case 3:
-		seq = []byte("\t")
 	case 4:
-		seq = []byte("\x1b[A")
+		// Paste is requested from accessoryButton through Gio's clipboard router.
+		return
+	case 5:
+		// The gear surface is intentionally not faked; the terminal remains
+		// usable while the full iSH settings/about controller is ported.
+		return
 	case 6:
-		seq = []byte("\x7f")
+		// SoftKeyboardCmd above performs the platform action.
+		return
 	}
 	if len(seq) > 0 {
 		_ = s.session.Write(seq)
 	}
-	if index == 5 {
-		s.term.Feed([]byte("\n[paste requested]\n"))
-	}
 }
-
-var _ = event.Event(nil)
