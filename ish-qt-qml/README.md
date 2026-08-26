@@ -31,15 +31,16 @@ git restore --source ef46ed8 -- .
 
 ## تحقق Android وAlpine
 
-تم التحقق من التشغيل الفعلي النهائي عبر [GitHub Actions run 32937182527](https://github.com/mostafa637/mostafa637/actions/runs/32937182527) للالتزام `a2c57759544b43a495a4a5cda75d20ab28445e3d` على فرع `ish-qt-qml`. نجحت اختبارات Go وLLVM/Gio وبناء Linux، ونجح بناء APKين موقّعين للمعماريتين `arm64-v8a` و`x86_64`، كما نجح اختبار Android x86_64 AVD باستخدام Linux وKVM. هذا التشغيل يتضمن إصلاح readiness الذي ينتظر بدء rootfs و`ash` الحقيقي قبل إرسال أوامر smoke.
+تم التحقق من التشغيل الفعلي الأحدث عبر [GitHub Actions run 32963752976](https://github.com/mostafa637/mostafa637/actions/runs/32963752976) للالتزام `50e6f04b740c71ee0fda876d3f9a213530c7848f` على فرع `ish-qt-qml`. نجحت اختبارات Go وLLVM/Gio وبناء Linux، ونجح بناء APKين موقّعين للمعماريتين `arm64-v8a` و`x86_64`، كما نجح اختبار Android x86_64 AVD باستخدام Linux وKVM. شمل هذا الإصلاح readiness بعد نجاح تشغيل rootfs و`ash` الحقيقي، واستخدم اختبار AVD حقن keyevents متسلسلة بدلاً من `adb input text` الذي كان يقطّع الأوامر.
 
-أثبت اختبار AVD أن `GioActivity` كانت في حالة `RESUMED` ومركّزة، وأن rootfs فُك داخل مجلد التطبيق الخاص `/data/user/0/org.ish.go/files/ish-rootfs`. سجّل iSH Core أولاً `iSH Alpine session ready; rootfs and ash started`، ثم ظهر داخل logcat marker `iSH Alpine smoke marker received; Alpine release 3.19.0` بعد إرسال أوامر الاختبار، مع بقاء سجل crash فارغاً. يتضمن artifact الخاص بالـAVD لقطة الشاشة النهائية و`avd-activities.txt` و`avd-logcat.txt` وملفات تشخيص التوقّف.
+أثبت اختبار AVD أن `GioActivity` كانت في حالة `RESUMED` ومركّزة، وأن rootfs فُك داخل مجلد التطبيق الخاص `/data/user/0/org.ish.go/files/ish-rootfs`. سجّل iSH Core `phase=after-main result=0` و`phase=after-devices result=0` ثم `iSH Alpine session ready; rootfs and ash started`. بعد إرسال أوامر الاختبار عبر واجهة Gio ظهر داخل logcat مرتان marker `iSH Alpine smoke marker received; Alpine release 3.19.0`، وبقي `avd-logcat-crash.txt` فارغاً ولم يظهر `FATAL EXCEPTION` أو `ANR` للتطبيق. يتضمن artifact الخاص بالـAVD لقطة الشاشة النهائية و`avd-activities.txt` و`avd-logcat.txt` وملفات تشخيص التوقّف.
 
-هذه النتيجة تثبت تشغيل Alpine i386 الحقيقي عبر محرك iSH/Asbestos المضمّن خلف طبقة cgo، وليست تشغيل `/system/bin/sh` الخاص بالمضيف. كما أن gritty مستخدم لمعالجة parser/buffer الخاصة بالطرفية، وليس بديلاً عن محرك Alpine. واجهة Gio الحالية تطابق بنية iSH الأساسية: canvas طرفية داكن، إدخال مباشر إلى PTY، شريط accessory مضغوط بترتيب Tab/Control/Escape/Arrow ثم gear/Paste/Hide Keyboard، ومناطق لمس مستقلة للأسهم. أما صفحات الإعدادات/الملفات المتقدمة في iSH iOS فليست مدّعاة كمطابقة كاملة في هذا المسار.
+هذه النتيجة تثبت تشغيل Alpine i386 الحقيقي عبر محرك iSH/Asbestos المضمّن خلف طبقة cgo، وليست تشغيل `/system/bin/sh` الخاص بالمضيف. كما أن gritty مستخدم لمعالجة parser/buffer الخاصة بالطرفية، وليس بديلاً عن محرك Alpine. واجهة Gio الحالية تطابق بنية iSH الأساسية: canvas طرفية داكن edge-to-edge، إدخال مباشر إلى PTY، شريط accessory مضغوط بترتيب Tab/Control/Escape/Arrow ثم gear/Paste/Hide Keyboard، ومناطق لمس مستقلة للأسهم. أما صفحات الإعدادات/الملفات المتقدمة في iSH iOS فليست مدّعاة كمطابقة كاملة في هذا المسار.
 
-نفّذ workflow خطوة `apksigner verify --verbose` ونجحت للـAPKين؛ التوقيع الموثق هو APK Signature Scheme v3 بموقّع واحد. بصمات SHA-256 للـartifacts في التشغيل النهائي هي:
+نفّذ workflow خطوة `apksigner verify --verbose` ونجحت للـAPKين؛ التوقيع الموثق هو APK Signature Scheme v3 بموقّع واحد. بصمات SHA-256 للـartifacts في التشغيل الأخير هي:
 
-| ABI | SHA-256 |
+| Artifact | SHA-256 |
 | --- | --- |
-| `arm64-v8a` | `83beab4158281709d058283e067b0672bef7e5aa23bcfdb702c0e123f4fbd9e5` |
-| `x86_64` | `f9d122e1e1c9afde3530b828717198746fd96b4cc67510cdf692ea9f760e38c4` |
+| `ish-go-arm64-v8a.apk` | `bf5708cdc989717fbc5b516232de98862558113e750fa0667942d5b6c9d88f7d` |
+| `ish-go-x86_64.apk` | `7ee22015275973459ea6048cb72ee4827326b6745afd0a20e1defd5fb246faa4` |
+| `ish-go-linux-x86_64` | `a9d480a1149e8981f324068445c2f8c37f730a2ae1fd6258733f09a8e4e0a678` |
