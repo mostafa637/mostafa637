@@ -19,6 +19,12 @@ static void ishGoSmokeLog(void) {
 #endif
 }
 
+static void ishGoReadyLog(void) {
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, "iSHCore", "iSH Alpine session ready; rootfs and ash started");
+#endif
+}
+
 extern void goIshOutput(void *cookie, char *bytes, size_t length);
 extern void goIshState(void *cookie, int exit_code);
 
@@ -142,6 +148,7 @@ func startAlpine(ctx context.Context, rootPath string) (*Session, error) {
 		s.handle.Delete()
 		return nil, errors.New("session: iSH core failed to start")
 	}
+	C.ishGoReadyLog()
 	return newSession(s), nil
 }
 
