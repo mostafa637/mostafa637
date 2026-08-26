@@ -500,9 +500,9 @@ func (s *appState) accessory(gtx C) D {
 		return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
 			layout.Rigid(func(gtx C) D {
 				return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceEnd}.Layout(gtx,
-					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 0, "⇥", button) }),
-					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 1, "⌃", button) }),
-					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 2, "⎋", button) }),
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 0, "", button) }),
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 1, "", button) }),
+					layout.Rigid(func(gtx C) D { return s.accessoryButton(gtx, 2, "", button) }),
 					layout.Rigid(func(gtx C) D { return s.arrowButton(gtx, button) }),
 				)
 			}),
@@ -524,7 +524,7 @@ func (s *appState) accessoryButton(gtx C, index int, glyph string, width float32
 		gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(width))
 		gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(width))
 		return s.buttons[index].Layout(gtx, func(gtx C) D {
-			pressed := s.buttons[index].Hovered()
+			pressed := s.buttons[index].Pressed() || s.buttons[index].Hovered()
 			if s.buttons[index].Clicked(gtx) {
 				if index == 4 {
 					gtx.Execute(clipboard.ReadCmd{Tag: &s.input})
@@ -533,18 +533,14 @@ func (s *appState) accessoryButton(gtx C, index int, glyph string, width float32
 				}
 				s.sendAccessory(index)
 			}
-			paint.FillShape(gtx.Ops, keyBackground, clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
+			face := clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}
+			paint.FillShape(gtx.Ops, keyShadow, clip.RRect{Rect: image.Rect(0, 1, gtx.Constraints.Max.X, gtx.Constraints.Max.Y+1), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
+			paint.FillShape(gtx.Ops, keyBackground, face.Op(gtx.Ops))
 			if pressed || (index == 1 && s.controlActive) {
 				paint.FillShape(gtx.Ops, keySecondary, clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
 			}
-			if index >= 4 {
-				drawBarIcon(gtx, index)
-				return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
-			}
-			label := material.Label(s.theme, unit.Sp(20), glyph)
-			label.Color = keyForeground
-			label.Alignment = text.Middle
-			return layout.Center.Layout(gtx, label.Layout)
+			s.drawBarIcon(gtx, index)
+			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
 		})
 	})
 }
@@ -615,11 +611,28 @@ func (s *appState) arrowPart(gtx C, index int, glyph string, cell int) D {
 	})
 }
 
-func drawBarIcon(gtx C, index int) {
+func (s *appState) drawBarIcon(gtx C, index int) {
 	w, h := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
 	icon := keyForeground
 	centerX, centerY := w/2, h/2
 	switch index {
+	case 0: // arrow.right.to.line.compact / Tab
+		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-10, centerY-1, centerX+7, centerY+2), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX+5, centerY-8, centerX+8, centerY+9), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-3, centerY-6, centerX+1, centerY-3), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-1, centerY-4, centerX+4, centerY-1), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+	case 1: // control, rendered as a deterministic chevron
+		for _, tooth := range []image.Rectangle{
+			image.Rect(centerX-9, centerY, centerX-6, centerY+3), image.Rect(centerX-7, centerY-3, centerX-4, centerY), image.Rect(centerX-5, centerY-6, centerX-2, centerY-3),
+			image.Rect(centerX+2, centerY-6, centerX+5, centerY-3), image.Rect(centerX+4, centerY-3, centerX+7, centerY), image.Rect(centerX+6, centerY, centerX+9, centerY+3),
+		} {
+			paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: tooth, SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+		}
+	case 2: // escape
+		label := material.Label(s.theme, unit.Sp(11), "ESC")
+		label.Color = icon
+		label.Alignment = text.Middle
+		layout.Center.Layout(gtx, label.Layout)
 	case 4: // doc.on.clipboard
 		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-7, centerY-6, centerX+7, centerY+8), SE: 2, SW: 2, NE: 2, NW: 2}.Op(gtx.Ops))
 		paint.FillShape(gtx.Ops, keyBackground, clip.RRect{Rect: image.Rect(centerX-4, centerY-3, centerX+5, centerY+5), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
