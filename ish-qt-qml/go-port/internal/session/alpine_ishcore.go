@@ -81,7 +81,10 @@ func goIshOutput(cookie unsafe.Pointer, bytes *C.char, length C.size_t) {
 	s.mu.Lock()
 	if !s.markerSeen {
 		s.markerBuf = append(s.markerBuf, chunk...)
-		const maxMarkerWindow = 64
+		// Line editing and terminal control sequences can place several hundred bytes
+		// between the echoed ALP token and the release output. Keep enough of
+		// the output stream to correlate both pieces without retaining it forever.
+		const maxMarkerWindow = 4096
 		if len(s.markerBuf) > maxMarkerWindow {
 			s.markerBuf = append([]byte(nil), s.markerBuf[len(s.markerBuf)-maxMarkerWindow:]...)
 		}
