@@ -252,17 +252,19 @@ func (s *appState) terminalView(gtx C) D {
 	paint.Fill(gtx.Ops, terminalBlack)
 	// iSH's terminal is the first responder; it does not show a separate
 	// command-entry bar. Gio still needs an Editor to connect to Android IME,
-	// so keep a one-pixel transparent editor over the terminal surface.
+	// so keep a full-surface transparent editor over the terminal surface.
 	if editorEvent, changed := s.input.Update(gtx); changed {
 		s.forwardEditorEvent(editorEvent)
 	}
 	return layout.Stack{}.Layout(gtx,
 		layout.Expanded(func(gtx C) D {
-			return layout.UniformInset(unit.Dp(8)).Layout(gtx, s.renderTerminal)
+			// term.css pins #terminal to all four edges with no body margin.
+			return s.renderTerminal(gtx)
 		}),
 		layout.Stacked(func(gtx C) D {
-			gtx.Constraints.Min = image.Pt(1, 1)
-			gtx.Constraints.Max = image.Pt(1, 1)
+			// Keep the editor full-size but visually transparent. Android IME
+			// needs a real focus target; a 1x1 target is easily lost during
+			// resize and does not behave like iSH's first-responder terminal.
 			style := material.Editor(s.theme, &s.input, "")
 			style.TextSize = unit.Sp(1)
 			style.LineHeight = unit.Sp(1)
@@ -491,7 +493,7 @@ func metricsForWidth(widthDp float32) barMetrics {
 }
 
 func (s *appState) accessory(gtx C) D {
-	paint.Fill(gtx.Ops, barBackground)
+	paint.FillShape(gtx.Ops, barBackground, clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}.Op())
 	metrics := metricsForWidth(float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp)
 	button := metrics.button
 	height := metrics.barHeight
