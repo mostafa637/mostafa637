@@ -7,6 +7,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"image/png"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,7 +15,9 @@ import (
 	"strings"
 
 	"gioui.org/app"
+	"gioui.org/f32"
 	giofont "gioui.org/font"
+	"gioui.org/font/opentype"
 	"gioui.org/io/clipboard"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
@@ -42,6 +45,47 @@ var embeddedRootfs []byte
 //
 //go:embed assets/meta.db
 var embeddedMetadata []byte
+
+// These are the actual template assets from iSH's Assets.xcassets. The PDFs
+// remain beside the PNGs as provenance; the PNGs are rasterized from those
+// PDFs at high resolution and keep their original alpha contours.
+//
+//go:embed assets/icons/paste-original.png
+var pasteOriginalPNG []byte
+
+//go:embed assets/icons/hide-keyboard-original.png
+var hideKeyboardOriginalPNG []byte
+
+// DejaVu Sans contains the exact Unicode characters used as titles by the
+// original storyboard (⇥, ⌃, ⎋, and the arrows). Bundling it prevents Android
+// font fallback from silently dropping those glyphs.
+//
+//go:embed assets/fonts/DejaVuSans.ttf
+var embeddedSymbolFont []byte
+
+var (
+	pasteOriginalIcon        = decodeEmbeddedIcon(pasteOriginalPNG)
+	hideKeyboardOriginalIcon = decodeEmbeddedIcon(hideKeyboardOriginalPNG)
+)
+
+func decodeEmbeddedIcon(data []byte) image.Image {
+	icon, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		panic("decode embedded iSH icon: " + err.Error())
+	}
+	return icon
+}
+
+func newThemeWithOriginalGlyphFont() *material.Theme {
+	theme := material.NewTheme()
+	faces, err := opentype.ParseCollection(embeddedSymbolFont)
+	if err != nil {
+		log.Printf("iSH original glyph font unavailable: %v", err)
+		return theme
+	}
+	theme.Shaper = text.NewShaper(text.WithCollection(faces))
+	return theme
+}
 
 type C = layout.Context
 type D = layout.Dimensions
@@ -96,7 +140,7 @@ func main() {
 
 func run(w *app.Window) error {
 	state := &appState{
-		theme:   material.NewTheme(),
+		theme:   newThemeWithOriginalGlyphFont(),
 		term:    terminal.New(100, 30),
 		startCh: make(chan sessionStartResult, 1),
 	}
@@ -635,8 +679,9 @@ func (s *appState) arrowPart(gtx C, index int, width, height int) D {
 		if s.arrows[index].Pressed() || s.arrows[index].Hovered() {
 			paint.FillShape(gtx.Ops, keySecondary, clip.Rect{Max: image.Pt(width, height)}.Op())
 		}
+		// ArrowBarButton.m uses these four system-font glyphs at 15pt.
 		glyphs := []string{"↑", "↓", "←", "→"}
-		label := material.Label(s.theme, unit.Sp(10), glyphs[index])
+		label := material.Label(s.theme, unit.Sp(15), glyphs[index])
 		label.Color = keyForeground
 		label.Alignment = text.Middle
 		return layout.Center.Layout(gtx, label.Layout)
@@ -644,46 +689,50 @@ func (s *appState) arrowPart(gtx C, index int, width, height int) D {
 }
 
 func (s *appState) drawBarIcon(gtx C, index int) {
-	w, h := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
-	icon := keyForeground
-	centerX, centerY := w/2, h/2
 	switch index {
-	case 0: // arrow.right.to.line.compact / Tab
-		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-10, centerY-1, centerX+7, centerY+2), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX+5, centerY-8, centerX+8, centerY+9), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-3, centerY-6, centerX+1, centerY-3), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-1, centerY-4, centerX+4, centerY-1), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
-	case 1: // control, rendered as a deterministic chevron
-		for _, tooth := range []image.Rectangle{
-			image.Rect(centerX-9, centerY, centerX-6, centerY+3), image.Rect(centerX-7, centerY-3, centerX-4, centerY), image.Rect(centerX-5, centerY-6, centerX-2, centerY-3),
-			image.Rect(centerX+2, centerY-6, centerX+5, centerY-3), image.Rect(centerX+4, centerY-3, centerX+7, centerY), image.Rect(centerX+6, centerY, centerX+9, centerY+3),
-		} {
-			paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: tooth, SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
-		}
-	case 2: // escape
-		label := material.Label(s.theme, unit.Sp(11), "ESC")
-		label.Color = icon
-		label.Alignment = text.Middle
-		layout.Center.Layout(gtx, label.Layout)
-	case 4: // doc.on.clipboard
-		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-7, centerY-6, centerX+7, centerY+8), SE: 2, SW: 2, NE: 2, NW: 2}.Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, keyBackground, clip.RRect{Rect: image.Rect(centerX-4, centerY-3, centerX+5, centerY+5), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-3, centerY-9, centerX+4, centerY-5), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
-	case 5: // gear
-		for _, tooth := range []image.Rectangle{
-			image.Rect(centerX-2, centerY-10, centerX+2, centerY-4), image.Rect(centerX-2, centerY+4, centerX+2, centerY+10),
-			image.Rect(centerX-10, centerY-2, centerX-4, centerY+2), image.Rect(centerX+4, centerY-2, centerX+10, centerY+2),
-		} {
-			paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: tooth, SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
-		}
-		paint.FillShape(gtx.Ops, icon, clip.Ellipse(image.Rect(centerX-7, centerY-7, centerX+7, centerY+7)).Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, keyBackground, clip.Ellipse(image.Rect(centerX-3, centerY-3, centerX+3, centerY+3)).Op(gtx.Ops))
-	case 6: // keyboard.chevron.compact.down
-		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-11, centerY-7, centerX+11, centerY+4), SE: 2, SW: 2, NE: 2, NW: 2}.Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, keyBackground, clip.RRect{Rect: image.Rect(centerX-7, centerY-4, centerX+7, centerY-2), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX-5, centerY+5, centerX-2, centerY+9), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, icon, clip.RRect{Rect: image.Rect(centerX+2, centerY+5, centerX+5, centerY+9), SE: 1, SW: 1, NE: 1, NW: 1}.Op(gtx.Ops))
+	case 0: // The storyboard title is exactly "⇥".
+		s.drawOriginalGlyph(gtx, "⇥", unit.Sp(20))
+	case 1: // The storyboard title is exactly "⌃".
+		s.drawOriginalGlyph(gtx, "⌃", unit.Sp(20))
+	case 2: // The storyboard title is exactly "⎋".
+		s.drawOriginalGlyph(gtx, "⎋", unit.Sp(24))
+	case 4: // Assets.xcassets/Paste.imageset/Paste.pdf.
+		drawTemplateIcon(gtx, pasteOriginalIcon, 20)
+	case 5: // UIKit buttonType=infoLight, accessibility label "Settings".
+		s.drawOriginalGlyph(gtx, "ⓘ", unit.Sp(22))
+	case 6: // Assets.xcassets/Hide Keyboard.imageset/Hide Keyboard.pdf.
+		drawTemplateIcon(gtx, hideKeyboardOriginalIcon, 32)
 	}
+}
+
+func (s *appState) drawOriginalGlyph(gtx C, glyph string, size unit.Sp) {
+	label := material.Label(s.theme, size, glyph)
+	label.Color = keyForeground
+	label.Alignment = text.Middle
+	// This family is bundled above, so the storyboard glyphs do not depend on
+	// whichever Android system font happens to be installed.
+	label.Font.Typeface = "DejaVu Sans"
+	layout.Center.Layout(gtx, label.Layout)
+}
+
+func drawTemplateIcon(gtx C, icon image.Image, sizeDp float32) {
+	if icon == nil {
+		return
+	}
+	bounds := icon.Bounds()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		return
+	}
+	target := gtx.Dp(unit.Dp(sizeDp))
+	scale := float32(target) / float32(maxInt(bounds.Dx(), bounds.Dy()))
+	width := maxInt(1, int(float32(bounds.Dx())*scale))
+	height := maxInt(1, int(float32(bounds.Dy())*scale))
+	x := (gtx.Constraints.Max.X - width) / 2
+	y := (gtx.Constraints.Max.Y - height) / 2
+	transform := op.Affine(f32.AffineId().Scale(f32.Point{}, f32.Pt(scale, scale)).Offset(f32.Pt(float32(x), float32(y))))
+	stack := transform.Push(gtx.Ops)
+	paint.NewImageOp(icon).Add(gtx.Ops)
+	stack.Pop()
 }
 
 func (s *appState) sendArrow(index int) {
