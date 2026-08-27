@@ -282,7 +282,7 @@ jobs:
   test-android-arm64-avd:
     name: Go/Gio Android arm64-v8a AVD smoke test
     needs: build-android
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 55
     steps:
       - name: Checkout
@@ -302,6 +302,15 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-${ANDROID_TARGET_SDK}" "build-tools;${ANDROID_BUILD_TOOLS}" "emulator" "system-images;android-35;google_apis;arm64-v8a"
 
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -e /dev/kvm
+          ls -l /dev/kvm
+
       - name: Download arm64 Gio APK
         uses: actions/download-artifact@v4
         with:
@@ -315,9 +324,9 @@ jobs:
           target: google_apis
           arch: arm64-v8a
           profile: pixel_2
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot -no-accel
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
           disable-animations: true
-          emulator-boot-timeout: 900
+          emulator-boot-timeout: 600
           script: |
             set -e; for i in $(seq 1 180); do state=$(adb -s emulator-5554 get-state 2>/dev/null || true); [ "$state" = device ] && break; sleep 5; done; test "$(adb -s emulator-5554 get-state 2>/dev/null)" = device; trap 'status=$?; adb devices > arm64-avd-adb-devices.txt 2>&1 || true; adb -s emulator-5554 shell getprop > arm64-avd-getprop.txt 2>&1 || true; adb -s emulator-5554 shell dumpsys activity activities > arm64-avd-activities.txt 2>&1 || true; adb -s emulator-5554 logcat -d > arm64-avd-logcat.txt 2>&1 || true; adb -s emulator-5554 logcat -d -b crash > arm64-avd-logcat-crash.txt 2>&1 || true; adb -s emulator-5554 shell ls -l /data/tombstones > arm64-avd-tombstones.txt 2>&1 || true; adb -s emulator-5554 shell screencap -p /sdcard/ish-go-arm64-diagnostic.png >/dev/null 2>&1 || true; adb -s emulator-5554 pull /sdcard/ish-go-arm64-diagnostic.png arm64-avd-ish-go-diagnostic.png >/dev/null 2>&1 || true; exit "$status"' 0; adb devices; test -s apk/ish-go-arm64-v8a.apk; adb -s emulator-5554 install -r apk/ish-go-arm64-v8a.apk; adb -s emulator-5554 shell pm list packages > arm64-avd-packages.txt; grep -q 'org.ish.go' arm64-avd-packages.txt; adb -s emulator-5554 shell monkey -p org.ish.go -c android.intent.category.LAUNCHER 1; ready=; for i in $(seq 1 90); do ready_log=$(adb -s emulator-5554 logcat -d -s iSHCore:I '*:S' 2>/dev/null || true); if printf '%s' "$ready_log" | grep -q 'iSH Alpine session ready'; then ready=1; break; fi; sleep 5; done; test -n "$ready"; sleep 3; adb -s emulator-5554 logcat -d > arm64-avd-logcat.txt; grep -q 'iSH Alpine session ready' arm64-avd-logcat.txt; grep -q 'iSH Alpine smoke marker received' arm64-avd-logcat.txt; test ! -s arm64-avd-logcat-crash.txt || ! grep -q 'FATAL EXCEPTION\|SIGSEGV\|Fatal signal' arm64-avd-logcat-crash.txt; adb -s emulator-5554 shell screencap -p /sdcard/ish-go-arm64.png; adb -s emulator-5554 pull /sdcard/ish-go-arm64.png arm64-avd-ish-go.png
 
