@@ -13,14 +13,17 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/f32"
 	giofont "gioui.org/font"
 	"gioui.org/font/opentype"
+	"gioui.org/gesture"
 	"gioui.org/io/clipboard"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -90,15 +93,22 @@ func newThemeWithOriginalGlyphFont() *material.Theme {
 type C = layout.Context
 type D = layout.Dimensions
 
+const arrowNone = -1
+
 type appState struct {
 	theme *material.Theme
 	input widget.Editor
 	term  *terminal.Terminal
 
 	buttons [7]widget.Clickable
-	arrows  [4]widget.Clickable
 	ops     op.Ops
 	session *session.Session
+
+	arrowDrag       gesture.Drag
+	arrowStart      f32.Point
+	arrowDirection  int
+	arrowPressed    bool
+	arrowNextRepeat time.Time
 
 	startTried    bool
 	startDone     bool
@@ -140,9 +150,10 @@ func main() {
 
 func run(w *app.Window) error {
 	state := &appState{
-		theme:   newThemeWithOriginalGlyphFont(),
-		term:    terminal.New(100, 30),
-		startCh: make(chan sessionStartResult, 1),
+		theme:          newThemeWithOriginalGlyphFont(),
+		term:           terminal.New(100, 30),
+		startCh:        make(chan sessionStartResult, 1),
+		arrowDirection: arrowNone,
 	}
 	state.input.SingleLine = false
 	state.input.Submit = false
@@ -617,9 +628,22 @@ func (s *appState) arrowButton(gtx C, width, height float32) D {
 			face := clip.RRect{Rect: image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y), SE: 5, SW: 5, NE: 5, NW: 5}
 			paint.FillShape(gtx.Ops, keyShadow, clip.RRect{Rect: image.Rect(0, 1, gtx.Constraints.Max.X, gtx.Constraints.Max.Y+1), SE: 5, SW: 5, NE: 5, NW: 5}.Op(gtx.Ops))
 			paint.FillShape(gtx.Ops, keyBackground, face.Op(gtx.Ops))
+			if s.arrowPressed {
+				paint.FillShape(gtx.Ops, keySecondary, face.Op(gtx.Ops))
+			}
 			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
 		}),
 		layout.Stacked(func(gtx C) D {
+			s.arrowDrag.Add(gtx.Ops)
+			for {
+				event, ok := s.arrowDrag.Update(gtx.Metric, gtx.Source, gesture.Both)
+				if !ok {
+					break
+				}
+				s.handleArrowEvent(gtx, event)
+			}
+			s.tickArrowRepeat(gtx.Now)
+
 			width := gtx.Constraints.Max.X
 			height := gtx.Constraints.Max.Y
 			col := width / 3
@@ -669,23 +693,83 @@ func arrowBlank(gtx C, width, height int) D {
 	return layout.Dimensions{Size: image.Pt(width, height)}
 }
 
-func (s *appState) arrowPart(gtx C, index int, width, height int) D {
+func arrowDirectionFromDelta(dx, dy, threshold float32) int {
+	if dx*dx+dy*dy < threshold*threshold {
+		return arrowNone
+	}
+	if absFloat32(dx) > absFloat32(dy) {
+		if dx > 0 {
+			return 3 // ArrowRight
+		}
+		return 2 // ArrowLeft
+	}
+	if dy > 0 {
+		return 1 // ArrowDown
+	}
+	return 0 // ArrowUp
+}
+
+func absFloat32(value float32) float32 {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func (s *appState) handleArrowEvent(gtx C, event pointer.Event) {
+	switch event.Kind {
+	case pointer.Press:
+		s.arrowPressed = true
+		s.arrowStart = event.Position
+		s.setArrowDirection(arrowNone, gtx.Now)
+	case pointer.Drag:
+		if !s.arrowPressed {
+			return
+		}
+		threshold := float32(gtx.Dp(unit.Dp(20)))
+		delta := event.Position.Sub(s.arrowStart)
+		s.setArrowDirection(arrowDirectionFromDelta(delta.X, delta.Y, threshold), gtx.Now)
+	case pointer.Release, pointer.Cancel:
+		s.arrowPressed = false
+		s.arrowDirection = arrowNone
+		s.arrowNextRepeat = time.Time{}
+	}
+}
+
+func (s *appState) setArrowDirection(direction int, now time.Time) {
+	if direction == s.arrowDirection {
+		return
+	}
+	s.arrowDirection = direction
+	s.arrowNextRepeat = time.Time{}
+	if direction != arrowNone {
+		s.sendArrow(direction)
+		s.arrowNextRepeat = now.Add(500 * time.Millisecond)
+	}
+}
+
+func (s *appState) tickArrowRepeat(now time.Time) {
+	if !s.arrowPressed || s.arrowDirection == arrowNone || s.arrowNextRepeat.IsZero() || now.Before(s.arrowNextRepeat) {
+		return
+	}
+	for !now.Before(s.arrowNextRepeat) {
+		s.sendArrow(s.arrowDirection)
+		s.arrowNextRepeat = s.arrowNextRepeat.Add(100 * time.Millisecond)
+	}
+}
+
+func (s *appState) arrowPart(gtx C, index, width, height int) D {
 	gtx.Constraints.Min = image.Pt(width, height)
 	gtx.Constraints.Max = image.Pt(width, height)
-	return s.arrows[index].Layout(gtx, func(gtx C) D {
-		if s.arrows[index].Clicked(gtx) {
-			s.sendArrow(index)
-		}
-		if s.arrows[index].Pressed() || s.arrows[index].Hovered() {
-			paint.FillShape(gtx.Ops, keySecondary, clip.Rect{Max: image.Pt(width, height)}.Op())
-		}
-		// ArrowBarButton.m uses these four system-font glyphs at 15pt.
-		glyphs := []string{"↑", "↓", "←", "→"}
-		label := material.Label(s.theme, unit.Sp(15), glyphs[index])
+	glyphs := []string{"↑", "↓", "←", "→"}
+	label := material.Label(s.theme, unit.Sp(15), glyphs[index])
+	label.Alignment = text.Middle
+	if s.arrowPressed && s.arrowDirection != arrowNone && s.arrowDirection != index {
+		label.Color = color.NRGBA{R: 255, G: 255, B: 255, A: 64}
+	} else {
 		label.Color = keyForeground
-		label.Alignment = text.Middle
-		return layout.Center.Layout(gtx, label.Layout)
-	})
+	}
+	return layout.Center.Layout(gtx, label.Layout)
 }
 
 func (s *appState) drawBarIcon(gtx C, index int) {

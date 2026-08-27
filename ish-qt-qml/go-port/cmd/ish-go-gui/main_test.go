@@ -59,6 +59,28 @@ func TestTerminalInputBytes(t *testing.T) {
 	}
 }
 
+func TestArrowDirectionFromDelta(t *testing.T) {
+	tests := []struct {
+		name, want string
+		dx, dy     float32
+	}{
+		{name: "below slop", dx: 19, dy: 0, want: "none"},
+		{name: "up", dx: 0, dy: -21, want: "up"},
+		{name: "down", dx: 0, dy: 21, want: "down"},
+		{name: "left", dx: -22, dy: 3, want: "left"},
+		{name: "right", dx: 22, dy: -3, want: "right"},
+	}
+	labels := map[int]string{arrowNone: "none", 0: "up", 1: "down", 2: "left", 3: "right"}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := labels[arrowDirectionFromDelta(test.dx, test.dy, 20)]
+			if got != test.want {
+				t.Fatalf("arrowDirectionFromDelta(%v, %v, 20) = %q; want %q", test.dx, test.dy, got, test.want)
+			}
+		})
+	}
+}
+
 func TestMetricsForWidth(t *testing.T) {
 	tests := []struct {
 		width, button, horizontal, vertical, barHeight, gap float32
