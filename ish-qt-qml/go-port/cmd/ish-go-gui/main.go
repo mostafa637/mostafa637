@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -123,6 +124,8 @@ type appState struct {
 	arrowNextRepeat time.Time
 
 	page           pageID
+	prefs          userPreferences
+	prefsPath      string
 	backButton     widget.Clickable
 	settingsRows   [5]widget.Clickable
 	appearanceRows [7]widget.Clickable
@@ -180,11 +183,19 @@ func main() {
 }
 
 func run(w *app.Window) error {
+	prefsPath := preferenceFilePath()
+	prefs, err := loadUserPreferences(prefsPath)
+	if err != nil {
+		log.Printf("iSH preferences load failed: %v", err)
+		prefs = defaultUserPreferences()
+	}
 	state := &appState{
 		theme:          newThemeWithOriginalGlyphFont(),
 		term:           terminal.New(100, 30),
 		startCh:        make(chan sessionStartResult, 1),
 		arrowDirection: arrowNone,
+		prefs:          prefs,
+		prefsPath:      prefsPath,
 	}
 	state.input.SingleLine = false
 	state.input.Submit = false
@@ -198,8 +209,11 @@ func run(w *app.Window) error {
 	state.browserList.List.Axis = layout.Vertical
 	state.aboutList.List.Axis = layout.Vertical
 	state.keepScreenOn.Value = false
-	state.blinkCursor.Value = true
-	state.hideStatusBar.Value = false
+	state.blinkCursor.Value = state.prefs.BlinkCursor
+	state.hideStatusBar.Value = state.prefs.HideStatusBar
+	if err := saveUserPreferences(state.prefsPath, state.prefs); err != nil {
+		log.Printf("iSH preferences initial save failed: %v", err)
+	}
 
 	for {
 		e := w.Event()
@@ -233,6 +247,7 @@ func run(w *app.Window) error {
 			}
 			state.drainOutput()
 			state.layout(gtx)
+			state.syncPreferences()
 			e.Frame(&state.ops)
 			w.Invalidate()
 		case app.DestroyEvent:
@@ -342,8 +357,10 @@ func (s *appState) handleKey(e key.Event) {
 	if s.session == nil {
 		return
 	}
-	if e.Name == key.NameEscape {
-		_ = s.session.Write([]byte("\x1b"))
+	if payload, handled := terminalKeyEventBytes(e, s.prefs); handled {
+		if err := s.session.Write(payload); err != nil {
+			log.Printf("iSH GUI hardware key failed: %v", err)
+		}
 	}
 }
 
@@ -352,7 +369,7 @@ func (s *appState) layout(gtx C) {
 		s.pageView(gtx)
 		return
 	}
-	paint.Fill(gtx.Ops, terminalBlack)
+	paint.Fill(gtx.Ops, s.terminalPalette().background)
 	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx C) D {
 			return s.terminalView(gtx)
@@ -549,17 +566,69 @@ func (s *appState) appearancePage(gtx C) D {
 
 func (s *appState) appearanceRow(gtx C, index int) D {
 	titles := []string{"Theme", "Font", "Font Size", "Color Scheme", "Cursor Style", "Blink Cursor", "Hide Status Bar"}
-	details := []string{"Default", "DejaVu Sans Mono", "12 pt", "Match System", "Block", "", ""}
+	details := []string{
+		s.prefs.Theme,
+		s.prefs.FontFamily,
+		fmt.Sprintf("%.0f pt", s.prefs.FontSize),
+		colorSchemeName(s.prefs.ColorScheme),
+		cursorStyleName(s.prefs.CursorStyle),
+		"",
+		"",
+	}
 	if index == 5 {
-		return s.switchRow(gtx, &s.blinkCursor, titles[index], true)
+		return s.switchRow(gtx, &s.blinkCursor, titles[index])
 	}
 	if index == 6 {
-		return s.switchRow(gtx, &s.hideStatusBar, titles[index], false)
+		return s.switchRow(gtx, &s.hideStatusBar, titles[index])
 	}
-	return s.pageRow(gtx, &s.appearanceRows[index], titles[index], details[index], nil)
+	var action func()
+	switch index {
+	case 0:
+		action = func() {
+			s.updatePreferences(func(p *userPreferences) {
+				switch p.Theme {
+				case "Default":
+					p.Theme = "1337"
+				case "1337":
+					p.Theme = "Solarized"
+				case "Solarized":
+					p.Theme = "Hot Dog Stand"
+				default:
+					p.Theme = "Default"
+				}
+			})
+		}
+	case 1:
+		action = func() {
+			s.updatePreferences(func(p *userPreferences) {
+				if p.FontFamily == "monospace" {
+					p.FontFamily = "DejaVu Sans Mono"
+				} else {
+					p.FontFamily = "monospace"
+				}
+			})
+		}
+	case 2:
+		action = func() {
+			s.updatePreferences(func(p *userPreferences) { p.FontSize = nextFontSize(p.FontSize) })
+		}
+	case 3:
+		action = func() {
+			s.updatePreferences(func(p *userPreferences) {
+				p.ColorScheme = (p.ColorScheme + 1) % 3
+			})
+		}
+	case 4:
+		action = func() {
+			s.updatePreferences(func(p *userPreferences) {
+				p.CursorStyle = (p.CursorStyle + 1) % 3
+			})
+		}
+	}
+	return s.pageRow(gtx, &s.appearanceRows[index], titles[index], details[index], action)
 }
 
-func (s *appState) switchRow(gtx C, value *widget.Bool, title string, enabled bool) D {
+func (s *appState) switchRow(gtx C, value *widget.Bool, title string) D {
 	height := gtx.Dp(unit.Dp(52))
 	gtx.Constraints.Min = image.Pt(gtx.Constraints.Max.X, height)
 	gtx.Constraints.Max.Y = height
@@ -593,8 +662,60 @@ func (s *appState) externalKeyboardPage(gtx C) D {
 
 func (s *appState) externalRow(gtx C, index int) D {
 	titles := []string{"Caps Lock Mapping", "Option Mapping", "Backtick Maps Escape", "Override Control-Space"}
-	details := []string{"Control", "None", "Off", "Off"}
-	return s.pageRow(gtx, &s.externalRows[index], titles[index], details[index], nil)
+	details := []string{
+		capsLockMappingName(s.prefs.CapsLockMapping),
+		optionMappingName(s.prefs.OptionMapping),
+		boolPreferenceName(s.prefs.BacktickMapEscape),
+		boolPreferenceName(s.prefs.OverrideControlSpace),
+	}
+	return s.pageRow(gtx, &s.externalRows[index], titles[index], details[index], func() {
+		s.updatePreferences(func(p *userPreferences) {
+			switch index {
+			case 0:
+				p.CapsLockMapping = (p.CapsLockMapping + 1) % 3
+			case 1:
+				p.OptionMapping = (p.OptionMapping + 1) % 2
+			case 2:
+				p.BacktickMapEscape = !p.BacktickMapEscape
+			case 3:
+				p.OverrideControlSpace = !p.OverrideControlSpace
+			}
+		})
+	})
+}
+
+func boolPreferenceName(value bool) string {
+	if value {
+		return "On"
+	}
+	return "Off"
+}
+
+func terminalKeyEventBytes(e key.Event, prefs userPreferences) ([]byte, bool) {
+	if e.Modifiers == 0 {
+		switch e.Name {
+		case key.NameEscape:
+			return []byte("\x1b"), true
+		case key.NameUpArrow:
+			return []byte("\x1b[A"), true
+		case key.NameDownArrow:
+			return []byte("\x1b[B"), true
+		case key.NameLeftArrow:
+			return []byte("\x1b[D"), true
+		case key.NameRightArrow:
+			return []byte("\x1b[C"), true
+		}
+		if string(e.Name) == "`" && prefs.BacktickMapEscape {
+			return []byte("\x1b"), true
+		}
+	}
+	if e.Modifiers.Contain(key.ModAlt) && prefs.OptionMapping == optionEscape && isMetaKey(string(e.Name)) {
+		return append([]byte{'\x1b'}, []byte(string(e.Name))...), true
+	}
+	if e.Modifiers.Contain(key.ModCtrl) && prefs.OverrideControlSpace && e.Name == key.NameSpace {
+		return []byte{0}, true
+	}
+	return nil, false
 }
 
 func (s *appState) filesystemsPage(gtx C) D {
@@ -675,7 +796,7 @@ func (s *appState) aboutRow(gtx C, index int) D {
 }
 
 func (s *appState) terminalView(gtx C) D {
-	paint.Fill(gtx.Ops, terminalBlack)
+	paint.Fill(gtx.Ops, s.terminalPalette().background)
 	// iSH's terminal is the first responder; it does not show a separate
 	// command-entry bar. Gio still needs an Editor to connect to Android IME,
 	// so keep a full-surface transparent editor over the terminal surface.
@@ -792,11 +913,69 @@ func controlByte(ch rune) (byte, bool) {
 	return byte(ch) ^ 0x40, true
 }
 
+type terminalPalette struct {
+	foreground color.NRGBA
+	background color.NRGBA
+	cursor     color.NRGBA
+}
+
+func (s *appState) terminalPalette() terminalPalette {
+	dark := s.prefs.ColorScheme == colorAlwaysDark
+	if s.prefs.ColorScheme == colorMatchSystem {
+		// Gio does not expose a portable system-appearance query. Keep the
+		// default theme light on the light Android/Linux environments used by
+		// iSH, while allowing deterministic dark-mode tests through the env var.
+		dark = os.Getenv("ISH_DARK_MODE") == "1"
+	}
+	palette := terminalPalette{
+		foreground: color.NRGBA{R: 0, G: 0, B: 0, A: 255},
+		background: color.NRGBA{R: 255, G: 255, B: 255, A: 255},
+		cursor:     color.NRGBA{R: 0, G: 0, B: 0, A: 255},
+	}
+	switch s.prefs.Theme {
+	case "1337":
+		palette.foreground = color.NRGBA{R: 0, G: 255, B: 0, A: 255}
+		palette.background = color.NRGBA{R: 0, G: 0, B: 0, A: 255}
+	case "Solarized":
+		if dark {
+			palette.foreground = color.NRGBA{R: 131, G: 148, B: 150, A: 255}
+			palette.background = color.NRGBA{R: 0, G: 43, B: 54, A: 255}
+		} else {
+			palette.foreground = color.NRGBA{R: 101, G: 123, B: 131, A: 255}
+			palette.background = color.NRGBA{R: 253, G: 246, B: 227, A: 255}
+		}
+	case "Hot Dog Stand":
+		palette.foreground = color.NRGBA{R: 255, G: 255, B: 0, A: 255}
+		palette.background = color.NRGBA{R: 255, G: 0, B: 0, A: 255}
+	default:
+		if dark {
+			palette.foreground = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+			palette.background = color.NRGBA{R: 0, G: 0, B: 0, A: 255}
+		}
+	}
+	palette.cursor = palette.foreground
+	return palette
+}
+
+func maxFloat32(a, b float32) float32 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func (s *appState) terminalTypeface() giofont.Typeface {
+	if s.prefs.FontFamily == "DejaVu Sans Mono" {
+		// The embedded font is DejaVu Sans; use its registered family on
+		// Android/Linux instead of relying on an uninstalled Mono alias.
+		return giofont.Typeface("DejaVu Sans")
+	}
+	return giofont.Typeface(s.prefs.FontFamily)
+}
+
 func (s *appState) renderTerminal(gtx C) D {
-	const (
-		cellWidthDp  = float32(9)
-		cellHeightDp = float32(17)
-	)
+	cellWidthDp := maxFloat32(7, s.prefs.FontSize*0.6)
+	cellHeightDp := maxFloat32(12, s.prefs.FontSize*1.35)
 	widthDp := float32(gtx.Constraints.Max.X) / gtx.Metric.PxPerDp
 	heightDp := float32(gtx.Constraints.Max.Y) / gtx.Metric.PxPerDp
 	cols := maxInt(1, int(widthDp/cellWidthDp))
@@ -816,9 +995,9 @@ func (s *appState) renderTerminal(gtx C) D {
 	if len(runes) > cols*rows {
 		runes = runes[:cols*rows]
 	}
-	fontStyle := material.Label(s.theme, unit.Sp(15), "")
-	fontStyle.Font.Typeface = "monospace"
-	fontStyle.LineHeight = unit.Sp(17)
+	fontStyle := material.Label(s.theme, unit.Sp(s.prefs.FontSize), "")
+	fontStyle.Font.Typeface = s.terminalTypeface()
+	fontStyle.LineHeight = unit.Sp(cellHeightDp)
 	fontStyle.LineHeightScale = 1
 
 	cellWidth := maxInt(1, int(cellWidthDp*gtx.Metric.PxPerDp))
@@ -839,9 +1018,9 @@ func (s *appState) renderTerminal(gtx C) D {
 			y := row * cellHeight
 			w := (col - start) * cellWidth
 			push := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
-			paint.FillShape(gtx.Ops, cellBackground(line[start]), clip.Rect{Max: image.Pt(w, cellHeight)}.Op())
+			paint.FillShape(gtx.Ops, s.cellBackground(line[start]), clip.Rect{Max: image.Pt(w, cellHeight)}.Op())
 			fontStyle.Text = textValue
-			fontStyle.Color = cellForeground(line[start])
+			fontStyle.Color = s.cellForeground(line[start])
 			if brush.Bold {
 				fontStyle.Font.Weight = giofont.Bold
 			} else {
@@ -856,9 +1035,20 @@ func (s *appState) renderTerminal(gtx C) D {
 	}
 
 	cursor := s.term.Cursor()
-	if cursor.X >= 0 && cursor.X < cols && cursor.Y >= 0 && cursor.Y < rows {
+	if cursor.X >= 0 && cursor.X < cols && cursor.Y >= 0 && cursor.Y < rows && cursorVisible(gtx.Now, s.prefs.BlinkCursor) {
 		push := op.Offset(image.Pt(cursor.X*cellWidth, cursor.Y*cellHeight)).Push(gtx.Ops)
-		paint.FillShape(gtx.Ops, color.NRGBA{R: 235, G: 235, B: 235, A: 145}, clip.Rect{Max: image.Pt(cellWidth, cellHeight)}.Op())
+		cursorColor := s.terminalPalette().cursor
+		switch s.prefs.CursorStyle {
+		case cursorBeam:
+			paint.FillShape(gtx.Ops, cursorColor, clip.Rect{Max: image.Pt(maxInt(2, gtx.Dp(unit.Dp(2))), cellHeight)}.Op())
+		case cursorUnderline:
+			cursorHeight := maxInt(2, gtx.Dp(unit.Dp(2)))
+			shift := op.Offset(image.Pt(0, cellHeight-cursorHeight)).Push(gtx.Ops)
+			paint.FillShape(gtx.Ops, cursorColor, clip.Rect{Max: image.Pt(cellWidth, cursorHeight)}.Op())
+			shift.Pop()
+		default:
+			paint.FillShape(gtx.Ops, cursorColor, clip.Rect{Max: image.Pt(cellWidth, cellHeight)}.Op())
+		}
 		push.Pop()
 	}
 	return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
@@ -883,25 +1073,32 @@ func cellsText(cells []buffer.BrushedRune) string {
 	return b.String()
 }
 
-func cellForeground(cell buffer.BrushedRune) color.NRGBA {
+func cursorVisible(now time.Time, blink bool) bool {
+	if !blink {
+		return true
+	}
+	return (now.UnixNano()/500_000_000)%2 == 0
+}
+
+func (s *appState) cellForeground(cell buffer.BrushedRune) color.NRGBA {
 	if cell.Brush.Invert {
-		return cellBackground(cell)
+		return s.cellBackground(buffer.BrushedRune{Brush: buffer.Brush{FG: cell.Brush.BG, BG: cell.Brush.FG}})
 	}
 	if cell.Brush.FG == buffer.DefaultFG {
-		return color.NRGBA{R: 235, G: 235, B: 235, A: 255}
+		return s.terminalPalette().foreground
 	}
 	return ansiColor(cell.Brush.FG)
 }
 
-func cellBackground(cell buffer.BrushedRune) color.NRGBA {
+func (s *appState) cellBackground(cell buffer.BrushedRune) color.NRGBA {
 	if cell.Brush.Invert {
 		if cell.Brush.FG == buffer.DefaultFG {
-			return color.NRGBA{R: 235, G: 235, B: 235, A: 255}
+			return s.terminalPalette().foreground
 		}
 		return ansiColor(cell.Brush.FG)
 	}
 	if cell.Brush.BG == buffer.DefaultBG {
-		return terminalBlack
+		return s.terminalPalette().background
 	}
 	return ansiColor(cell.Brush.BG)
 }

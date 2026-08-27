@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"path/filepath"
 	"testing"
+
+	"gioui.org/io/key"
 )
 
 func TestControlByteMatchesISH(t *testing.T) {
@@ -102,6 +105,71 @@ func TestMetricsForWidth(t *testing.T) {
 	}
 	if metricsForWidth(700).showHideKeyboard {
 		t.Fatal("wide iPad layout must omit the hide-keyboard control")
+	}
+}
+
+func TestUserPreferencesRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "user-preferences.json")
+	want := defaultUserPreferences()
+	want.Theme = "Solarized"
+	want.FontFamily = "DejaVu Sans Mono"
+	want.FontSize = 18
+	want.ColorScheme = colorAlwaysDark
+	want.CursorStyle = cursorUnderline
+	want.BlinkCursor = true
+	want.BacktickMapEscape = true
+	want.OptionMapping = optionEscape
+	if err := saveUserPreferences(path, want); err != nil {
+		t.Fatalf("saveUserPreferences: %v", err)
+	}
+	got, err := loadUserPreferences(path)
+	if err != nil {
+		t.Fatalf("loadUserPreferences: %v", err)
+	}
+	if got != want {
+		t.Fatalf("round trip = %+v; want %+v", got, want)
+	}
+}
+
+func TestUserPreferencesNormalizeInvalidValues(t *testing.T) {
+	prefs := userPreferences{
+		CapsLockMapping: 99,
+		OptionMapping:   99,
+		FontSize:        100,
+		Theme:           "unknown",
+		ColorScheme:     99,
+		CursorStyle:     99,
+	}
+	prefs.normalize()
+	defaults := defaultUserPreferences()
+	if prefs.CapsLockMapping != defaults.CapsLockMapping || prefs.OptionMapping != defaults.OptionMapping || prefs.FontSize != defaults.FontSize || prefs.Theme != defaults.Theme || prefs.ColorScheme != defaults.ColorScheme || prefs.CursorStyle != defaults.CursorStyle {
+		t.Fatalf("normalize = %+v; expected invalid fields to return to defaults", prefs)
+	}
+}
+
+func TestTerminalKeyEventBytes(t *testing.T) {
+	prefs := defaultUserPreferences()
+	prefs.BacktickMapEscape = true
+	prefs.OptionMapping = optionEscape
+	prefs.OverrideControlSpace = true
+	tests := []struct {
+		name    string
+		e       key.Event
+		want    []byte
+		handled bool
+	}{
+		{name: "backtick escape", e: key.Event{Name: "`", Modifiers: 0}, want: []byte{0x1b}, handled: true},
+		{name: "option meta", e: key.Event{Name: "x", Modifiers: key.ModAlt}, want: []byte{0x1b, 'x'}, handled: true},
+		{name: "control space", e: key.Event{Name: key.NameSpace, Modifiers: key.ModCtrl}, want: []byte{0}, handled: true},
+		{name: "ordinary key", e: key.Event{Name: "x", Modifiers: 0}, handled: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, handled := terminalKeyEventBytes(test.e, prefs)
+			if handled != test.handled || !bytes.Equal(got, test.want) {
+				t.Fatalf("terminalKeyEventBytes(%+v) = %#v, %v; want %#v, %v", test.e, got, handled, test.want, test.handled)
+			}
+		})
 	}
 }
 
