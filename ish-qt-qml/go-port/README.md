@@ -45,15 +45,15 @@ gogio -target android -arch amd64 -o ish-go-x86_64.apk ./cmd/ish-go-gui
 
 ينتج workflow APK موقّعًا لكل من `arm64-v8a` و`x86_64`، ويتحقق من توقيع كل APK باستخدام `apksigner`. كما ينزل APK x86_64 إلى AVD يعمل على Linux مع KVM، يثبته، يشغّل Activity، ينتظر جاهزية جلسة Alpine الحقيقية، يتحقق من marker الإصدار، يفتح Settings من زر `infoLight`، يعود إلى الطرفية، ويلتقط screenshots وتشخيصات AVD.
 
-آخر تشغيل Go/Gio ناجح موثق هو [run 33112614240](https://github.com/mostafa637/mostafa637/actions/runs/33112614240) على commit `989c2ab0f73adb11060c8807373ce8473af93975`. أثبت run نجاح Linux، وبناء APKين موقّعين، وتشغيل AVD x86_64 على Linux + KVM، ووجود السجلين `Terminal -> Settings` و`Settings -> iSH`، وmarker `Alpine release 3.19.0`، مع سجل crash فارغ.
+آخر تشغيل Go/Gio ناجح موثق هو [run 33114995383](https://github.com/mostafa637/mostafa637/actions/runs/33114995383) على commit `6f3a4f535ac1cdd3be7c87c1bd00fa0c5f9dd259`؛ ونجح أيضاً run الدفع [33114991706](https://github.com/mostafa637/mostafa637/actions/runs/33114991706) لنفس SHA. أثبتا نجاح Linux، وبناء APKين موقّعين، وتشغيل AVD x86_64 على Linux + KVM، وجاهزية Alpine i386 الحقيقية، وmarker `Alpine release 3.19.0`، ووجود السجلين `Terminal -> Settings` و`Settings -> iSH`، مع سجل crash فارغ. لقطة Settings المرفقة بالـartifact تعرض فعلياً grouped Settings مع Back toolbar وAppearance وExternal Keyboard وFilesystems وUpgrade Repositories وAbout.
 
-بصمات SHA-256 للـartifacts التي رفعها ذلك run هي:
+بصمات SHA-256 للـartifacts التي رفعها run 33114995383 هي:
 
 | Artifact | SHA-256 |
 |---|---|
-| `ish-go-arm64-v8a.apk` | `217fe30c6c0e00d5f447043658cb62eb3b4826d834814c9a399238ec0fe0ddd6` |
-| `ish-go-x86_64.apk` | `6b3c1856989742d5b16c1cec88f83c368b1f9a1a6d53fcf36d12aba01c96bd23` |
-| `ish-go-linux-x86_64` | `0ab16366b53256b2bb16d9081de176255bf507bd6dd8d950e52b0d4f8430c9d8` |
+| `ish-go-arm64-v8a.apk` | `c5ca95ad47e5409282008fae494bf823431503b9446f45debf5820bab0ccf313` |
+| `ish-go-x86_64.apk` | `1972c6bf0422ee44d913479caba75cb4dbc7ccc63d886b28d8b044e66b11b7b8` |
+| `ish-go-linux-x86_64` | `b181cb0d0582c31ba33fa336d09418a3976e198c526d47f108b0233061d6430e` |
 
 ## مستورد rootfs
 
