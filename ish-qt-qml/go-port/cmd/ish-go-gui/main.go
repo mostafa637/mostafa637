@@ -402,8 +402,9 @@ func (s *appState) pageToolbar(gtx C) D {
 		layout.Rigid(func(gtx C) D {
 			gtx.Constraints.Min = image.Pt(gtx.Dp(unit.Dp(88)), height)
 			gtx.Constraints.Max = gtx.Constraints.Min
+			clicked := s.backButton.Clicked(gtx)
 			return s.backButton.Layout(gtx, func(gtx C) D {
-				if s.backButton.Clicked(gtx) {
+				if clicked {
 					s.goBack()
 				}
 				label := material.Label(s.theme, unit.Sp(17), "‹  Back")
@@ -466,8 +467,9 @@ func (s *appState) pageRow(gtx C, button *widget.Clickable, title, detail string
 	height := gtx.Dp(unit.Dp(52))
 	gtx.Constraints.Min = image.Pt(gtx.Constraints.Max.X, height)
 	gtx.Constraints.Max.Y = height
+	clicked := button.Clicked(gtx)
 	return button.Layout(gtx, func(gtx C) D {
-		if button.Clicked(gtx) && action != nil {
+		if clicked && action != nil {
 			action()
 		}
 		bg := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
@@ -969,9 +971,10 @@ func (s *appState) accessoryButton(gtx C, index int, width, height float32) D {
 	gtx.Constraints.Max.X = gtx.Dp(unit.Dp(width))
 	gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(height))
 	gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(height))
+	clicked := s.buttons[index].Clicked(gtx)
 	return s.buttons[index].Layout(gtx, func(gtx C) D {
 		pressed := s.buttons[index].Pressed() || s.buttons[index].Hovered()
-		if s.buttons[index].Clicked(gtx) {
+		if clicked {
 			if index == 5 {
 				s.page = pageSettings
 				log.Printf("iSH GUI page navigation: Terminal -> Settings")
