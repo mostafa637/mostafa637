@@ -698,9 +698,13 @@ func (s *appState) terminalView(gtx C) D {
 			dims := style.Layout(gtx)
 			// widget.Editor clips its event.Op to the rendered text dimensions.
 			// With an empty, transparent buffer that can be smaller than the
-			// terminal, so add a full-surface target like iSH's first responder.
+			// terminal, add a full terminal-surface target like iSH's first
+			// responder. Keep the target clipped to terminalView: the accessory
+			// bar is a separate sibling and must receive its own pointer events.
+			terminalTarget := clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}.Push(gtx.Ops)
 			event.Op(gtx.Ops, &s.input)
 			key.InputHintOp{Tag: &s.input, Hint: key.HintText}.Add(gtx.Ops)
+			terminalTarget.Pop()
 			return layout.Dimensions{Size: dims.Size}
 		}),
 	)
