@@ -126,6 +126,7 @@ type appState struct {
 	page           pageID
 	prefs          userPreferences
 	prefsPath      string
+	prefsLoaded    bool
 	backButton     widget.Clickable
 	settingsRows   [5]widget.Clickable
 	appearanceRows [7]widget.Clickable
@@ -183,19 +184,12 @@ func main() {
 }
 
 func run(w *app.Window) error {
-	prefsPath := preferenceFilePath()
-	prefs, err := loadUserPreferences(prefsPath)
-	if err != nil {
-		log.Printf("iSH preferences load failed: %v", err)
-		prefs = defaultUserPreferences()
-	}
 	state := &appState{
 		theme:          newThemeWithOriginalGlyphFont(),
 		term:           terminal.New(100, 30),
 		startCh:        make(chan sessionStartResult, 1),
 		arrowDirection: arrowNone,
-		prefs:          prefs,
-		prefsPath:      prefsPath,
+		prefs:          defaultUserPreferences(),
 	}
 	state.input.SingleLine = false
 	state.input.Submit = false
@@ -211,15 +205,27 @@ func run(w *app.Window) error {
 	state.keepScreenOn.Value = false
 	state.blinkCursor.Value = state.prefs.BlinkCursor
 	state.hideStatusBar.Value = state.prefs.HideStatusBar
-	if err := saveUserPreferences(state.prefsPath, state.prefs); err != nil {
-		log.Printf("iSH preferences initial save failed: %v", err)
-	}
 
 	for {
 		e := w.Event()
 		switch e := e.(type) {
 		case app.FrameEvent:
 			gtx := app.NewContext(&state.ops, e)
+			if !state.prefsLoaded {
+				state.prefsPath = preferenceFilePath()
+				prefs, err := loadUserPreferences(state.prefsPath)
+				if err != nil {
+					log.Printf("iSH preferences load failed: %v", err)
+					prefs = defaultUserPreferences()
+				}
+				state.prefs = prefs
+				state.blinkCursor.Value = state.prefs.BlinkCursor
+				state.hideStatusBar.Value = state.prefs.HideStatusBar
+				state.prefsLoaded = true
+				if err := saveUserPreferences(state.prefsPath, state.prefs); err != nil {
+					log.Printf("iSH preferences initial save failed: %v", err)
+				}
+			}
 			if !state.startTried {
 				state.startTried = true
 				// Rootfs extraction and CoreSession startup can take several seconds
