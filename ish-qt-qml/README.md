@@ -31,16 +31,16 @@ git restore --source ef46ed8 -- .
 
 ## تحقق Android وAlpine
 
-تم التحقق من التشغيل الفعلي الأحدث عبر [GitHub Actions run 33040885722](https://github.com/mostafa637/mostafa637/actions/runs/33040885722) للالتزام `ee81d70e5d7056ba5f877fe50030f9e4320a02ed` على فرع `ish-qt-qml`. نجحت اختبارات Go وLLVM/Gio وبناء Linux، ونجح بناء APKين موقّعين للمعماريتين `arm64-v8a` و`x86_64`، كما نجح اختبار Android x86_64 AVD باستخدام Linux وKVM. شمل هذا الإصلاح ربط أصول iSH iOS الأصلية لـPaste وHide Keyboard داخل Gio، وإضافة `paint.PaintOp` اللازمة لرسمها فعلياً، مع إبقاء readiness بعد نجاح تشغيل rootfs و`ash` الحقيقي واستخدام keyevents متسلسلة في اختبار AVD.
+تم التحقق من التشغيل الفعلي الأحدث عبر [GitHub Actions run 33107011021](https://github.com/mostafa637/mostafa637/actions/runs/33107011021) للالتزام `4bcf4d86424f97edb25438f569926840ffb4fff0` على فرع `ish-qt-qml`. نجحت اختبارات Go وLLVM/Gio وبناء Linux، ونجح بناء APKين موقّعين للمعماريتين `arm64-v8a` و`x86_64`، كما نجح اختبار Android x86_64 AVD باستخدام Linux وKVM. يشمل هذا الإصدار أصول iSH iOS الأصلية لـPaste وHide Keyboard، و`paint.PaintOp` اللازمة لرسمها فعلياً، وسلوك ArrowPad الأصلي: عتبة سحب 20dp، إرسال الاتجاه فور تجاوزه، ثم تكرار بعد 500ms كل 100ms مع تخفيف الأسهم غير المختارة.
 
 أثبت اختبار AVD أن `GioActivity` كانت في حالة `RESUMED` ومركّزة، وأن rootfs فُك داخل مجلد التطبيق الخاص `/data/user/0/org.ish.go/files/ish-rootfs`. سجّل iSH Core `phase=after-main result=0` و`phase=after-devices result=0` ثم `iSH Alpine session ready; rootfs and ash started`. بعد إرسال أوامر الاختبار عبر واجهة Gio ظهر داخل logcat مرتان marker `iSH Alpine smoke marker received; Alpine release 3.19.0`، وبقي `avd-logcat-crash.txt` فارغاً ولم يظهر `FATAL EXCEPTION` أو `ANR` للتطبيق. يتضمن artifact الخاص بالـAVD لقطة الشاشة النهائية و`avd-activities.txt` و`avd-logcat.txt` وملفات تشخيص التوقّف.
 
-هذه النتيجة تثبت تشغيل Alpine i386 الحقيقي عبر محرك iSH/Asbestos المضمّن خلف طبقة cgo، وليست تشغيل `/system/bin/sh` الخاص بالمضيف. كما أن gritty مستخدم لمعالجة parser/buffer الخاصة بالطرفية، وليس بديلاً عن محرك Alpine. واجهة Gio الحالية تطابق بنية iSH الأساسية: canvas طرفية داكن edge-to-edge، إدخال مباشر إلى PTY، شريط accessory مضغوط بترتيب Tab/Control/Escape/Arrow ثم gear/Paste/Hide Keyboard، ومناطق لمس مستقلة للأسهم. ملفات `Paste.pdf` و`Hide Keyboard.pdf` مأخوذة من `upstream/ish-ios/app/Assets.xcassets`، وحُوّلت إلى PNG شفافة مضمّنة مع الحفاظ على الشكل الأصلي؛ أما رموز Tab/Control/Escape/Info النصية فتستخدم glyphs المصدر مع خط مضمن. أما صفحات الإعدادات/الملفات المتقدمة في iSH iOS فليست مدّعاة كمطابقة كاملة في هذا المسار.
+هذه النتيجة تثبت تشغيل Alpine i386 الحقيقي عبر محرك iSH/Asbestos المضمّن خلف طبقة cgo، وليست تشغيل `/system/bin/sh` الخاص بالمضيف. كما أن gritty مستخدم لمعالجة parser/buffer الخاصة بالطرفية، وليس بديلاً عن محرك Alpine. واجهة Gio الحالية تطابق بنية iSH الأساسية: canvas طرفية داكن edge-to-edge، إدخال مباشر إلى PTY، شريط accessory مضغوط بترتيب Tab/Control/Escape/Arrow ثم infoLight/Paste/Hide Keyboard، ومناطق لمس مستقلة للأسهم. ملفات `Paste.pdf` و`Hide Keyboard.pdf` مأخوذة من `upstream/ish-ios/app/Assets.xcassets`، وحُوّلت إلى PNG شفافة مضمّنة مع الحفاظ على الشكل الأصلي؛ أما رموز Tab/Control/Escape/Info النصية فتستخدم glyphs المصدر مع خط مضمن. ArrowPad يستخدم gesture ثنائي المحور مستلهماً `ArrowBarButton.m`، بما في ذلك السحب، التقاط الاتجاه، الإرسال الفوري، والتكرار. أما صفحات الإعدادات/الملفات المتقدمة في iSH iOS فليست مدّعاة كمطابقة كاملة في هذا المسار.
 
 نفّذ workflow خطوة `apksigner verify --verbose` ونجحت للـAPKين؛ التوقيع الموثق هو APK Signature Scheme v3 بموقّع واحد. بصمات SHA-256 للـartifacts في التشغيل الأخير هي:
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `ish-go-arm64-v8a.apk` | `26a8de94990a1956cc4cce702a6af308a18edfe865673daa502d84dd7a131409` |
-| `ish-go-x86_64.apk` | `29c45ac743ca1a972ecfeac39fae4bb1082123be7802373400246b1de0ac8cce` |
-| `ish-go-linux-x86_64` | `049e63e3997535036d8b50da6dfd0a2ff5fa1be276fed8abd46f69835ea9591b` |
+| `ish-go-arm64-v8a.apk` | `976c069819f24b2f055dcb64f01106145c640ef3589b04ec84980d3f8397e79b` |
+| `ish-go-x86_64.apk` | `809f478bbe1016a03ee14776cdb40469b8a8f31a9c3b7573bd9973215505c74a` |
+| `ish-go-linux-x86_64` | `64dac81f0fd8571fbd53b1796221824c4bb11bf0258783b2f2bd9d870234c46f` |
