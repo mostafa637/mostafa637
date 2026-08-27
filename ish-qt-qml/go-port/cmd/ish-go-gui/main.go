@@ -732,6 +732,7 @@ func drawTemplateIcon(gtx C, icon image.Image, sizeDp float32) {
 	transform := op.Affine(f32.AffineId().Scale(f32.Point{}, f32.Pt(scale, scale)).Offset(f32.Pt(float32(x), float32(y))))
 	stack := transform.Push(gtx.Ops)
 	paint.NewImageOp(icon).Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
 	stack.Pop()
 }
 
