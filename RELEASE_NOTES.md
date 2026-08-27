@@ -152,3 +152,10 @@ make clean && make check \
 أضيفت صيغ `MOVLPS` و`MOVHPS` و`MOVLPD` و`MOVHPD` legacy memory-only بعرض 64 بت. يدعم decoder opcodes `12/13/16/17` مع prefix `66` عند الحاجة، ويرفض register-to-register. ينفذ executor تحميل أو تخزين low/high quadword مع الحفاظ على الجزء غير المنقول والـphysical upper state في XMM، ويستخدم borrowed memory bounds دون محاكاة alignment أو FP exceptions.
 
 تغطي الاختبارات decoder/executor للعائلات الأربع، اتجاهات load/store، preservation للأجزاء الأخرى، الكتابة بعرض 8 بايت، وفشل bounds مع بقاء RIP. لم تُضف VEX merge forms في هذه الدفعة لاختلاف operand layout وسلوك merge. اجتازت الدفعة strict C99 وASan/UBSan، ثم نُظفت نواتج البناء. لا يمثل هذا السجل release أو archive جديدًا.
+
+
+### دفعة VEX partial XMM merge
+
+أضيفت صيغ `VMOVLPS` و`VMOVHPS` و`VMOVLPD` و`VMOVHPD` VEX.128. تدعم loads ثلاثة operands مع source XMM من `VEX.vvvv` وm64، وتدعم stores memory-only مع `VEX.vvvv=1111`. يطبق decoder التحقق من VEX.L وترتيب operands، ويرفض register-to-register وvvvv غير المحجوز في stores.
+
+ينفذ executor دمج low/high 64-bit مع source XMM، ويصفر الحالة الفيزيائية فوق 128 بت عند destination XMM، بينما تخزن stores ثمانية بايت فقط. تغطي الاختبارات العائلات الأربع والـmerge source ordering وupper-zeroing وL/vvvv/mod validation وborrowed bounds. اجتازت الدفعة strict C99 وASan/UBSan، ثم نُظفت نواتج البناء. لا يمثل هذا السجل release أو archive جديدًا.

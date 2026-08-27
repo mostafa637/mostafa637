@@ -1592,6 +1592,34 @@ x86emu_error x86emu_step(x86emu_cpu *cpu)
         }
         break;
     }
+    case X86ASM_OP_VMOVLPS:
+    case X86ASM_OP_VMOVHPS:
+    case X86ASM_OP_VMOVLPD:
+    case X86ASM_OP_VMOVHPD: {
+        bool high = instruction->opcode == X86ASM_OP_VMOVHPS || instruction->opcode == X86ASM_OP_VMOVHPD;
+        bool store = instruction->arguments[0].kind == X86ASM_ARG_MEMORY;
+        unsigned lane_offset = high ? 8u : 0u;
+        uint8_t vector_value[16];
+        uint64_t scalar = 0;
+        if (store) {
+            if (!read_vector_argument(cpu, instruction, &instruction->arguments[1], 16, vector_value)) result = X86EMU_ERR_MEMORY;
+            else {
+                memcpy(&scalar, vector_value + lane_offset, sizeof(scalar));
+                if (!write_argument(cpu, instruction, &instruction->arguments[0], 64, scalar)) result = X86EMU_ERR_MEMORY;
+                else cpu->rip = next_rip;
+            }
+        } else if (!read_vector_argument(cpu, instruction, &instruction->arguments[1], 16, vector_value) ||
+                   !read_argument(cpu, instruction, &instruction->arguments[2], 64, &scalar)) result = X86EMU_ERR_MEMORY;
+        else {
+            memcpy(vector_value + lane_offset, &scalar, sizeof(scalar));
+            if (!write_vector_argument(cpu, instruction, &instruction->arguments[0], 16, vector_value)) result = X86EMU_ERR_MEMORY;
+            else {
+                zero_vector_upper_128(cpu, &instruction->arguments[0]);
+                cpu->rip = next_rip;
+            }
+        }
+        break;
+    }
     case X86ASM_OP_MOVLPS:
     case X86ASM_OP_MOVHPS:
     case X86ASM_OP_MOVLPD:

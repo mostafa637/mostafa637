@@ -204,7 +204,7 @@ static const char *const opcode_names[X86ASM_OP_COUNT] = {
     [X86ASM_OP_VBLENDPD] = "vblendpd", [X86ASM_OP_VBLENDPS] = "vblendps",
     [X86ASM_OP_VPADDB] = "vpaddb", [X86ASM_OP_VPADDW] = "vpaddw",
     [X86ASM_OP_VAND] = "vand", [X86ASM_OP_VANDN] = "vandn",
-    [X86ASM_OP_VMOVUPD] = "vmovupd", [X86ASM_OP_VMOVUPS] = "vmovups", [X86ASM_OP_VMOVD] = "vmovd", [X86ASM_OP_VMOVQ] = "vmovq", [X86ASM_OP_VMOVDQA] = "vmovdqa", [X86ASM_OP_VMOVDQU] = "vmovdqu", [X86ASM_OP_VMOVNTDQA] = "vmovntdqa", [X86ASM_OP_VMOVNTDQ] = "vmovntdq", [X86ASM_OP_VLDDQU] = "vlddqu", [X86ASM_OP_VMOVSS] = "vmovss", [X86ASM_OP_VMOVSD] = "vmovsd",
+    [X86ASM_OP_VMOVUPD] = "vmovupd", [X86ASM_OP_VMOVUPS] = "vmovups", [X86ASM_OP_VMOVLPS] = "vmovlps", [X86ASM_OP_VMOVHPS] = "vmovhps", [X86ASM_OP_VMOVLPD] = "vmovlpd", [X86ASM_OP_VMOVHPD] = "vmovhpd", [X86ASM_OP_VMOVD] = "vmovd", [X86ASM_OP_VMOVQ] = "vmovq", [X86ASM_OP_VMOVDQA] = "vmovdqa", [X86ASM_OP_VMOVDQU] = "vmovdqu", [X86ASM_OP_VMOVNTDQA] = "vmovntdqa", [X86ASM_OP_VMOVNTDQ] = "vmovntdq", [X86ASM_OP_VLDDQU] = "vlddqu", [X86ASM_OP_VMOVSS] = "vmovss", [X86ASM_OP_VMOVSD] = "vmovsd",
     [X86ASM_OP_VPADDD] = "vpaddd", [X86ASM_OP_VPCMPEQB] = "vpcmpeqb",
     [X86ASM_OP_VPCMPEQW] = "vpcmpeqw", [X86ASM_OP_VPCMPEQD] = "vpcmpeqd",
     [X86ASM_OP_VPCMPGTB] = "vpcmpgtb", [X86ASM_OP_VPCMPGTW] = "vpcmpgtw",
@@ -1207,6 +1207,7 @@ static x86asm_error decode_vex(const uint8_t *bytes, size_t length, size_t pos,
     bool scalar_move = false;
     bool scalar_vector_move = false;
     bool xmm_quad_move = false;
+    bool partial_vex_move = false;
     bool unary_vector = false;
     bool extend_vector = false;
     bool store = false;
@@ -1374,6 +1375,12 @@ static x86asm_error decode_vex(const uint8_t *bytes, size_t length, size_t pos,
         operation = X86ASM_OP_VMOVQ;
         xmm_quad_move = true;
         store = opcode == 0xD6;
+    } else if ((opcode == 0x12 || opcode == 0x13 || opcode == 0x16 || opcode == 0x17) &&
+               (p == 0 || p == 1) && map == 1) {
+        if (p == 0) operation = (opcode == 0x12 || opcode == 0x13) ? X86ASM_OP_VMOVLPS : X86ASM_OP_VMOVHPS;
+        else operation = (opcode == 0x12 || opcode == 0x13) ? X86ASM_OP_VMOVLPD : X86ASM_OP_VMOVHPD;
+        partial_vex_move = true;
+        store = opcode == 0x13 || opcode == 0x17;
     } else if ((opcode == 0x6F || opcode == 0x7F) && (p == 1 || p == 2) && map == 1) {
         operation = p == 1 ? X86ASM_OP_VMOVDQA : X86ASM_OP_VMOVDQU;
         load_store = true;
@@ -1389,9 +1396,10 @@ static x86asm_error decode_vex(const uint8_t *bytes, size_t length, size_t pos,
         return X86ASM_ERR_UNRECOGNIZED;
     }
 
-    if ((scalar_move || scalar_vector_move || xmm_quad_move) && l != 0) return X86ASM_ERR_UNRECOGNIZED;
+    if ((scalar_move || scalar_vector_move || xmm_quad_move || partial_vex_move) && l != 0) return X86ASM_ERR_UNRECOGNIZED;
     if (scalar_vector_move && w != 0 && mode != 64) return X86ASM_ERR_UNRECOGNIZED;
     if (xmm_quad_move && w != 0) return X86ASM_ERR_UNRECOGNIZED;
+    if (partial_vex_move && store && vvvv != 15u) return X86ASM_ERR_UNRECOGNIZED;
     if ((scalar_insert || scalar_extract) && l != 0) return X86ASM_ERR_UNRECOGNIZED;
     if (scalar_extract && vvvv != 15u) return X86ASM_ERR_UNRECOGNIZED;
     if ((variable_blend || operation == X86ASM_OP_VPBLENDD) && w != 0) return X86ASM_ERR_UNRECOGNIZED;
@@ -1402,6 +1410,7 @@ static x86asm_error decode_vex(const uint8_t *bytes, size_t length, size_t pos,
     unsigned reg = ((modrm >> 3) & 7) | (r ? 0 : 8);
     unsigned rm = (modrm & 7) | (b ? 0 : 8);
     x86asm_argument rm_argument = { X86ASM_ARG_NONE, { 0 } };
+    if (partial_vex_move && mod == 3u) return X86ASM_ERR_UNRECOGNIZED;
     if (two_vector_test && vvvv != 15u) return X86ASM_ERR_UNRECOGNIZED;
     if (mask_extract && (mod != 3u || vvvv != 15u)) return X86ASM_ERR_UNRECOGNIZED;
     if (scalar_move && mod != 3u && vvvv != 15u) return X86ASM_ERR_UNRECOGNIZED;
@@ -1450,6 +1459,10 @@ static x86asm_error decode_vex(const uint8_t *bytes, size_t length, size_t pos,
     instruction->opcode = operation;
     if (scalar_vector_move) instruction->data_size = w != 0 ? 64 : 32;
     if (xmm_quad_move) instruction->data_size = 64;
+    if (partial_vex_move) {
+        instruction->data_size = 128;
+        instruction->memory_bytes = 8;
+    }
     if (mask_extract) {
         set_register(&instruction->arguments[0], register_for_width(32, reg));
         set_vector(&instruction->arguments[1], l != 0, rm);
@@ -1484,6 +1497,15 @@ static x86asm_error decode_vex(const uint8_t *bytes, size_t length, size_t pos,
         } else {
             set_vector(&instruction->arguments[0], false, reg);
             instruction->arguments[1] = rm_argument;
+        }
+    } else if (partial_vex_move) {
+        if (store) {
+            instruction->arguments[0] = rm_argument;
+            set_vector(&instruction->arguments[1], false, reg);
+        } else {
+            set_vector(&instruction->arguments[0], false, reg);
+            set_vector(&instruction->arguments[1], false, vvvv);
+            instruction->arguments[2] = rm_argument;
         }
     } else if (scalar_move && mod == 3u) {
         if (store) {

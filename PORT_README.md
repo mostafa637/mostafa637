@@ -177,3 +177,10 @@ int main(void)
 أضيفت صيغ legacy memory-only الأربع لنقل نصف XMM بعرض 64 بت: `MOVLPS` (`0F 12/13`)، `MOVHPS` (`0F 16/17`)، `MOVLPD` (`66 0F 12/13`) و`MOVHPD` (`66 0F 16/17`). يحمّل opcode الأول من m64 إلى low أو high quadword، بينما يخزّن opcode الثاني نصف XMM المحدد إلى m64. يرفض decoder register-to-register لهذه الصيغ، لأن المرجع يعرّفها memory-only.
 
 تحافظ loads legacy على النصف الآخر من XMM وعلى physical bytes فوق 128 بت، وتكتب stores ثمانية بايت فقط. الذاكرة borrowed مع فحص bounds، ولا تُفرض محاذاة أو floating-point exception model اصطناعيًا. لم تُضف صيغ VEX merge لهذه العائلة بعد، لأنها تحتاج operand VEX.vvvv إضافيًا وسلوك merge مختلفًا عن legacy.
+
+
+## VMOVLPS/VMOVHPS وVMOVLPD/VMOVHPD بصيغة VEX.128
+
+أضيفت صيغ VEX.128 لعائلة partial XMM moves. في صيغ التحميل ذات opcode `12` أو `16` يستخدم التعليمة ثلاثة operands: destination XMM، وsource XMM من `VEX.vvvv`، وm64. يدمج `VMOVLPS/VMOVLPD` low 64 bits من الذاكرة مع high 64 bits من source XMM، بينما يدمج `VMOVHPS/VMOVHPD` high 64 bits من الذاكرة مع low 64 bits من source XMM. صيغ التخزين ذات opcode `13` أو `17` تستخدم memory destination وXMM source، ويكون `VEX.vvvv` محجوزًا بقيمة 1111.
+
+يتحقق decoder من `VEX.L=0`، ويرفض register-to-register في هذه الصيغ وvvvv غير المحجوز في stores، ويدعم فقط VEX.128 دون EVEX. ينفذ executor الدمج low/high بعرض 64 بت، ويصفر physical bytes فوق 128 بت عند وجهة XMM في load، بينما stores تكتب 8 بايت فقط. الذاكرة borrowed مع bounds checking، ولا تُحاكى alignment faults أو floating-point exception model أو cache protocol.
