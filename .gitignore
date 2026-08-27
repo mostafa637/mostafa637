@@ -1,0 +1,11 @@
+# C99 build outputs
+c99/*.o
+c99/*.a
+c99/test_x86asm
+c99/test_x86emu
+
+# Generated logs and release artifacts
+*.log
+*.tar.gz
+release/
+ARCHIVE_MANIFEST.txt

@@ -1,0 +1,110 @@
+single-byte conditions
+762:        case 0xF0: case 0xF2: case 0xF3:
+763:        case 0x2E: case 0x36: case 0x3E: case 0x26: case 0x64: case 0x65:
+764:        case 0x66: case 0x67:
+800:    if (mode != 64 && opcode_byte >= 0x40 && opcode_byte <= 0x47) {
+806:    if (mode != 64 && opcode_byte >= 0x48 && opcode_byte <= 0x4F) {
+813:    if (opcode_byte >= 0x91 && opcode_byte <= 0x97) {
+831:    case 0x04: case 0x05: case 0x0C: case 0x0D:
+832:    case 0x14: case 0x15: case 0x1C: case 0x1D:
+833:    case 0x24: case 0x25: case 0x2C: case 0x2D:
+834:    case 0x34: case 0x35: case 0x3C: case 0x3D: {
+838:        if (opcode_byte >= 0x04 && opcode_byte <= 0x05) instruction->opcode = X86ASM_OP_ADD;
+839:        else if (opcode_byte >= 0x0C && opcode_byte <= 0x0D) instruction->opcode = X86ASM_OP_OR;
+840:        else if (opcode_byte >= 0x14 && opcode_byte <= 0x15) instruction->opcode = X86ASM_OP_ADC;
+841:        else if (opcode_byte >= 0x1C && opcode_byte <= 0x1D) instruction->opcode = X86ASM_OP_SBB;
+842:        else if (opcode_byte >= 0x24 && opcode_byte <= 0x25) instruction->opcode = X86ASM_OP_AND;
+843:        else if (opcode_byte >= 0x2C && opcode_byte <= 0x2D) instruction->opcode = X86ASM_OP_SUB;
+844:        else if (opcode_byte >= 0x34 && opcode_byte <= 0x35) instruction->opcode = X86ASM_OP_XOR;
+859:    if (opcode_byte == 0x90) {
+865:    if (opcode_byte == 0xF5 || opcode_byte == 0xF8 || opcode_byte == 0xF9 ||
+866:        opcode_byte == 0xFC || opcode_byte == 0xFD || opcode_byte == 0x9E || opcode_byte == 0x9F) {
+867:        if (opcode_byte == 0xF5) instruction->opcode = X86ASM_OP_CMC;
+868:        else if (opcode_byte == 0xF8) instruction->opcode = X86ASM_OP_CLC;
+869:        else if (opcode_byte == 0xF9) instruction->opcode = X86ASM_OP_STC;
+870:        else if (opcode_byte == 0xFC) instruction->opcode = X86ASM_OP_CLD;
+871:        else if (opcode_byte == 0xFD) instruction->opcode = X86ASM_OP_STD;
+872:        else if (opcode_byte == 0x9E) instruction->opcode = X86ASM_OP_SAHF;
+877:    if (opcode_byte == 0xC9) {
+882:    if (opcode_byte == 0xC8) {
+892:    if (opcode_byte == 0xCC) {
+898:    if (opcode_byte == 0xCD) {
+905:    if (opcode_byte == 0xC3 || opcode_byte == 0xCB) {
+910:    if (opcode_byte == 0xC2 || opcode_byte == 0xCA) {
+942:    if (opcode_byte >= 0xE0 && opcode_byte <= 0xE3) {
+944:        if (opcode_byte == 0xE0) instruction->opcode = X86ASM_OP_LOOPNE;
+945:        else if (opcode_byte == 0xE1) instruction->opcode = X86ASM_OP_LOOPE;
+946:        else if (opcode_byte == 0xE2) instruction->opcode = X86ASM_OP_LOOP;
+954:    if (opcode_byte == 0xEB || (opcode_byte >= 0x70 && opcode_byte <= 0x7F)) {
+956:        instruction->opcode = opcode_byte == 0xEB ? X86ASM_OP_JMP : condition_opcode(opcode_byte & 15);
+964:    if (opcode_byte == 0xE8 || opcode_byte == 0xE9) {
+967:        instruction->opcode = opcode_byte == 0xE8 ? X86ASM_OP_CALL : X86ASM_OP_JMP;
+976:    if (opcode_byte == 0x0F) {
+1069:    if (opcode_byte == 0x80 || opcode_byte == 0x81 || opcode_byte == 0x82 || opcode_byte == 0x83) {
+1072:        int width = opcode_byte == 0x80 || opcode_byte == 0x82 ? 8 : operand_width;
+1076:        if (opcode_byte == 0x80 || opcode_byte == 0x81 || opcode_byte == 0x82) {
+1089:    if (opcode_byte == 0xC6 || opcode_byte == 0xC7) {
+1092:        int width = opcode_byte == 0xC6 ? 8 : operand_width;
+1105:    if (opcode_byte == 0xF6 || opcode_byte == 0xF7) {
+1108:        int width = opcode_byte == 0xF6 ? 8 : operand_width;
+1137:    if (opcode_byte == 0xC0 || opcode_byte == 0xC1 ||
+1138:        opcode_byte == 0xD0 || opcode_byte == 0xD1 ||
+1139:        opcode_byte == 0xD2 || opcode_byte == 0xD3) {
+1142:        int width = (opcode_byte == 0xC0 || opcode_byte == 0xD0 || opcode_byte == 0xD2) ? 8 : operand_width;
+1147:        if (opcode_byte == 0xC0 || opcode_byte == 0xC1) {
+1150:        } else if (opcode_byte == 0xD2 || opcode_byte == 0xD3) {
+1159:    if (opcode_byte == 0xFE || opcode_byte == 0xFF) {
+1162:        int width = opcode_byte == 0xFE ? 8 : (mode == 64 ? 64 : operand_width);
+1168:        else if (opcode_byte == 0xFF && group == 2) instruction->opcode = X86ASM_OP_CALL;
+1169:        else if (opcode_byte == 0xFF && group == 4) instruction->opcode = X86ASM_OP_JMP;
+1170:        else if (opcode_byte == 0xFF && group == 6) instruction->opcode = X86ASM_OP_PUSH;
+1176:    if (opcode_byte == 0x88 || opcode_byte == 0x89 || opcode_byte == 0x8A || opcode_byte == 0x8B ||
+1177:        opcode_byte == 0x8D || opcode_byte == 0x86 || opcode_byte == 0x87 ||
+1178:        opcode_byte == 0x01 || opcode_byte == 0x03 ||
+1179:        opcode_byte == 0x29 || opcode_byte == 0x2B || opcode_byte == 0x31 || opcode_byte == 0x33 ||
+1180:        opcode_byte == 0x39 || opcode_byte == 0x3B) {
+1182:        int width = (opcode_byte == 0x88 || opcode_byte == 0x8A) ? 8 : operand_width;
+1185:        if (opcode_byte == 0x8D) instruction->opcode = X86ASM_OP_LEA;
+1186:        else if (opcode_byte == 0x86 || opcode_byte == 0x87) instruction->opcode = X86ASM_OP_XCHG;
+1192:        if (opcode_byte == 0x8A || opcode_byte == 0x8B || opcode_byte == 0x03 || opcode_byte == 0x2B || opcode_byte == 0x33 || opcode_byte == 0x3B) {
+
+0F conditions
+980:        if (second >= 0xC8 && second <= 0xCF) {
+986:        if (second >= 0x80 && second <= 0x8F) {
+997:        if (second >= 0x40 && second <= 0x4F) {
+1006:        if (second >= 0x90 && second <= 0x9F) {
+1014:        if (second == 0x1F) {
+1022:        if (second == 0xC0 || second == 0xC1) {
+1024:            int width = second == 0xC0 ? 8 : operand_width;
+1032:        if (second == 0xB0 || second == 0xB1) {
+1034:            int width = second == 0xB0 ? 8 : operand_width;
+1042:        if (second == 0xAF) {
+1051:        if (second == 0xB6 || second == 0xB7 || second == 0xBE || second == 0xBF) {
+1054:            int source_width = (second == 0xB6 || second == 0xBE) ? 8 : 16;
+1061:            instruction->opcode = (second == 0xB6 || second == 0xB7) ? X86ASM_OP_MOVZX : X86ASM_OP_MOVSX;
+
+VEX conditions
+158:    if (opcode >= X86ASM_OP_COUNT || opcode_names[opcode] == NULL) {
+517:    if (map == 10 && opcode == 0x10) {
+553:    instruction->opcode = opcode == 0xA2 ? X86ASM_OP_VPCMOV : X86ASM_OP_VPROTB;
+565:    if (opcode == 0xC0) {
+593:    if (opcode == 0x58 && pp == 0) operation = X86ASM_OP_VADDPS;
+594:    else if (opcode == 0x58 && pp == 1) operation = X86ASM_OP_VADDPD;
+595:    else if (opcode == 0x57 && pp == 0) operation = X86ASM_OP_VXORPS;
+596:    else if (opcode == 0xFE && pp == 1) operation = X86ASM_OP_VPADDD;
+597:    else if (opcode == 0x10 && (pp == 0 || pp == 1)) operation = pp == 0 ? X86ASM_OP_VMOVUPS : X86ASM_OP_VMOVUPD;
+598:    else if (opcode == 0x11 && (pp == 0 || pp == 1)) operation = pp == 0 ? X86ASM_OP_VMOVUPS : X86ASM_OP_VMOVUPD;
+628:    if (opcode == 0x10 || opcode == 0x11) {
+629:        if (opcode == 0x11) { instruction->arguments[0] = rm_argument; set_vector_length(&instruction->arguments[1], length_bits, reg); }
+680:    if (opcode == 0x77 && p == 0 && l == 0 && w == 0) {
+689:    if (opcode == 0x58 && p == 0) operation = X86ASM_OP_VADDPS;
+690:    else if (opcode == 0x58 && p == 1) operation = X86ASM_OP_VADDPD;
+691:    else if (opcode == 0x57 && p == 0) operation = X86ASM_OP_VXORPS;
+692:    else if (opcode == 0xFE && p == 1 && map == 1) operation = X86ASM_OP_VPADDD;
+693:    else if (opcode == 0xDB && p == 1 && map == 2) operation = X86ASM_OP_VAND;
+694:    else if (opcode == 0xDF && p == 1 && map == 2) operation = X86ASM_OP_VANDN;
+695:    else if (opcode == 0xEB && p == 1 && map == 2) operation = X86ASM_OP_VOR;
+696:    else if (opcode == 0xEF && p == 1 && map == 2) operation = X86ASM_OP_VXOR;
+697:    else if (opcode == 0x10 && (p == 0 || p == 1)) {
+700:    } else if (opcode == 0x11 && (p == 0 || p == 1)) {
+1146:        if (instruction->opcode == X86ASM_OP_INVALID) return X86ASM_ERR_UNRECOGNIZED;
