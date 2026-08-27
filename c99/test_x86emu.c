@@ -499,6 +499,63 @@ static void test_partial_xmm_moves(void)
     assert(cpu.rip == 0u);
 }
 
+static void test_movhlps_movlhps(void)
+{
+    uint8_t code[128] = { 0 };
+    x86emu_cpu cpu;
+    x86emu_memory memory = { code, sizeof(code), 0 };
+    uint8_t destination[16];
+    uint8_t source0[16];
+    uint8_t source1[16];
+    for (unsigned i = 0; i < sizeof(destination); ++i) {
+        destination[i] = (uint8_t)(0xD0u + i);
+        source0[i] = (uint8_t)(0xA0u + i);
+        source1[i] = (uint8_t)(0xB0u + i);
+    }
+
+    memcpy(code, (const uint8_t[]){ 0x0F,0x12,0xC8 }, 3u);
+    x86emu_init(&cpu, memory, 0);
+    memcpy(cpu.vector_registers[1], destination, sizeof(destination));
+    memcpy(cpu.vector_registers[0], source0, sizeof(source0));
+    memset(cpu.vector_registers[1] + 16u, 0xEE, 48u);
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    assert(memcmp(cpu.vector_registers[1], source0 + 8u, 8u) == 0);
+    assert(memcmp(cpu.vector_registers[1] + 8u, destination + 8u, 8u) == 0);
+    for (unsigned i = 16u; i < 64u; ++i) assert(cpu.vector_registers[1][i] == 0xEEu);
+
+    memcpy(code, (const uint8_t[]){ 0x0F,0x16,0xC8 }, 3u);
+    x86emu_init(&cpu, memory, 0);
+    memcpy(cpu.vector_registers[1], destination, sizeof(destination));
+    memcpy(cpu.vector_registers[0], source0, sizeof(source0));
+    memset(cpu.vector_registers[1] + 16u, 0xEE, 48u);
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    assert(memcmp(cpu.vector_registers[1], destination, 8u) == 0);
+    assert(memcmp(cpu.vector_registers[1] + 8u, source0, 8u) == 0);
+    for (unsigned i = 16u; i < 64u; ++i) assert(cpu.vector_registers[1][i] == 0xEEu);
+
+    memcpy(code, (const uint8_t[]){ 0xC5,0xE8,0x12,0xC8 }, 4u);
+    x86emu_init(&cpu, memory, 0);
+    memcpy(cpu.vector_registers[1], destination, sizeof(destination));
+    memcpy(cpu.vector_registers[2], source1, sizeof(source1));
+    memcpy(cpu.vector_registers[0], source0, sizeof(source0));
+    memset(cpu.vector_registers[1] + 16u, 0xEE, 48u);
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    assert(memcmp(cpu.vector_registers[1], source0 + 8u, 8u) == 0);
+    assert(memcmp(cpu.vector_registers[1] + 8u, source1 + 8u, 8u) == 0);
+    for (unsigned i = 16u; i < 64u; ++i) assert(cpu.vector_registers[1][i] == 0u);
+
+    memcpy(code, (const uint8_t[]){ 0xC5,0xE8,0x16,0xC8 }, 4u);
+    x86emu_init(&cpu, memory, 0);
+    memcpy(cpu.vector_registers[1], destination, sizeof(destination));
+    memcpy(cpu.vector_registers[2], source1, sizeof(source1));
+    memcpy(cpu.vector_registers[0], source0, sizeof(source0));
+    memset(cpu.vector_registers[1] + 16u, 0xEE, 48u);
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    assert(memcmp(cpu.vector_registers[1], source1, 8u) == 0);
+    assert(memcmp(cpu.vector_registers[1] + 8u, source0, 8u) == 0);
+    for (unsigned i = 16u; i < 64u; ++i) assert(cpu.vector_registers[1][i] == 0u);
+}
+
 static void test_vmov_partial_moves(void)
 {
     uint8_t code[128] = { 0 };
@@ -2459,6 +2516,7 @@ int main(void)
     test_movd_movq();
     test_movq_xmm_forms();
     test_partial_xmm_moves();
+    test_movhlps_movlhps();
     test_vmov_partial_moves();
     test_vmovd_vmovq();
     test_sse2_integer();

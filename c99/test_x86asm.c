@@ -324,8 +324,10 @@ int main(void)
     static const uint8_t movlpd_store[] = { 0x66, 0x0F, 0x13, 0x08 };
     static const uint8_t movhpd_load[] = { 0x66, 0x0F, 0x16, 0x08 };
     static const uint8_t movhpd_store[] = { 0x66, 0x0F, 0x17, 0x08 };
-    static const uint8_t movlps_register_invalid[] = { 0x0F, 0x12, 0xC1 };
-    static const uint8_t movlpd_register_invalid[] = { 0x66, 0x0F, 0x12, 0xC1 };
+    static const uint8_t movlps_register_invalid[] = { 0x0F, 0x13, 0xC1 };
+    static const uint8_t movlpd_register_invalid[] = { 0x66, 0x0F, 0x12, 0xC1 }; 
+    static const uint8_t movhlps_register[] = { 0x0F, 0x12, 0xC1 };
+    static const uint8_t movlhps_register[] = { 0x0F, 0x16, 0xC1 };
     static const uint8_t vmovlps_load[] = { 0xC5, 0xE8, 0x12, 0x08 };
     static const uint8_t vmovlps_store[] = { 0xC5, 0x80, 0x13, 0x08 };
     static const uint8_t vmovhps_load[] = { 0xC5, 0xE8, 0x16, 0x08 };
@@ -334,9 +336,11 @@ int main(void)
     static const uint8_t vmovlpd_store[] = { 0xC5, 0x81, 0x13, 0x08 };
     static const uint8_t vmovhpd_load[] = { 0xC5, 0xE9, 0x16, 0x08 };
     static const uint8_t vmovhpd_store[] = { 0xC5, 0x81, 0x17, 0x08 };
-    static const uint8_t vmovlps_register_invalid[] = { 0xC5, 0x68, 0x12, 0xC8 };
+    static const uint8_t vmovlps_register_invalid[] = { 0xC5, 0xE9, 0x12, 0xC8 };
     static const uint8_t vmovlps_store_vvvv_invalid[] = { 0xC5, 0x68, 0x13, 0x08 };
     static const uint8_t vmovlpd_l_invalid[] = { 0xC5, 0xED, 0x12, 0x08 };
+    static const uint8_t vmovhlps_register[] = { 0xC5, 0xE8, 0x12, 0xC8 };
+    static const uint8_t vmovlhps_register[] = { 0xC5, 0xE8, 0x16, 0xC8 };
     static const uint8_t movdqa_xmm[] = { 0x66, 0x0F, 0x6F, 0xC1 };
     static const uint8_t movdqa_store_mem[] = { 0x66, 0x0F, 0x7F, 0x08 };
     static const uint8_t movdqu_store_mem[] = { 0xF3, 0x0F, 0x7F, 0x08 };
@@ -716,6 +720,8 @@ int main(void)
     check(movlpd_store, sizeof(movlpd_store), X86ASM_OP_MOVLPD, "66 movlpd [rax], xmm1");
     check(movhpd_load, sizeof(movhpd_load), X86ASM_OP_MOVHPD, "66 movhpd xmm1, [rax]");
     check(movhpd_store, sizeof(movhpd_store), X86ASM_OP_MOVHPD, "66 movhpd [rax], xmm1");
+    check(movhlps_register, sizeof(movhlps_register), X86ASM_OP_MOVHLPS, "movhlps xmm0, xmm1");
+    check(movlhps_register, sizeof(movlhps_register), X86ASM_OP_MOVLHPS, "movlhps xmm0, xmm1");
     check_error(movlps_register_invalid, sizeof(movlps_register_invalid), X86ASM_ERR_UNRECOGNIZED);
     check_error(movlpd_register_invalid, sizeof(movlpd_register_invalid), X86ASM_ERR_UNRECOGNIZED);
     check(vmovlps_load, sizeof(vmovlps_load), X86ASM_OP_VMOVLPS, "c5 e8 vmovlps xmm1, xmm2, [rax]");
@@ -726,6 +732,8 @@ int main(void)
     check(vmovlpd_store, sizeof(vmovlpd_store), X86ASM_OP_VMOVLPD, "c5 81 vmovlpd [rax], xmm1");
     check(vmovhpd_load, sizeof(vmovhpd_load), X86ASM_OP_VMOVHPD, "c5 e9 vmovhpd xmm1, xmm2, [rax]");
     check(vmovhpd_store, sizeof(vmovhpd_store), X86ASM_OP_VMOVHPD, "c5 81 vmovhpd [rax], xmm1");
+    check(vmovhlps_register, sizeof(vmovhlps_register), X86ASM_OP_VMOVHLPS, "c5 e8 vmovhlps xmm1, xmm2, xmm0");
+    check(vmovlhps_register, sizeof(vmovlhps_register), X86ASM_OP_VMOVLHPS, "c5 e8 vmovlhps xmm1, xmm2, xmm0");
     check_error(vmovlps_register_invalid, sizeof(vmovlps_register_invalid), X86ASM_ERR_UNRECOGNIZED);
     check_error(vmovlps_store_vvvv_invalid, sizeof(vmovlps_store_vvvv_invalid), X86ASM_ERR_UNRECOGNIZED);
     check_error(vmovlpd_l_invalid, sizeof(vmovlpd_l_invalid), X86ASM_ERR_UNRECOGNIZED);

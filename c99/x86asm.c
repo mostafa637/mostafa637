@@ -120,7 +120,7 @@ static const char *const opcode_names[X86ASM_OP_COUNT] = {
     [X86ASM_OP_CMOVP] = "cmovp", [X86ASM_OP_CMOVS] = "cmovs",
     [X86ASM_OP_LAHF] = "lahf", [X86ASM_OP_LEA] = "lea", [X86ASM_OP_LEAVE] = "leave",
     [X86ASM_OP_MOV] = "mov", [X86ASM_OP_MOVSX] = "movsx", [X86ASM_OP_MOVBE] = "movbe",
-    [X86ASM_OP_MOVD] = "movd", [X86ASM_OP_MOVQ] = "movq", [X86ASM_OP_MOVLPS] = "movlps", [X86ASM_OP_MOVHPS] = "movhps", [X86ASM_OP_MOVLPD] = "movlpd", [X86ASM_OP_MOVHPD] = "movhpd",
+    [X86ASM_OP_MOVD] = "movd", [X86ASM_OP_MOVQ] = "movq", [X86ASM_OP_MOVLPS] = "movlps", [X86ASM_OP_MOVHPS] = "movhps", [X86ASM_OP_MOVLPD] = "movlpd", [X86ASM_OP_MOVHPD] = "movhpd", [X86ASM_OP_MOVLHPS] = "movlhps", [X86ASM_OP_MOVHLPS] = "movhlps",
     [X86ASM_OP_MOVDQA] = "movdqa", [X86ASM_OP_MOVDQU] = "movdqu", [X86ASM_OP_MOVNTDQA] = "movntdqa", [X86ASM_OP_MOVNTDQ] = "movntdq", [X86ASM_OP_LDDQU] = "lddqu", [X86ASM_OP_MOVUPD] = "movupd", [X86ASM_OP_MOVSS] = "movss", [X86ASM_OP_MOVSD_SCALAR] = "movsd",
     [X86ASM_OP_SUBPS] = "subps", [X86ASM_OP_MULPS] = "mulps", [X86ASM_OP_DIVPS] = "divps",
     [X86ASM_OP_ADDPD] = "addpd", [X86ASM_OP_SUBPD] = "subpd", [X86ASM_OP_MULPD] = "mulpd", [X86ASM_OP_DIVPD] = "divpd",
@@ -204,7 +204,7 @@ static const char *const opcode_names[X86ASM_OP_COUNT] = {
     [X86ASM_OP_VBLENDPD] = "vblendpd", [X86ASM_OP_VBLENDPS] = "vblendps",
     [X86ASM_OP_VPADDB] = "vpaddb", [X86ASM_OP_VPADDW] = "vpaddw",
     [X86ASM_OP_VAND] = "vand", [X86ASM_OP_VANDN] = "vandn",
-    [X86ASM_OP_VMOVUPD] = "vmovupd", [X86ASM_OP_VMOVUPS] = "vmovups", [X86ASM_OP_VMOVLPS] = "vmovlps", [X86ASM_OP_VMOVHPS] = "vmovhps", [X86ASM_OP_VMOVLPD] = "vmovlpd", [X86ASM_OP_VMOVHPD] = "vmovhpd", [X86ASM_OP_VMOVD] = "vmovd", [X86ASM_OP_VMOVQ] = "vmovq", [X86ASM_OP_VMOVDQA] = "vmovdqa", [X86ASM_OP_VMOVDQU] = "vmovdqu", [X86ASM_OP_VMOVNTDQA] = "vmovntdqa", [X86ASM_OP_VMOVNTDQ] = "vmovntdq", [X86ASM_OP_VLDDQU] = "vlddqu", [X86ASM_OP_VMOVSS] = "vmovss", [X86ASM_OP_VMOVSD] = "vmovsd",
+    [X86ASM_OP_VMOVUPD] = "vmovupd", [X86ASM_OP_VMOVUPS] = "vmovups", [X86ASM_OP_VMOVLPS] = "vmovlps", [X86ASM_OP_VMOVHPS] = "vmovhps", [X86ASM_OP_VMOVLPD] = "vmovlpd", [X86ASM_OP_VMOVHPD] = "vmovhpd", [X86ASM_OP_VMOVLHPS] = "vmovlhps", [X86ASM_OP_VMOVHLPS] = "vmovhlps", [X86ASM_OP_VMOVD] = "vmovd", [X86ASM_OP_VMOVQ] = "vmovq", [X86ASM_OP_VMOVDQA] = "vmovdqa", [X86ASM_OP_VMOVDQU] = "vmovdqu", [X86ASM_OP_VMOVNTDQA] = "vmovntdqa", [X86ASM_OP_VMOVNTDQ] = "vmovntdq", [X86ASM_OP_VLDDQU] = "vlddqu", [X86ASM_OP_VMOVSS] = "vmovss", [X86ASM_OP_VMOVSD] = "vmovsd",
     [X86ASM_OP_VPADDD] = "vpaddd", [X86ASM_OP_VPCMPEQB] = "vpcmpeqb",
     [X86ASM_OP_VPCMPEQW] = "vpcmpeqw", [X86ASM_OP_VPCMPEQD] = "vpcmpeqd",
     [X86ASM_OP_VPCMPGTB] = "vpcmpgtb", [X86ASM_OP_VPCMPGTW] = "vpcmpgtw",
@@ -610,8 +610,20 @@ static x86asm_error decode_sse(const uint8_t *bytes, size_t length, size_t pos,
         x86asm_error error = read_modrm(bytes, length, &pos, mode, mode, 64, rex,
                                          &modrm, &memory_argument, &ignored_register);
         if (error != X86ASM_OK) return error;
-        if ((modrm >> 6) == 3u) return X86ASM_ERR_UNRECOGNIZED;
         unsigned vector_index = ((modrm >> 3) & 7u) | ((rex & 4u) != 0 ? 8u : 0u);
+        if ((modrm >> 6) == 3u) {
+            if (p66 || store) return X86ASM_ERR_UNRECOGNIZED;
+            instruction->opcode = high ? X86ASM_OP_MOVLHPS : X86ASM_OP_MOVHLPS;
+            instruction->mode = mode;
+            instruction->address_size = mode;
+            instruction->data_size = 128;
+            instruction->memory_bytes = 0;
+            instruction->encoded_opcode = ((uint32_t)0x0F << 8) | second;
+            set_vector(&instruction->arguments[0], false, vector_index);
+            set_vector(&instruction->arguments[1], false, ((modrm & 7u) | ((rex & 1u) != 0 ? 8u : 0u)));
+            instruction->length = (int)pos;
+            return X86ASM_OK;
+        }
         if (p66) instruction->opcode = high ? X86ASM_OP_MOVHPD : X86ASM_OP_MOVLPD;
         else instruction->opcode = high ? X86ASM_OP_MOVHPS : X86ASM_OP_MOVLPS;
         instruction->mode = mode;
@@ -1208,6 +1220,7 @@ static x86asm_error decode_vex(const uint8_t *bytes, size_t length, size_t pos,
     bool scalar_vector_move = false;
     bool xmm_quad_move = false;
     bool partial_vex_move = false;
+    bool register_partial_vex_move = false;
     bool unary_vector = false;
     bool extend_vector = false;
     bool store = false;
@@ -1410,7 +1423,15 @@ static x86asm_error decode_vex(const uint8_t *bytes, size_t length, size_t pos,
     unsigned reg = ((modrm >> 3) & 7) | (r ? 0 : 8);
     unsigned rm = (modrm & 7) | (b ? 0 : 8);
     x86asm_argument rm_argument = { X86ASM_ARG_NONE, { 0 } };
-    if (partial_vex_move && mod == 3u) return X86ASM_ERR_UNRECOGNIZED;
+    if (partial_vex_move && mod == 3u) {
+        if (p == 0 && (opcode == 0x12 || opcode == 0x16)) {
+            partial_vex_move = false;
+            register_partial_vex_move = true;
+            operation = opcode == 0x12 ? X86ASM_OP_VMOVHLPS : X86ASM_OP_VMOVLHPS;
+        } else {
+            return X86ASM_ERR_UNRECOGNIZED;
+        }
+    }
     if (two_vector_test && vvvv != 15u) return X86ASM_ERR_UNRECOGNIZED;
     if (mask_extract && (mod != 3u || vvvv != 15u)) return X86ASM_ERR_UNRECOGNIZED;
     if (scalar_move && mod != 3u && vvvv != 15u) return X86ASM_ERR_UNRECOGNIZED;
@@ -1463,6 +1484,10 @@ static x86asm_error decode_vex(const uint8_t *bytes, size_t length, size_t pos,
         instruction->data_size = 128;
         instruction->memory_bytes = 8;
     }
+    if (register_partial_vex_move) {
+        instruction->data_size = 128;
+        instruction->memory_bytes = 0;
+    }
     if (mask_extract) {
         set_register(&instruction->arguments[0], register_for_width(32, reg));
         set_vector(&instruction->arguments[1], l != 0, rm);
@@ -1507,6 +1532,10 @@ static x86asm_error decode_vex(const uint8_t *bytes, size_t length, size_t pos,
             set_vector(&instruction->arguments[1], false, vvvv);
             instruction->arguments[2] = rm_argument;
         }
+    } else if (register_partial_vex_move) {
+        set_vector(&instruction->arguments[0], false, reg);
+        set_vector(&instruction->arguments[1], false, vvvv);
+        set_vector(&instruction->arguments[2], false, rm);
     } else if (scalar_move && mod == 3u) {
         if (store) {
             instruction->arguments[0] = rm_argument;

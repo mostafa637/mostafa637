@@ -1592,6 +1592,40 @@ x86emu_error x86emu_step(x86emu_cpu *cpu)
         }
         break;
     }
+    case X86ASM_OP_VMOVLHPS:
+    case X86ASM_OP_VMOVHLPS: {
+        bool high_to_low = instruction->opcode == X86ASM_OP_VMOVHLPS;
+        uint8_t source1[16];
+        uint8_t source2[16];
+        uint8_t result_value[16];
+        if (!read_vector_argument(cpu, instruction, &instruction->arguments[1], 16, source1) ||
+            !read_vector_argument(cpu, instruction, &instruction->arguments[2], 16, source2)) result = X86EMU_ERR_MEMORY;
+        else {
+            memcpy(result_value, high_to_low ? source2 + 8u : source1, 8u);
+            memcpy(result_value + 8u, high_to_low ? source1 + 8u : source2, 8u);
+            if (!write_vector_argument(cpu, instruction, &instruction->arguments[0], 16, result_value)) result = X86EMU_ERR_MEMORY;
+            else {
+                zero_vector_upper_128(cpu, &instruction->arguments[0]);
+                cpu->rip = next_rip;
+            }
+        }
+        break;
+    }
+    case X86ASM_OP_MOVLHPS:
+    case X86ASM_OP_MOVHLPS: {
+        bool high_to_low = instruction->opcode == X86ASM_OP_MOVHLPS;
+        uint8_t destination[16];
+        uint8_t source[16];
+        if (!read_vector_argument(cpu, instruction, &instruction->arguments[0], 16, destination) ||
+            !read_vector_argument(cpu, instruction, &instruction->arguments[1], 16, source)) result = X86EMU_ERR_MEMORY;
+        else {
+            memcpy(destination, high_to_low ? source + 8u : destination, 8u);
+            memcpy(destination + 8u, high_to_low ? destination + 8u : source, 8u);
+            if (!write_vector_argument(cpu, instruction, &instruction->arguments[0], 16, destination)) result = X86EMU_ERR_MEMORY;
+            else cpu->rip = next_rip;
+        }
+        break;
+    }
     case X86ASM_OP_VMOVLPS:
     case X86ASM_OP_VMOVHPS:
     case X86ASM_OP_VMOVLPD:

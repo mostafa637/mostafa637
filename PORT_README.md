@@ -184,3 +184,12 @@ int main(void)
 أضيفت صيغ VEX.128 لعائلة partial XMM moves. في صيغ التحميل ذات opcode `12` أو `16` يستخدم التعليمة ثلاثة operands: destination XMM، وsource XMM من `VEX.vvvv`، وm64. يدمج `VMOVLPS/VMOVLPD` low 64 bits من الذاكرة مع high 64 bits من source XMM، بينما يدمج `VMOVHPS/VMOVHPD` high 64 bits من الذاكرة مع low 64 bits من source XMM. صيغ التخزين ذات opcode `13` أو `17` تستخدم memory destination وXMM source، ويكون `VEX.vvvv` محجوزًا بقيمة 1111.
 
 يتحقق decoder من `VEX.L=0`، ويرفض register-to-register في هذه الصيغ وvvvv غير المحجوز في stores، ويدعم فقط VEX.128 دون EVEX. ينفذ executor الدمج low/high بعرض 64 بت، ويصفر physical bytes فوق 128 بت عند وجهة XMM في load، بينما stores تكتب 8 بايت فقط. الذاكرة borrowed مع bounds checking، ولا تُحاكى alignment faults أو floating-point exception model أو cache protocol.
+
+
+## MOVHLPS/MOVLHPS وVMOVHLPS/VMOVLHPS
+
+أضيفت صيغ register-only من partial XMM moves. في legacy، `MOVHLPS` (`0F 12 /r`) ينقل high quadword من XMM المصدر إلى low quadword من XMM الوجهة مع إبقاء high quadword للوجهة، بينما `MOVLHPS` (`0F 16 /r`) ينقل low quadword من المصدر إلى high quadword من الوجهة مع إبقاء low quadword. يشترط decoder صيغة ModR/M register لهذه المسارات، ولا يخلطها مع MOVLPS/MOVHPS memory forms.
+
+أضيفت كذلك صيغ VEX.128 الثلاثية `VMOVHLPS xmm1, xmm2, xmm3` و`VMOVLHPS xmm1, xmm2, xmm3`. في `VMOVHLPS` يأتي low quadword من high quadword للمصدر الثالث ModR/M.r/m، ويأتي high quadword من high quadword للمصدر الثاني VEX.vvvv. في `VMOVLHPS` يأتي low quadword من low quadword للمصدر الثاني، ويأتي high quadword من low quadword للمصدر الثالث. يتحقق decoder من register ModR/M و`VEX.L=0`، ويطبق executor upper-zeroing فوق 128 بت في صيغ VEX، مع preservation للـphysical upper bytes في الصيغ legacy.
+
+لا تحاكي هذه الدفعة floating-point exceptions أو EVEX masking؛ فالتعليمات تنقل bit patterns فقط ضمن نموذج XMM user-mode.

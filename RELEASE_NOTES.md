@@ -159,3 +159,10 @@ make clean && make check \
 أضيفت صيغ `VMOVLPS` و`VMOVHPS` و`VMOVLPD` و`VMOVHPD` VEX.128. تدعم loads ثلاثة operands مع source XMM من `VEX.vvvv` وm64، وتدعم stores memory-only مع `VEX.vvvv=1111`. يطبق decoder التحقق من VEX.L وترتيب operands، ويرفض register-to-register وvvvv غير المحجوز في stores.
 
 ينفذ executor دمج low/high 64-bit مع source XMM، ويصفر الحالة الفيزيائية فوق 128 بت عند destination XMM، بينما تخزن stores ثمانية بايت فقط. تغطي الاختبارات العائلات الأربع والـmerge source ordering وupper-zeroing وL/vvvv/mod validation وborrowed bounds. اجتازت الدفعة strict C99 وASan/UBSan، ثم نُظفت نواتج البناء. لا يمثل هذا السجل release أو archive جديدًا.
+
+
+### دفعة MOVHLPS/MOVLHPS وVMOVHLPS/VMOVLHPS
+
+أضيفت صيغ legacy register-only `MOVHLPS` و`MOVLHPS`، مع تمييزها عن صيغ `MOVLPS/MOVHPS` memory-only عند قراءة ModR/M. أضيفت أيضًا صيغ VEX.128 الثلاثية `VMOVHLPS` و`VMOVLHPS`، مع التحقق من register ModR/M و`VEX.L=0` وترتيب المصدرين.
+
+ينفذ legacy partial move مع الحفاظ على النصف غير المنقول والـphysical upper bytes، بينما تنفذ صيغ VEX merge بين low/high quadwords وتصفّر الحالة فوق 128 بت. تغطي الاختبارات source ordering، preservation، upper-zeroing، register validation، وترميزات VEX. اجتازت الدفعة strict C99 وASan/UBSan، ثم نُظفت نواتج البناء. لا يمثل هذا السجل release أو archive جديدًا.
