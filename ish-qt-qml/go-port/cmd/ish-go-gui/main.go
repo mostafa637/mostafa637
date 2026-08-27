@@ -95,6 +95,18 @@ type D = layout.Dimensions
 
 const arrowNone = -1
 
+type pageID uint8
+
+const (
+	pageTerminal pageID = iota
+	pageSettings
+	pageAppearance
+	pageExternalKeyboard
+	pageFilesystems
+	pageFilesBrowser
+	pageAbout
+)
+
 type appState struct {
 	theme *material.Theme
 	input widget.Editor
@@ -109,6 +121,25 @@ type appState struct {
 	arrowDirection  int
 	arrowPressed    bool
 	arrowNextRepeat time.Time
+
+	page           pageID
+	backButton     widget.Clickable
+	settingsRows   [5]widget.Clickable
+	appearanceRows [7]widget.Clickable
+	externalRows   [4]widget.Clickable
+	filesRows      [2]widget.Clickable
+	aboutRows      [5]widget.Clickable
+	settingsList   widget.List
+	appearanceList widget.List
+	externalList   widget.List
+	filesList      widget.List
+	browserList    widget.List
+	aboutList      widget.List
+	keepScreenOn   widget.Bool
+	blinkCursor    widget.Bool
+	hideStatusBar  widget.Bool
+	rootfsBase     string
+	fileEntries    []string
 
 	startTried    bool
 	startDone     bool
@@ -160,6 +191,15 @@ func run(w *app.Window) error {
 	state.input.InputHint = key.HintText
 	state.input.LineHeight = unit.Sp(17)
 	state.input.LineHeightScale = 1
+	state.settingsList.List.Axis = layout.Vertical
+	state.appearanceList.List.Axis = layout.Vertical
+	state.externalList.List.Axis = layout.Vertical
+	state.filesList.List.Axis = layout.Vertical
+	state.browserList.List.Axis = layout.Vertical
+	state.aboutList.List.Axis = layout.Vertical
+	state.keepScreenOn.Value = false
+	state.blinkCursor.Value = true
+	state.hideStatusBar.Value = false
 
 	for {
 		e := w.Event()
@@ -183,6 +223,7 @@ func run(w *app.Window) error {
 						state.term.Feed([]byte("\r\n[iSH] Alpine startup failed: " + result.err.Error() + "\r\n"))
 					} else {
 						state.session = result.session
+						state.rootfsBase = rootfsDisplayPath()
 						if state.termCols > 0 && state.termRows > 0 {
 							_ = state.session.Resize(uint16(state.termCols), uint16(state.termRows))
 						}
@@ -221,6 +262,17 @@ func startApplicationSession() (*session.Session, error) {
 		shell = "/bin/sh"
 	}
 	return session.Start(context.Background(), shell, "-i")
+}
+
+func rootfsDisplayPath() string {
+	if override := os.Getenv("ISH_ROOTFS_BASE"); override != "" {
+		return override
+	}
+	dataDir, err := app.DataDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dataDir, "ish-rootfs")
 }
 
 func prepareRootfs(ctx context.Context) (string, error) {
@@ -289,6 +341,10 @@ func (s *appState) handleKey(e key.Event) {
 }
 
 func (s *appState) layout(gtx C) {
+	if s.page != pageTerminal {
+		s.pageView(gtx)
+		return
+	}
 	paint.Fill(gtx.Ops, terminalBlack)
 	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx C) D {
@@ -302,6 +358,309 @@ func (s *appState) layout(gtx C) {
 		gtx.Execute(key.FocusCmd{Tag: &s.input})
 		s.focused = true
 	}
+}
+
+func (s *appState) pageView(gtx C) {
+	pageBackground := color.NRGBA{R: 242, G: 242, B: 247, A: 255}
+	paint.Fill(gtx.Ops, pageBackground)
+	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx C) D { return s.pageToolbar(gtx) }),
+		layout.Flexed(1, func(gtx C) D {
+			switch s.page {
+			case pageSettings:
+				return s.settingsPage(gtx)
+			case pageAppearance:
+				return s.appearancePage(gtx)
+			case pageExternalKeyboard:
+				return s.externalKeyboardPage(gtx)
+			case pageFilesystems:
+				return s.filesystemsPage(gtx)
+			case pageFilesBrowser:
+				return s.filesBrowserPage(gtx)
+			case pageAbout:
+				return s.aboutPage(gtx)
+			default:
+				return layout.Dimensions{}
+			}
+		}),
+	)
+}
+
+func (s *appState) pageToolbar(gtx C) D {
+	height := gtx.Dp(unit.Dp(56))
+	gtx.Constraints.Min = image.Pt(gtx.Constraints.Max.X, height)
+	gtx.Constraints.Max.Y = height
+	paint.FillShape(gtx.Ops, color.NRGBA{R: 255, G: 255, B: 255, A: 245}, clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, height)}.Op())
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx C) D {
+			gtx.Constraints.Min = image.Pt(gtx.Dp(unit.Dp(88)), height)
+			gtx.Constraints.Max = gtx.Constraints.Min
+			return s.backButton.Layout(gtx, func(gtx C) D {
+				if s.backButton.Clicked(gtx) {
+					s.goBack()
+				}
+				label := material.Label(s.theme, unit.Sp(17), "‹  Back")
+				label.Color = color.NRGBA{R: 0, G: 122, B: 255, A: 255}
+				return layout.Center.Layout(gtx, label.Layout)
+			})
+		}),
+		layout.Flexed(1, func(gtx C) D {
+			label := material.Label(s.theme, unit.Sp(17), s.pageTitle())
+			label.Alignment = text.Middle
+			label.Font.Weight = giofont.Bold
+			label.Color = color.NRGBA{R: 20, G: 20, B: 24, A: 255}
+			return label.Layout(gtx)
+		}),
+		layout.Rigid(func(gtx C) D { return layout.Dimensions{Size: image.Pt(gtx.Dp(unit.Dp(88)), height)} }),
+	)
+}
+
+func (s *appState) pageTitle() string {
+	switch s.page {
+	case pageSettings:
+		return "Settings"
+	case pageAppearance:
+		return "Appearance"
+	case pageExternalKeyboard:
+		return "External Keyboard"
+	case pageFilesystems:
+		return "Filesystems"
+	case pageFilesBrowser:
+		return "Browse Files"
+	case pageAbout:
+		return "About iSH"
+	default:
+		return "iSH"
+	}
+}
+
+func (s *appState) goBack() {
+	switch s.page {
+	case pageAppearance, pageExternalKeyboard, pageFilesystems, pageAbout:
+		s.page = pageSettings
+	case pageFilesBrowser:
+		s.page = pageFilesystems
+	default:
+		s.page = pageTerminal
+	}
+}
+
+func pageLabel(theme *material.Theme, size unit.Sp, value string, col color.NRGBA) layout.Widget {
+	return func(gtx C) D {
+		label := material.Label(theme, size, value)
+		label.Color = col
+		return label.Layout(gtx)
+	}
+}
+
+func (s *appState) pageRow(gtx C, button *widget.Clickable, title, detail string, action func()) D {
+	height := gtx.Dp(unit.Dp(52))
+	gtx.Constraints.Min = image.Pt(gtx.Constraints.Max.X, height)
+	gtx.Constraints.Max.Y = height
+	return button.Layout(gtx, func(gtx C) D {
+		if button.Clicked(gtx) && action != nil {
+			action()
+		}
+		bg := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+		if button.Pressed() || button.Hovered() {
+			bg = color.NRGBA{R: 232, G: 232, B: 237, A: 255}
+		}
+		paint.FillShape(gtx.Ops, bg, clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, height)}.Op())
+		return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16)}.Layout(gtx, func(gtx C) D {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx C) D {
+					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
+						layout.Rigid(func(gtx C) D {
+							return pageLabel(s.theme, unit.Sp(17), title, color.NRGBA{R: 28, G: 28, B: 32, A: 255})(gtx)
+						}),
+						layout.Rigid(func(gtx C) D {
+							if detail == "" {
+								return layout.Dimensions{}
+							}
+							return pageLabel(s.theme, unit.Sp(13), detail, color.NRGBA{R: 110, G: 110, B: 116, A: 255})(gtx)
+						}),
+					)
+				}),
+				layout.Rigid(func(gtx C) D {
+					chevron := material.Label(s.theme, unit.Sp(25), "›")
+					chevron.Color = color.NRGBA{R: 142, G: 142, B: 147, A: 255}
+					return chevron.Layout(gtx)
+				}),
+			)
+		})
+	})
+}
+
+func (s *appState) sectionGap(gtx C) D {
+	return layout.Spacer{Height: unit.Dp(18)}.Layout(gtx)
+}
+
+func (s *appState) settingsPage(gtx C) D {
+	return s.settingsList.Layout(gtx, 5, func(gtx C, index int) D {
+		if index == 0 || index == 4 {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx C) D { return s.sectionGap(gtx) }),
+				layout.Rigid(func(gtx C) D { return s.settingsRow(gtx, index) }),
+			)
+		}
+		return s.settingsRow(gtx, index)
+	})
+}
+
+func (s *appState) settingsRow(gtx C, index int) D {
+	titles := []string{"Appearance", "External Keyboard", "Filesystems", "Upgrade Repositories", "About"}
+	details := []string{"Theme, font, cursor and color scheme", "Caps Lock and modifier mappings", "Manage the Alpine filesystems", "Refresh available package repositories", "Version, links and diagnostics"}
+	return s.pageRow(gtx, &s.settingsRows[index], titles[index], details[index], func() {
+		switch index {
+		case 0:
+			s.page = pageAppearance
+		case 1:
+			s.page = pageExternalKeyboard
+		case 2:
+			s.page = pageFilesystems
+		case 4:
+			s.page = pageAbout
+		}
+	})
+}
+
+func (s *appState) appearancePage(gtx C) D {
+	return s.appearanceList.Layout(gtx, 7, func(gtx C, index int) D {
+		if index == 0 || index == 3 {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx C) D { return s.sectionGap(gtx) }),
+				layout.Rigid(func(gtx C) D { return s.appearanceRow(gtx, index) }),
+			)
+		}
+		return s.appearanceRow(gtx, index)
+	})
+}
+
+func (s *appState) appearanceRow(gtx C, index int) D {
+	titles := []string{"Theme", "Font", "Font Size", "Color Scheme", "Cursor Style", "Blink Cursor", "Hide Status Bar"}
+	details := []string{"Default", "DejaVu Sans Mono", "12 pt", "Match System", "Block", "", ""}
+	if index == 5 {
+		return s.switchRow(gtx, &s.blinkCursor, titles[index], true)
+	}
+	if index == 6 {
+		return s.switchRow(gtx, &s.hideStatusBar, titles[index], false)
+	}
+	return s.pageRow(gtx, &s.appearanceRows[index], titles[index], details[index], nil)
+}
+
+func (s *appState) switchRow(gtx C, value *widget.Bool, title string, enabled bool) D {
+	height := gtx.Dp(unit.Dp(52))
+	gtx.Constraints.Min = image.Pt(gtx.Constraints.Max.X, height)
+	gtx.Constraints.Max.Y = height
+	return layout.Stack{}.Layout(gtx,
+		layout.Expanded(func(gtx C) D {
+			paint.FillShape(gtx.Ops, color.NRGBA{R: 255, G: 255, B: 255, A: 255}, clip.Rect{Max: image.Pt(gtx.Constraints.Max.X, height)}.Op())
+			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, height)}
+		}),
+		layout.Stacked(func(gtx C) D {
+			return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16)}.Layout(gtx, func(gtx C) D {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, pageLabel(s.theme, unit.Sp(17), title, color.NRGBA{R: 28, G: 28, B: 32, A: 255})),
+					layout.Rigid(func(gtx C) D { return material.Switch(s.theme, value, "").Layout(gtx) }),
+				)
+			})
+		}),
+	)
+}
+
+func (s *appState) externalKeyboardPage(gtx C) D {
+	return s.externalList.Layout(gtx, 4, func(gtx C, index int) D {
+		if index == 0 {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx C) D { return s.sectionGap(gtx) }),
+				layout.Rigid(func(gtx C) D { return s.externalRow(gtx, index) }),
+			)
+		}
+		return s.externalRow(gtx, index)
+	})
+}
+
+func (s *appState) externalRow(gtx C, index int) D {
+	titles := []string{"Caps Lock Mapping", "Option Mapping", "Backtick Maps Escape", "Override Control-Space"}
+	details := []string{"Control", "None", "Off", "Off"}
+	return s.pageRow(gtx, &s.externalRows[index], titles[index], details[index], nil)
+}
+
+func (s *appState) filesystemsPage(gtx C) D {
+	return s.filesList.Layout(gtx, 2, func(gtx C, index int) D {
+		if index == 0 {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx C) D { return s.sectionGap(gtx) }),
+				layout.Rigid(func(gtx C) D { return s.filesRow(gtx, index) }),
+			)
+		}
+		return s.filesRow(gtx, index)
+	})
+}
+
+func (s *appState) filesRow(gtx C, index int) D {
+	base := s.rootfsBase
+	if base == "" {
+		base = "Alpine root"
+	}
+	titles := []string{"Default", "Browse Files"}
+	details := []string{base, "Open the app-private rootfs"}
+	return s.pageRow(gtx, &s.filesRows[index], titles[index], details[index], func() {
+		if index == 1 {
+			s.openFilesBrowser()
+		}
+	})
+}
+
+func (s *appState) openFilesBrowser() {
+	s.fileEntries = nil
+	if s.rootfsBase != "" {
+		entries, err := os.ReadDir(s.rootfsBase)
+		if err != nil {
+			s.fileEntries = []string{"Unable to read rootfs: " + err.Error()}
+		} else {
+			for _, entry := range entries {
+				name := entry.Name()
+				if entry.IsDir() {
+					name += "/"
+				}
+				s.fileEntries = append(s.fileEntries, name)
+			}
+		}
+	}
+	if len(s.fileEntries) == 0 {
+		s.fileEntries = []string{"Alpine rootfs is not ready"}
+	}
+	s.page = pageFilesBrowser
+}
+
+func (s *appState) filesBrowserPage(gtx C) D {
+	return s.browserList.Layout(gtx, len(s.fileEntries), func(gtx C, index int) D {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx C) D { return s.sectionGap(gtx) }),
+			layout.Rigid(func(gtx C) D {
+				return s.pageRow(gtx, &s.filesRows[0], s.fileEntries[index], "", nil)
+			}),
+		)
+	})
+}
+
+func (s *appState) aboutPage(gtx C) D {
+	return s.aboutList.Layout(gtx, 5, func(gtx C, index int) D {
+		if index == 0 {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx C) D { return s.sectionGap(gtx) }),
+				layout.Rigid(func(gtx C) D { return s.aboutRow(gtx, index) }),
+			)
+		}
+		return s.aboutRow(gtx, index)
+	})
+}
+
+func (s *appState) aboutRow(gtx C, index int) D {
+	titles := []string{"iSH", "Send Feedback", "iSH on GitHub", "iSH Discord Server", "iSH on the Fediverse"}
+	details := []string{"Go/Gio port · Alpine i386", "", "ish-app/ish", "Community", "Social updates"}
+	return s.pageRow(gtx, &s.aboutRows[index%len(s.aboutRows)], titles[index], details[index], nil)
 }
 
 func (s *appState) terminalView(gtx C) D {
@@ -600,6 +959,10 @@ func (s *appState) accessoryButton(gtx C, index int, width, height float32) D {
 	return s.buttons[index].Layout(gtx, func(gtx C) D {
 		pressed := s.buttons[index].Pressed() || s.buttons[index].Hovered()
 		if s.buttons[index].Clicked(gtx) {
+			if index == 5 {
+				s.page = pageSettings
+				return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
+			}
 			if index == 4 {
 				gtx.Execute(clipboard.ReadCmd{Tag: &s.input})
 			} else if index == 6 {
