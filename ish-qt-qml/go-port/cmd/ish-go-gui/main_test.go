@@ -104,3 +104,30 @@ func TestMetricsForWidth(t *testing.T) {
 		t.Fatal("wide iPad layout must omit the hide-keyboard control")
 	}
 }
+
+func TestPageNavigationHierarchy(t *testing.T) {
+	state := &appState{page: pageSettings}
+	if got := state.pageTitle(); got != "Settings" {
+		t.Fatalf("settings title = %q", got)
+	}
+
+	for _, page := range []pageID{pageAppearance, pageExternalKeyboard, pageFilesystems, pageAbout} {
+		state.page = page
+		state.goBack()
+		if state.page != pageSettings {
+			t.Fatalf("page %d did not return to settings", page)
+		}
+	}
+
+	state.page = pageFilesBrowser
+	state.goBack()
+	if state.page != pageFilesystems {
+		t.Fatalf("files browser did not return to filesystems")
+	}
+
+	state.page = pageSettings
+	state.goBack()
+	if state.page != pageTerminal {
+		t.Fatalf("settings did not return to terminal")
+	}
+}

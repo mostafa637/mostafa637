@@ -332,7 +332,14 @@ func (s *appState) drainOutput() {
 }
 
 func (s *appState) handleKey(e key.Event) {
-	if s.session == nil || e.State != key.Press {
+	if e.State != key.Press {
+		return
+	}
+	if e.Name == key.NameEscape && s.page != pageTerminal {
+		s.goBack()
+		return
+	}
+	if s.session == nil {
 		return
 	}
 	if e.Name == key.NameEscape {
@@ -435,6 +442,7 @@ func (s *appState) pageTitle() string {
 }
 
 func (s *appState) goBack() {
+	from := s.pageTitle()
 	switch s.page {
 	case pageAppearance, pageExternalKeyboard, pageFilesystems, pageAbout:
 		s.page = pageSettings
@@ -443,6 +451,7 @@ func (s *appState) goBack() {
 	default:
 		s.page = pageTerminal
 	}
+	log.Printf("iSH GUI page navigation: %s -> %s", from, s.pageTitle())
 }
 
 func pageLabel(theme *material.Theme, size unit.Sp, value string, col color.NRGBA) layout.Widget {
@@ -961,6 +970,7 @@ func (s *appState) accessoryButton(gtx C, index int, width, height float32) D {
 		if s.buttons[index].Clicked(gtx) {
 			if index == 5 {
 				s.page = pageSettings
+				log.Printf("iSH GUI page navigation: Terminal -> Settings")
 				return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)}
 			}
 			if index == 4 {
