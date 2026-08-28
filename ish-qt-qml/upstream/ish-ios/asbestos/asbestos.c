@@ -103,8 +103,14 @@ static void fiber_insert(struct asbestos *asbestos, struct fiber_block *block) {
 
     list_init_add(&asbestos->hash[block->addr % asbestos->hash_size], &block->chain);
     list_init_add(blocks_list(asbestos, PAGE(block->addr), 0), &block->page[0]);
+    // Always initialize page[1] (even for single-page blocks) so that
+    // fiber_block_disconnect's list_remove(&block->page[1]) is safe. Without
+    // this, page[1] stays NULL (from calloc/zeros) for single-page blocks and
+    // list_remove() crashes with SIGSEGV (null pointer) the first time the
+    // block is later invalidated, e.g. during mem_destroy() on process exit.
+    list_init(&block->page[1]);
     if (PAGE(block->addr) != PAGE(block->end_addr))
-        list_init_add(blocks_list(asbestos, PAGE(block->end_addr), 1), &block->page[1]);
+        list_add(blocks_list(asbestos, PAGE(block->end_addr), 1), &block->page[1]);
 }
 
 static struct fiber_block *fiber_lookup(struct asbestos *asbestos, addr_t addr) {
