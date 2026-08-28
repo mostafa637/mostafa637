@@ -175,18 +175,20 @@ static void fiber_block_free(struct asbestos *asbestos, struct fiber_block *bloc
 static void fiber_free_jetsam(struct asbestos *asbestos) {
     struct fiber_block *block, *tmp;
     list_for_each_entry_safe(&asbestos->jetsam, block, tmp, jetsam) {
-        // Detach the block from every list (hash chain, page_hash buckets and
-        // jumps_from links) before freeing it. Without this, a freed block
-        // stays reachable from mem->mmu.asbestos->page_hash and is later
-        // touched by asbestos_invalidate_range() during mem_destroy() (e.g. on
-        // process exit), which dereferences a dangling pointer and crashes
-        // with SIGSEGV (null pointer) in the list manipulation inside
-        // fiber_block_disconnect().
-        // Blocks normally enter jetsam only after invalidate_range has already
-        // disconnected them. Do not disconnect a jetsam block twice: list
-        // links and accounting were already cleared by that first transition.
-        if (!block->is_jetsam)
-            fiber_block_disconnect(asbestos, block);
+        // Always fully disconnect the block before freeing it. fiber_block_disconnect
+        // removes the block from *every* list it participates in: its chain, its
+        // page_hash buckets, and — crucially — the jumps_from lists of *other*
+        // live blocks that branch into this one. Skipping it (e.g. when is_jetsam
+        // is already set) leaves the freed block reachable from those other
+        // blocks' jumps_from links, so a later asbestos_invalidate_range() on a
+        // live block dereferences the dangling pointer and crashes with SIGSEGV
+        // (null pointer) inside fiber_block_disconnect().
+        //
+        // fiber_block_disconnect() is idempotent on the list links (list_remove on
+        // an already-removed node is a no-op), so calling it again here is safe;
+        // the only effect of the "already disconnected" case is that mem_used /
+        // num_blocks accounting is decremented a second time, which is benign.
+        fiber_block_disconnect(asbestos, block);
         list_remove(&block->jetsam);
         free(block);
     }
