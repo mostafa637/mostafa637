@@ -2,6 +2,13 @@ cmake_minimum_required(VERSION 3.21)
 
 project(ish_go_native VERSION 1.0 LANGUAGES C ASM)
 
+# Force a clean, non-cached native build so source fixes in upstream/ish-ios
+# are always recompiled (no ccache / compiler-launcher reuse of stale objects).
+unset(CMAKE_C_COMPILER_LAUNCHER CACHE)
+set(CMAKE_C_COMPILER_LAUNCHER "")
+unset(CMAKE_CXX_COMPILER_LAUNCHER CACHE)
+set(CMAKE_CXX_COMPILER_LAUNCHER "")
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
