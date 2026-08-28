@@ -43,17 +43,17 @@ gogio -target android -arch amd64 -o ish-go-x86_64.apk ./cmd/ish-go-gui
 
 يوجد workflow في `.github/workflows/build-go-gio.yml` يبني ويختبر المشروع على GitHub. يشمل ذلك اختبارات Go و`go vet`، وفحص تنسيق Go، وتجربة lowering من x86-64 إلى LLVM IR ثم إخراج object code عبر `llc-18`، وبناء executable لـLinux.
 
-ينتج workflow APK موقّعًا لكل من `arm64-v8a` و`x86_64`، ويتحقق من توقيع كل APK باستخدام `apksigner`. كما ينزل APK x86_64 إلى AVD يعمل على Linux مع KVM، يثبته، يشغّل Activity، ينتظر جاهزية جلسة Alpine الحقيقية، يتحقق من marker الإصدار، يفتح Settings من زر `infoLight`، يعود إلى الطرفية، ويلتقط screenshots وتشخيصات AVD.
+ينتج workflow APK موقّعًا لكل من `arm64-v8a` و`x86_64`، ويتحقق من توقيع كل APK باستخدام `apksigner`. كما ينزل APK x86_64 إلى AVD يعمل على Linux مع KVM، يثبته، يشغّل Activity، ينتظر جاهزية جلسة Alpine الحقيقية، يتحقق من marker الإصدار، يفتح Settings من زر `infoLight`، يعود إلى الطرفية، ويلتقط screenshots وتشخيصات AVD. ويحتوي أيضاً على probe مستقل لـAPK arm64: يثبته داخل صورة Android x86_64 التي توفر Native Bridge، ينتظر readiness، يحقن `echo ALP ALP` و`cat /etc/alpine-release`، ويفحص logcat ولقطة الشاشة.
 
-آخر تشغيل Go/Gio ناجح موثق هو [run 33114995383](https://github.com/mostafa637/mostafa637/actions/runs/33114995383) على commit `6f3a4f535ac1cdd3be7c87c1bd00fa0c5f9dd259`؛ ونجح أيضاً run الدفع [33114991706](https://github.com/mostafa637/mostafa637/actions/runs/33114991706) لنفس SHA. أثبتا نجاح Linux، وبناء APKين موقّعين، وتشغيل AVD x86_64 على Linux + KVM، وجاهزية Alpine i386 الحقيقية، وmarker `Alpine release 3.19.0`، ووجود السجلين `Terminal -> Settings` و`Settings -> iSH`، مع سجل crash فارغ. لقطة Settings المرفقة بالـartifact تعرض فعلياً grouped Settings مع Back toolbar وAppearance وExternal Keyboard وFilesystems وUpgrade Repositories وAbout.
+آخر تشغيل Go/Gio ناجح موثق هو [run 33129833499](https://github.com/mostafa637/mostafa637/actions/runs/33129833499) على commit `82a8bad996ebddd4db89930fc5ed85948e910c7d`. أثبت نجاح Linux، وبناء APKين موقّعين، وتشغيل AVD x86_64 على Linux + KVM، وجاهزية Alpine i386 الحقيقية، وmarker `Alpine release 3.19.0`، ووجود السجلين `Terminal -> Settings` و`Settings -> iSH`، مع سجل crash فارغ. والأهم أن APK arm64 ثُبّت وشُغّل فعلياً داخل AVD Android x86_64 عبر Native Bridge؛ أثبت logcat `phase=after-main result=0` و`phase=after-devices result=0`، ثم نفّذ smoke marker وظهر `3.19.0` في الطرفية، وسجل crash فارغ. هذا يثبت أن مشكلة تشغيل arm64 ليست crash في كود التطبيق. الاختبار ليس AVD arm64 guest أصلياً؛ تشغيل guest arm64 الحقيقي تعذر على runners المتاحة بسبب قيود صورة/حزمة Android Emulator، لذلك يسجل workflow هذا القيد بدلاً من ادعاء نتيجة غير متاحة. لقطة Settings المرفقة بالـartifact تعرض grouped Settings مع Back toolbar وAppearance وExternal Keyboard وFilesystems وUpgrade Repositories وAbout، كما تعرض لقطة arm64 الطرفية Alpine 3.19.0 فعلياً.
 
-بصمات SHA-256 للـartifacts التي رفعها run 33114995383 هي:
+بصمات SHA-256 للـartifacts التي رفعها run 33129833499 هي:
 
 | Artifact | SHA-256 |
 |---|---|
-| `ish-go-arm64-v8a.apk` | `c5ca95ad47e5409282008fae494bf823431503b9446f45debf5820bab0ccf313` |
-| `ish-go-x86_64.apk` | `1972c6bf0422ee44d913479caba75cb4dbc7ccc63d886b28d8b044e66b11b7b8` |
-| `ish-go-linux-x86_64` | `b181cb0d0582c31ba33fa336d09418a3976e198c526d47f108b0233061d6430e` |
+| `ish-go-arm64-v8a.apk` | `e70e55862814aa1efd8508a231c11daadf5747a486f126e0e034b51042b36c58` |
+| `ish-go-x86_64.apk` | `a6c50e5213807560d4dc8c289fd50155c763798154cfdc1ae1c6d45f5ef19833` |
+| `ish-go-linux-x86_64` | `f59878354dc28040fee7776d4a2dc707a30e3dfb5f3cf35e20a9517f8e8b15d3` |
 
 ## مستورد rootfs
 
@@ -88,7 +88,7 @@ ret
 
 ## الحالة والقيود
 
-هذه نسخة Go/Gio قابلة للبناء تحتوي على terminal UTF-8، جلسة iSH Core/Asbestos حقيقية خلف cgo، فك rootfs بعد التثبيت داخل private app data، شريط ملحقات مستندًا إلى Terminal.storyboard، ArrowPad بسلوك السحب والتكرار المستند إلى `ArrowBarButton.m`، وصفحات Settings/Appearance/External Keyboard/Filesystems/Browse Files/About مع زر Back داخل toolbar. أثبت run 33112614240 أن Alpine i386 يبدأ على Android x86_64 وأن `cat /etc/alpine-release` يعطي `3.19.0`.
+هذه نسخة Go/Gio قابلة للبناء تحتوي على terminal UTF-8، جلسة iSH Core/Asbestos حقيقية خلف cgo، فك rootfs بعد التثبيت داخل private app data، شريط ملحقات مستندًا إلى Terminal.storyboard، ArrowPad بسلوك السحب والتكرار المستند إلى `ArrowBarButton.m`، وصفحات Settings/Appearance/External Keyboard/Filesystems/Browse Files/About مع زر Back داخل toolbar. أثبت run 33129833499 أن Alpine i386 يبدأ على Android x86_64 وأن `cat /etc/alpine-release` يعطي `3.19.0`، كما أثبت تشغيل APK arm64 عبر Native Bridge في المحاكي نفسه.
 
 صفحات Settings الحالية هي طبقة parity أولية وليست نقلًا وظيفيًا كاملًا لكل شاشات iSH iOS. التنقل والصفوف وBrowse Files تعمل، ونموذج `UserPreferences` يحفظ JSON داخل مجلد التطبيق الخاص ويربط Blink Cursor وCursor Style وTheme وFont Size وColor Scheme بالـrenderer، كما تحفظ صفوف External Keyboard قيمها وتعرضها عند العودة. ما تزال إدارة roots الحقيقية، import/export/delete، تنفيذ Upgrade Repositories، وفتح روابط About بحاجة إلى استكمال؛ لذلك لا تُعد الصفحات نقلًا وظيفيًا كاملاً بعد.
 
