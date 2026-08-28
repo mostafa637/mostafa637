@@ -55,6 +55,14 @@ gogio -target android -arch amd64 -o ish-go-x86_64.apk ./cmd/ish-go-gui
 | `ish-go-x86_64.apk` | `a6c50e5213807560d4dc8c289fd50155c763798154cfdc1ae1c6d45f5ef19833` |
 | `ish-go-linux-x86_64` | `f59878354dc28040fee7776d4a2dc707a30e3dfb5f3cf35e20a9517f8e8b15d3` |
 
+## إصلاح AArch64 في Asbestos
+
+كان مسار `asbestos_invalidate_range` يعيد كتابة مؤشرات القفز داخل كتل التعليمات المولّدة ثم يعيد تنفيذ هذه الكتل من دون نشر التعديل إلى instruction cache. هذا غير آمن على مضيف ذي I-cache منفصل مثل AArch64؛ فقد تبقى التعليمات القديمة في cache بعد تعديل `jump_ip`. أضيفت دالة `fiber_code_flush` التي تستدعي [`__builtin___clear_cache`](https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html#index-_005f_005f_005fbuiltin_005f_005f_005fclear_005fcache) بعد توليد الكتلة، وبعد استعادة jump في `fiber_block_disconnect`، وبعد إعادة ربط jump في مسار `cpu_step_to_interrupt`. لا يتغير منطق guest x86 أو بنية Asbestos، وعلى x86 لا يضيف هذا التعديل مساراً عملياً لتغيير السلوك.
+
+تم بناء `ish-core-smoke` كـAArch64 ELF static وتشغيله بواسطة [`qemu-aarch64`](https://www.qemu.org/docs/master/user/main.html) مع fakefs/SQLite وAlpine i386 الحقيقيين. نجح smoke الأساسي واختبار الضغط الذي نفّذ 100 دورة `exec` وقراءة/كتابة ملفات، وأظهر كلاهما `3.19.0` وخرجاً `0` دون segmentation fault أو assertion أو QEMU signal. كما أظهر تفكيك binary سبعة استدعاءات فعلية إلى `__clear_cache` من مسارات Asbestos.
+
+بعد ذلك نجح [GitHub Actions run 33134571794](https://github.com/mostafa637/mostafa637/actions/runs/33134571794) على commit الإصلاح `49a141ce63ebe7fecbf35c0d28ee1c8b720f2496`: اختبارات Go و`go vet`، بناء Linux، بناء APK arm64 وx86_64 وتوقيعهما، واختبار AVD x86_64 مع probe لـAPK arm64. هذا يثبت إصلاح مسار البناء والتشغيل، لكنه لا يساوي اختبار AVD arm64 guest أصلي؛ ذلك المسار ما زال يتخطى بوضوح عند عدم توفر Android Emulator/SDK arm64 على runner.
+
 ## مستورد rootfs
 
 المستورِد يثبت البنية التي يتوقعها fakefs:
