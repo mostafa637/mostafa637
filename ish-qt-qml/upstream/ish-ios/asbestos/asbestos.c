@@ -14,6 +14,13 @@ static void fiber_block_free(struct asbestos *asbestos, struct fiber_block *bloc
 static void fiber_free_jetsam(struct asbestos *asbestos);
 static void fiber_resize_hash(struct asbestos *asbestos, size_t new_size);
 
+// Asbestos writes and then executes generated host instructions. On hosts with
+// a separate instruction cache (notably AArch64), every code patch must be
+// published to the I-cache before another thread can execute it.
+static inline void fiber_code_flush(void *start, void *end) {
+    __builtin___clear_cache((char *)start, (char *)end);
+}
+
 struct asbestos *asbestos_new(struct mmu *mmu) {
     struct asbestos *asbestos = calloc(1, sizeof(struct asbestos));
     asbestos->mmu = mmu;
@@ -130,6 +137,7 @@ static struct fiber_block *fiber_block_compile(addr_t ip, struct tlb *tlb) {
         }
     }
     gen_end(&state);
+    fiber_code_flush(state.block->code, state.block->code + state.size);
     assert(state.ip - ip <= PAGE_SIZE);
     state.block->used = state.capacity;
     return state.block;
@@ -149,8 +157,11 @@ static void fiber_block_disconnect(struct asbestos *asbestos, struct fiber_block
 
         struct fiber_block *prev_block, *tmp;
         list_for_each_entry_safe(&block->jumps_from[i], prev_block, tmp, jumps_from_links[i]) {
-            if (prev_block->jump_ip[i] != NULL)
+            if (prev_block->jump_ip[i] != NULL) {
                 *prev_block->jump_ip[i] = prev_block->old_jump_ip[i];
+                fiber_code_flush(prev_block->jump_ip[i],
+                        prev_block->jump_ip[i] + 1);
+            }
             list_remove(&prev_block->jumps_from_links[i]);
         }
     }
@@ -214,6 +225,8 @@ static int cpu_step_to_interrupt(struct cpu_state *cpu, struct tlb *tlb) {
                     if (last_block->jump_ip[i] != NULL &&
                             (*last_block->jump_ip[i] & 0xffffffff) == block->addr) {
                         *last_block->jump_ip[i] = (unsigned long) block->code;
+                        fiber_code_flush(last_block->jump_ip[i],
+                                last_block->jump_ip[i] + 1);
                         list_add(&block->jumps_from[i], &last_block->jumps_from_links[i]);
                     }
                 }
@@ -248,6 +261,7 @@ static int cpu_single_step(struct cpu_state *cpu, struct tlb *tlb) {
     gen_step(&state, tlb);
     gen_exit(&state);
     gen_end(&state);
+    fiber_code_flush(state.block->code, state.block->code + state.size);
 
     struct fiber_block *block = state.block;
     struct fiber_frame frame = {.cpu = *cpu};
