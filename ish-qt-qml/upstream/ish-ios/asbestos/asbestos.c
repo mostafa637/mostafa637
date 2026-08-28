@@ -175,6 +175,18 @@ static void fiber_block_free(struct asbestos *asbestos, struct fiber_block *bloc
 static void fiber_free_jetsam(struct asbestos *asbestos) {
     struct fiber_block *block, *tmp;
     list_for_each_entry_safe(&asbestos->jetsam, block, tmp, jetsam) {
+        // Detach the block from every list (hash chain, page_hash buckets and
+        // jumps_from links) before freeing it. Without this, a freed block
+        // stays reachable from mem->mmu.asbestos->page_hash and is later
+        // touched by asbestos_invalidate_range() during mem_destroy() (e.g. on
+        // process exit), which dereferences a dangling pointer and crashes
+        // with SIGSEGV (null pointer) in the list manipulation inside
+        // fiber_block_disconnect().
+        // Blocks normally enter jetsam only after invalidate_range has already
+        // disconnected them. Do not disconnect a jetsam block twice: list
+        // links and accounting were already cleared by that first transition.
+        if (!block->is_jetsam)
+            fiber_block_disconnect(asbestos, block);
         list_remove(&block->jetsam);
         free(block);
     }
