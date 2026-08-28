@@ -1,0 +1,399 @@
+name: Build iSH Go/Gio
+
+on:
+  push:
+    branches: [main, ish-qt-qml]
+    paths:
+      - 'ish-qt-qml/go-port/**'
+      - 'ish-qt-qml/upstream/ish-ios/**'
+      - '.github/workflows/build-go-gio.yml'
+  pull_request:
+    branches: [main, ish-qt-qml]
+    paths:
+      - 'ish-qt-qml/go-port/**'
+      - 'ish-qt-qml/upstream/ish-ios/**'
+      - '.github/workflows/build-go-gio.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.25.x'
+  GO_MODULE_DIR: ish-qt-qml/go-port
+  ANDROID_MIN_SDK: '28'
+  ANDROID_TARGET_SDK: '36'
+  ANDROID_BUILD_TOOLS: '36.0.0'
+  ANDROID_NDK: '27.2.12479018'
+  GIO_VERSION: 'v0.10.2'
+  GOGIO_VERSION: 'v0.10.0'
+  APK_SIGN_PASSWORD: ish-qt-ci-release
+
+jobs:
+  go-test-and-linux:
+    name: Go tests, LLVM lowering and Linux Gio
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ${{ env.GO_MODULE_DIR }}/go.sum
+
+      - name: Install Linux and LLVM dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-18 clang-18 lld-18 cmake ninja-build python3 libvulkan-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev libx11-xcb-dev libxcursor-dev libxfixes-dev
+
+      - name: Download Go modules
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: go mod download
+
+      - name: Format, vet and test
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -count=1 ./...
+
+      - name: Test x86_64 to LLVM IR and host object code
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: |
+          go run ./cmd/ish-go-translator -hex 48c7c0010000004883c002c3 > /tmp/ish-go-sample.ll
+          grep -q 'define' /tmp/ish-go-sample.ll
+          go run ./cmd/ish-go-translator \
+            -hex 48c7c0010000004883c002c3 \
+            -llc llc-18 \
+            -o /tmp/ish-go-sample.o
+          test -s /tmp/ish-go-sample.o
+          file /tmp/ish-go-sample.o
+
+      - name: Build native iSH core for Linux
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: |
+          rm -rf /tmp/ish-go-native-linux native/lib
+          cmake -S native -B /tmp/ish-go-native-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/ish-go-native-linux --target ish_core_session ish_kernel ish_emu ish_fakefs ish_sqlite -j2
+          mkdir -p native/lib
+          cp /tmp/ish-go-native-linux/lib/libish_*.a native/lib/
+          test -s native/lib/libish_core_session.a
+
+      - name: Run Alpine CoreSession functional test
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: |
+          rm -rf /tmp/ish-go-alpine-root
+          go run ./cmd/ish-go-rootfs -archive cmd/ish-go-gui/assets/root.tar.gz -base /tmp/ish-go-alpine-root
+          ISH_TEST_ROOTFS=/tmp/ish-go-alpine-root CGO_ENABLED=1 go test -count=1 -tags ishcore ./internal/session
+
+      - name: Build Linux Gio executable
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -tags ishcore \
+            -ldflags "-s -w -X gioui.org/app.ID=org.ish.go" \
+            -o dist/ish-go-linux-x86_64 ./cmd/ish-go-gui
+          test -x dist/ish-go-linux-x86_64
+
+      - name: Upload Linux and Go diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-go-gio-linux-x86_64
+          path: |
+            ${{ env.GO_MODULE_DIR }}/dist/ish-go-linux-x86_64
+            /tmp/ish-go-sample.ll
+            /tmp/ish-go-sample.o
+          if-no-files-found: error
+
+  build-android:
+    name: Go/Gio Android ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            abi: arm64-v8a
+          - arch: amd64
+            abi: x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ${{ env.GO_MODULE_DIR }}/go.sum
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-${ANDROID_TARGET_SDK}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "emulator" \
+            "ndk;${ANDROID_NDK}"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK}" >> "$GITHUB_ENV"
+
+      - name: Install gogio
+        run: |
+          GOBIN="$HOME/go/bin" go install gioui.org/cmd/gogio@${GOGIO_VERSION}
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          gogio -h
+
+      - name: Build native iSH core for Android
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: |
+          rm -rf /tmp/ish-go-native-android native/lib
+          cmake -S native -B /tmp/ish-go-native-android -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="${{ matrix.abi }}" \
+            -DANDROID_PLATFORM="android-${ANDROID_MIN_SDK}"
+          cmake --build /tmp/ish-go-native-android --target ish_core_session ish_kernel ish_emu ish_fakefs ish_sqlite -j2
+          mkdir -p native/lib
+          cp /tmp/ish-go-native-android/lib/libish_*.a native/lib/
+          test -s native/lib/libish_core_session.a
+
+      - name: Download Go modules
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: go mod download
+
+      - name: Test non-GUI Go packages on the Linux runner
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: go test ./internal/... ./cmd/ish-go-rootfs ./cmd/ish-go-translator
+
+      - name: Build signed Gio APK
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        env:
+          GOGIO_SIGNPASS: ${{ env.APK_SIGN_PASSWORD }}
+        run: |
+          mkdir -p dist
+          gogio -x \
+            -target android \
+            -arch "${{ matrix.arch }}" \
+            -minsdk "${ANDROID_MIN_SDK}" \
+            -targetsdk "${ANDROID_TARGET_SDK}" \
+            -appid org.ish.go \
+            -version 0.1.0.1 \
+            -tags ishcore \
+            -signkey "${GITHUB_WORKSPACE}/ish-qt-qml/ci/keys/ish-qt-ci-release.keystore" \
+            -signpass "${GOGIO_SIGNPASS}" \
+            -o "dist/ish-go-${{ matrix.abi }}.apk" \
+            ./cmd/ish-go-gui
+          test -s "dist/ish-go-${{ matrix.abi }}.apk"
+
+      - name: Verify APK signature
+        working-directory: ${{ env.GO_MODULE_DIR }}
+        run: |
+          "$ANDROID_SDK_ROOT/build-tools/${ANDROID_BUILD_TOOLS}/apksigner" verify --verbose "dist/ish-go-${{ matrix.abi }}.apk"
+
+      - name: Upload signed Gio APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-go-gio-android-${{ matrix.abi }}
+          path: ${{ env.GO_MODULE_DIR }}/dist/ish-go-${{ matrix.abi }}.apk
+          if-no-files-found: error
+
+  test-android-avd:
+    name: Go/Gio Android AVD smoke test (Linux + KVM)
+    needs: build-android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install emulator packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-${ANDROID_TARGET_SDK}" "build-tools;${ANDROID_BUILD_TOOLS}" "emulator" "system-images;android-35;google_apis;x86_64"
+
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -e /dev/kvm
+          ls -l /dev/kvm
+
+      - name: Download x86_64 Gio APK
+        uses: actions/download-artifact@v4
+        with:
+          name: ish-go-gio-android-x86_64
+          path: apk
+
+      - name: Download arm64 Gio APK for emulator translation probe
+        uses: actions/download-artifact@v4
+        with:
+          name: ish-go-gio-android-arm64-v8a
+          path: apk-arm64
+
+      - name: Run x86_64 AVD and install APK
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          emulator-boot-timeout: 300
+          script: |
+            set -e; for i in $(seq 1 90); do state=$(adb -s emulator-5554 get-state 2>/dev/null || true); [ "$state" = device ] && break; sleep 2; done; test "$(adb -s emulator-5554 get-state 2>/dev/null)" = device; trap 'status=$?; adb devices > avd-adb-devices.txt 2>&1 || true; adb -s emulator-5554 shell getprop > avd-getprop.txt 2>&1 || true; adb -s emulator-5554 shell dumpsys activity activities > avd-activities.txt 2>&1 || true; adb -s emulator-5554 logcat -d > avd-logcat.txt 2>&1 || true; adb -s emulator-5554 logcat -d -b crash > avd-logcat-crash.txt 2>&1 || true; adb -s emulator-5554 shell ls -l /data/tombstones > avd-tombstones.txt 2>&1 || true; adb -s emulator-5554 shell cat /data/tombstones/tombstone_00 > avd-tombstone-00.txt 2>&1 || true; adb -s emulator-5554 shell screencap -p /sdcard/ish-go-diagnostic.png >/dev/null 2>&1 || true; adb -s emulator-5554 pull /sdcard/ish-go-diagnostic.png avd-ish-go-diagnostic.png >/dev/null 2>&1 || true; exit "$status"' 0; adb devices; test -s apk/ish-go-x86_64.apk; adb -s emulator-5554 install -r apk/ish-go-x86_64.apk; adb -s emulator-5554 shell pm list packages > avd-packages.txt; grep -q 'org.ish.go' avd-packages.txt; adb -s emulator-5554 shell monkey -p org.ish.go -c android.intent.category.LAUNCHER 1; sleep 8; ready=; for i in $(seq 1 75); do ready_log=$(adb -s emulator-5554 logcat -d -s iSHCore:I '*:S' 2>/dev/null || true); if printf '%s' "$ready_log" | grep -q 'iSH Alpine session ready'; then ready=1; break; fi; sleep 2; done; test -n "$ready"; sleep 2; adb -s emulator-5554 shell input tap 220 2135; sleep 2; type_keys() { for key in "$@"; do adb -s emulator-5554 shell input keyevent "$key"; sleep 0.25; done; }; type_keys KEYCODE_E KEYCODE_C KEYCODE_H KEYCODE_O KEYCODE_SPACE KEYCODE_A KEYCODE_L KEYCODE_P KEYCODE_SPACE KEYCODE_A KEYCODE_L KEYCODE_P; adb -s emulator-5554 shell input keyevent KEYCODE_ENTER; sleep 2; type_keys KEYCODE_C KEYCODE_A KEYCODE_T KEYCODE_SPACE KEYCODE_SLASH KEYCODE_E KEYCODE_T KEYCODE_C KEYCODE_SLASH KEYCODE_A KEYCODE_L KEYCODE_P KEYCODE_I KEYCODE_N KEYCODE_E KEYCODE_MINUS KEYCODE_R KEYCODE_E KEYCODE_L KEYCODE_E KEYCODE_A KEYCODE_S KEYCODE_E; adb -s emulator-5554 shell input keyevent KEYCODE_ENTER; sleep 8; adb -s emulator-5554 shell input keyevent KEYCODE_BACK; sleep 2; adb -s emulator-5554 shell input tap 821 2275; sleep 2; adb -s emulator-5554 logcat -d | grep -q 'iSH GUI page navigation: Terminal -> Settings'; adb -s emulator-5554 shell screencap -p /sdcard/ish-go-settings.png; adb -s emulator-5554 pull /sdcard/ish-go-settings.png avd-ish-go-settings.png; adb -s emulator-5554 shell input tap 84 130; back=; for i in $(seq 1 20); do if adb -s emulator-5554 logcat -d | grep -q 'iSH GUI page navigation: Settings -> iSH'; then back=1; break; fi; sleep 1; done; test -n "$back"; adb -s emulator-5554 shell dumpsys activity activities | grep -q 'org.ish.go'; adb -s emulator-5554 logcat -d > avd-logcat.txt; grep -q 'iSH Alpine smoke marker received' avd-logcat.txt; adb -s emulator-5554 shell screencap -p /sdcard/ish-go.png; adb -s emulator-5554 pull /sdcard/ish-go.png avd-ish-go.png; set +e; adb -s emulator-5554 uninstall org.ish.go > avd-arm64-uninstall.txt 2>&1; adb -s emulator-5554 install -r apk-arm64/ish-go-arm64-v8a.apk > avd-arm64-install.txt 2>&1; arm64_install_status=$?; printf '%s\n' "install_status=$arm64_install_status" >> avd-arm64-install.txt; arm64_runtime_status=skipped; if [ "$arm64_install_status" -eq 0 ]; then adb -s emulator-5554 logcat -c; adb -s emulator-5554 shell monkey -p org.ish.go -c android.intent.category.LAUNCHER 1 > avd-arm64-launch.txt 2>&1; arm64_ready=; for i in $(seq 1 90); do arm64_log=$(adb -s emulator-5554 logcat -d -s iSHCore:I '*:S' 2>/dev/null || true); printf '%s' "$arm64_log" | grep -q 'iSH Alpine session ready' && arm64_ready=1; [ -n "$arm64_ready" ] && break; sleep 2; done; if [ -n "$arm64_ready" ]; then sleep 2; adb -s emulator-5554 shell input tap 220 2135; type_keys KEYCODE_E KEYCODE_C KEYCODE_H KEYCODE_O KEYCODE_SPACE KEYCODE_A KEYCODE_L KEYCODE_P KEYCODE_SPACE KEYCODE_A KEYCODE_L KEYCODE_P; adb -s emulator-5554 shell input keyevent KEYCODE_ENTER; sleep 2; type_keys KEYCODE_C KEYCODE_A KEYCODE_T KEYCODE_SPACE KEYCODE_SLASH KEYCODE_E KEYCODE_T KEYCODE_C KEYCODE_SLASH KEYCODE_A KEYCODE_L KEYCODE_P KEYCODE_I KEYCODE_N KEYCODE_E KEYCODE_MINUS KEYCODE_R KEYCODE_E KEYCODE_L KEYCODE_E KEYCODE_A KEYCODE_S KEYCODE_E; adb -s emulator-5554 shell input keyevent KEYCODE_ENTER; fi; arm64_marker=; if [ -n "$arm64_ready" ]; then for i in $(seq 1 90); do arm64_log=$(adb -s emulator-5554 logcat -d -s iSHCore:I '*:S' 2>/dev/null || true); printf '%s' "$arm64_log" | grep -q 'iSH Alpine smoke marker received' && arm64_marker=1; [ -n "$arm64_marker" ] && break; sleep 2; done; fi; if [ -n "$arm64_ready" ] && [ -n "$arm64_marker" ]; then arm64_runtime_status=success; else arm64_runtime_status=failed; fi; sleep 2; adb -s emulator-5554 logcat -d > avd-arm64-logcat.txt 2>&1; adb -s emulator-5554 logcat -d -b crash > avd-arm64-logcat-crash.txt 2>&1; adb -s emulator-5554 shell screencap -p /sdcard/ish-go-arm64-translation.png > /dev/null 2>&1; adb -s emulator-5554 pull /sdcard/ish-go-arm64-translation.png avd-ish-go-arm64-translation.png > /dev/null 2>&1; fi; printf '%s\n' "runtime_status=$arm64_runtime_status" >> avd-arm64-install.txt; if [ "$arm64_runtime_status" = failed ]; then exit 71; fi; set -e
+
+      - name: Upload AVD screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-go-gio-android-avd-screenshot
+          path: |
+            avd-ish-go.png
+            avd-ish-go-settings.png
+            avd-ish-go-diagnostic.png
+            avd-adb-devices.txt
+            avd-getprop.txt
+            avd-activities.txt
+            avd-packages.txt
+            avd-logcat.txt
+            avd-logcat-crash.txt
+            avd-tombstones.txt
+            avd-tombstone-00.txt
+            avd-arm64-uninstall.txt
+            avd-arm64-install.txt
+            avd-arm64-launch.txt
+            avd-arm64-logcat.txt
+            avd-arm64-logcat-crash.txt
+            avd-ish-go-arm64-translation.png
+          if-no-files-found: warn
+
+  test-android-arm64-avd:
+    name: Go/Gio Android arm64-v8a AVD smoke test
+    needs: build-android
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 55
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        id: setup_android_sdk
+        continue-on-error: true
+        uses: android-actions/setup-android@v3
+
+      - name: Record unavailable arm64 Android SDK
+        if: steps.setup_android_sdk.outcome != 'success'
+        run: |
+          {
+            printf '%s\n' 'status=unavailable'
+            printf '%s\n' 'reason=Android SDK setup action failed on the arm64 GitHub runner before emulator probing'
+            printf 'runner_arch='; uname -m
+            printf 'runner_kernel='; uname -sr
+            printf '%s\n' 'The arm64 APK build completed separately; runtime is verified through the x86_64 AVD Native Bridge probe when available.'
+          } > arm64-avd-host-diagnostic.txt
+
+      - name: Probe arm64 emulator packages
+        if: steps.setup_android_sdk.outcome == 'success'
+        id: arm64_packages
+        run: |
+          set +e
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-${ANDROID_TARGET_SDK}" "build-tools;${ANDROID_BUILD_TOOLS}" "emulator" "system-images;android-35;google_apis;arm64-v8a" > arm64-avd-host-diagnostic.txt 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && grep -q 'Dependant package with key emulator not found' arm64-avd-host-diagnostic.txt; then
+            {
+              printf '%s\n' 'status=unavailable'
+              printf '%s\n' 'reason=Android SDK emulator package is unavailable on this arm64 GitHub runner'
+              printf 'runner_arch='; uname -m
+              printf 'runner_kernel='; uname -sr
+              printf '%s\n' 'The arm64 APK build completed separately; no AVD runtime claim is made.'
+            } >> arm64-avd-host-diagnostic.txt
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo '::warning::Android emulator package is unavailable on this arm64 runner; arm64 AVD runtime test is skipped.'
+            exit 0
+          fi
+          if [ "$status" -ne 0 ]; then
+            cat arm64-avd-host-diagnostic.txt
+            exit "$status"
+          fi
+          echo 'available=true' >> "$GITHUB_OUTPUT"
+
+      - name: Enable KVM
+        if: steps.arm64_packages.outputs.available == 'true'
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -e /dev/kvm
+          ls -l /dev/kvm
+
+      - name: Download arm64 Gio APK
+        if: steps.arm64_packages.outputs.available == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: ish-go-gio-android-arm64-v8a
+          path: apk
+
+      - name: Run arm64-v8a AVD and install APK
+        if: steps.arm64_packages.outputs.available == 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: arm64-v8a
+          profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+          disable-animations: true
+          emulator-boot-timeout: 600
+          script: |
+            set -e; for i in $(seq 1 180); do state=$(adb -s emulator-5554 get-state 2>/dev/null || true); [ "$state" = device ] && break; sleep 5; done; test "$(adb -s emulator-5554 get-state 2>/dev/null)" = device; trap 'status=$?; adb devices > arm64-avd-adb-devices.txt 2>&1 || true; adb -s emulator-5554 shell getprop > arm64-avd-getprop.txt 2>&1 || true; adb -s emulator-5554 shell dumpsys activity activities > arm64-avd-activities.txt 2>&1 || true; adb -s emulator-5554 logcat -d > arm64-avd-logcat.txt 2>&1 || true; adb -s emulator-5554 logcat -d -b crash > arm64-avd-logcat-crash.txt 2>&1 || true; adb -s emulator-5554 shell ls -l /data/tombstones > arm64-avd-tombstones.txt 2>&1 || true; adb -s emulator-5554 shell screencap -p /sdcard/ish-go-arm64-diagnostic.png >/dev/null 2>&1 || true; adb -s emulator-5554 pull /sdcard/ish-go-arm64-diagnostic.png arm64-avd-ish-go-diagnostic.png >/dev/null 2>&1 || true; exit "$status"' 0; adb devices; test -s apk/ish-go-arm64-v8a.apk; adb -s emulator-5554 install -r apk/ish-go-arm64-v8a.apk; adb -s emulator-5554 shell pm list packages > arm64-avd-packages.txt; grep -q 'org.ish.go' arm64-avd-packages.txt; adb -s emulator-5554 shell monkey -p org.ish.go -c android.intent.category.LAUNCHER 1; ready=; for i in $(seq 1 90); do ready_log=$(adb -s emulator-5554 logcat -d -s iSHCore:I '*:S' 2>/dev/null || true); if printf '%s' "$ready_log" | grep -q 'iSH Alpine session ready'; then ready=1; break; fi; sleep 5; done; test -n "$ready"; sleep 3; adb -s emulator-5554 logcat -d > arm64-avd-logcat.txt; grep -q 'iSH Alpine session ready' arm64-avd-logcat.txt; grep -q 'iSH Alpine smoke marker received' arm64-avd-logcat.txt; test ! -s arm64-avd-logcat-crash.txt || ! grep -q 'FATAL EXCEPTION\|SIGSEGV\|Fatal signal' arm64-avd-logcat-crash.txt; adb -s emulator-5554 shell screencap -p /sdcard/ish-go-arm64.png; adb -s emulator-5554 pull /sdcard/ish-go-arm64.png arm64-avd-ish-go.png
+
+      - name: Upload arm64 AVD evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-go-gio-android-arm64-avd-evidence
+          path: |
+            arm64-avd-host-diagnostic.txt
+            arm64-avd-ish-go.png
+            arm64-avd-ish-go-diagnostic.png
+            arm64-avd-adb-devices.txt
+            arm64-avd-getprop.txt
+            arm64-avd-activities.txt
+            arm64-avd-packages.txt
+            arm64-avd-logcat.txt
+            arm64-avd-logcat-crash.txt
+            arm64-avd-tombstones.txt
+          if-no-files-found: warn

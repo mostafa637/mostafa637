@@ -1,0 +1,35 @@
+:root { color-scheme: dark; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #000; }
+body { font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace; }
+#terminal { box-sizing: border-box; position: absolute; inset: 0; width: 100%; height: 100%; padding: 10px 10px 294px; overflow: auto; outline: none; color: #f5f5f7; background: #000; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.35; }
+body.keyboard-hidden #terminal { padding-bottom: 52px; }
+#output { display: inline; margin: 0; font: inherit; color: inherit; }
+#cursor { display: inline-block; color: inherit; animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+::selection { color: #000; background: #fff; }
+
+/* Android iSH-style input accessory. It lives in Chromium's WebView so the
+   keyboard and terminal share one composited surface; Qt Quick never paints
+   rounded keys over the WebView texture. */
+#iosSurface { box-sizing: border-box; position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; height: 286px; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: #d1d1d6; color: #1c1c1e; user-select: none; -webkit-user-select: none; }
+#iosSurface.compact { height: 43px; }
+#iosSurface.keyboard-hidden { height: 43px; }
+#iosSurface.keyboard-hidden #iosKeyboard { display: none; }
+#iosKeyboard { box-sizing: border-box; display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 6px; }
+.ios-accessory { box-sizing: border-box; display: flex; align-items: center; gap: 6px; min-height: 31px; height: 31px; flex: 0 0 31px; }
+.ios-accessory .ios-key { flex: 0 0 31px; width: 31px; padding: 0; font-size: 13px; }
+.ios-accessory .ios-spacer { flex: 1 1 auto; min-width: 8px; }
+.ios-row { box-sizing: border-box; display: flex; flex: 1 1 0; min-height: 0; gap: 6px; }
+.ios-row-two { padding: 0 5%; }
+.ios-row-three { padding: 0 2%; }
+.ios-row .ios-key { min-width: 0; flex: 1 1 0; }
+.ios-row-three .ios-key.special { flex: 1.25 1 0; }
+.ios-row-four .ios-key.numeric { flex: 2.35 1 0; }
+.ios-row-four .ios-key.space { flex: 5.3 1 0; }
+.ios-row-four .ios-key.return { flex: 2.35 1 0; }
+.ios-key { box-sizing: border-box; border: 0; border-radius: 6px; margin: 0; padding: 0 2px; background: #ffffff; color: #1c1c1e; box-shadow: 0 1px 0 rgba(0,0,0,.18); font: 700 20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1; text-align: center; touch-action: manipulation; }
+.ios-key.special { background: #b8b8bd; font-weight: 500; }
+.ios-key:active { background: #aeb4be; transform: translateY(1px); }
+.ios-key[data-action="space"] { font-size: 14px; }
+.ios-key[data-action="return"] { font-size: 13px; }
+.ios-key[data-action="settings"], .ios-key[data-action="paste"], .ios-key[data-action="hide"] { font-size: 16px; }

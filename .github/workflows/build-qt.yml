@@ -1,0 +1,356 @@
+name: Build iSH Qt/QML
+
+on:
+  push:
+    branches: [main, ish-qt-qml]
+  pull_request:
+    branches: [main, ish-qt-qml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: 6.11.1
+  QT_MODULES: qtwebview qtwebchannel qtwebsockets
+  BUILD_TYPE: Release
+
+jobs:
+  qml-lint:
+    name: QML lint (Qt 6.11.1)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate bundled iSH assets and rootfs
+        run: ./ish-qt-qml/ci/check-assets.sh
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install aqtinstall
+        run: python -m pip install --upgrade aqtinstall
+
+      - name: Install Qt desktop with aqtinstall
+        run: |
+          python -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
+            --outputdir "$RUNNER_TEMP/Qt" \
+            --modules $QT_MODULES
+
+      - name: Run qmllint
+        env:
+          QT_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/gcc_64
+        run: |
+          "$QT_ROOT/bin/qmllint" --max-warnings 1000000 --import=disable \
+            -I ish-qt-qml/android-qt/qml \
+            ish-qt-qml/android-qt/qml/Main.qml \
+            ish-qt-qml/android-qt/qml/*.qml \
+            ish-qt-qml/android-qt/qml/IshIOSStyle/*.qml
+
+  build-linux:
+    name: Linux Desktop
+    needs: qml-lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build clang lld libarchive-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-dev
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install aqtinstall
+        run: python -m pip install --upgrade aqtinstall
+
+      - name: Install Qt desktop with aqtinstall
+        run: |
+          python -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
+            --outputdir "$RUNNER_TEMP/Qt" \
+            --modules $QT_MODULES
+
+      - name: Check complete core bridge
+        run: ./ish-qt-qml/ci/check-source-completeness.sh linux
+
+      - name: Configure Linux
+        env:
+          QT_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/gcc_64
+        run: |
+          cmake -S ish-qt-qml/android-qt -B build-linux -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT"
+
+      - name: Build Linux
+        run: cmake --build build-linux --parallel 2
+
+      - name: Test iSH core on host
+        run: ctest --test-dir build-linux --output-on-failure -R '^ish_core_host_smoke$'
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-qt-linux-x86_64
+          path: build-linux/ish_qt_android
+          if-no-files-found: error
+
+  build-android-debug:
+    name: Android LLDB Debug x86_64
+    needs: qml-lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check build tooling
+        run: |
+          command -v cmake
+          command -v ninja
+          command -v clang
+          ld_lld="$(command -v ld.lld || command -v ld.lld-18 || command -v ld.lld-17 || true)"
+          test -n "$ld_lld"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-36" \
+            "build-tools;36.0.0" "cmake;3.22.1" \
+            "ndk;27.2.12479018"
+
+      - name: Install aqtinstall
+        run: python -m pip install --upgrade aqtinstall
+
+      - name: Install Qt host tools
+        run: |
+          python -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
+            --outputdir "$RUNNER_TEMP/Qt" \
+            --modules $QT_MODULES
+
+      - name: Install Qt Android x86_64
+        run: |
+          python -m aqt install-qt linux android "${QT_VERSION}" android_x86_64 \
+            --outputdir "$RUNNER_TEMP/Qt" \
+            --modules $QT_MODULES
+
+      - name: Check complete core bridge
+        run: ./ish-qt-qml/ci/check-source-completeness.sh android
+
+      - name: Configure Android Debug
+        env:
+          QT_HOST_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/gcc_64
+          QT_ANDROID_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/android_x86_64
+          ANDROID_NDK_VERSION: 27.2.12479018
+        run: |
+          QT_TOOLCHAIN="$QT_ANDROID_ROOT/lib/cmake/Qt6/qt.toolchain.cmake"
+          cmake -S ish-qt-qml/android-qt -B build-x86_64-debug -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DQT_HOST_PATH="$QT_HOST_ROOT" \
+            -DCMAKE_TOOLCHAIN_FILE="$QT_TOOLCHAIN" \
+            -DANDROID_ABI=x86_64 \
+            -DANDROID_PLATFORM=android-28 \
+            -DQT_ANDROID_SIGN_APK=OFF
+
+      - name: Build Android Debug
+        run: cmake --build build-x86_64-debug --parallel 2
+
+      - name: Upload Android LLDB Debug APK and symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-qt-android-x86_64-debug
+          path: |
+            build-x86_64-debug/android-build/build/outputs/apk/debug/*.apk
+            build-x86_64-debug/android-build/libs/x86_64/**/*.so
+          if-no-files-found: error
+
+  build-android:
+    name: Android ${{ matrix.abi }}
+    needs: qml-lint
+    runs-on: ubuntu-24.04
+    env:
+      QT_ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/ish-qt-qml/ci/keys/ish-qt-ci-release.keystore
+      QT_ANDROID_KEYSTORE_ALIAS: ishqtrelease
+      QT_ANDROID_KEYSTORE_STORE_PASS: ish-qt-ci-release
+      QT_ANDROID_KEYSTORE_KEY_PASS: ish-qt-ci-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            qt_arch: android_arm64_v8a
+          - abi: x86_64
+            qt_arch: android_x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build clang lld
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-36" \
+            "build-tools;36.0.0" "cmake;3.22.1" \
+            "ndk;27.2.12479018"
+
+      - name: Install aqtinstall
+        run: python -m pip install --upgrade aqtinstall
+
+      - name: Install Qt host tools with aqtinstall
+        run: |
+          python -m aqt install-qt linux desktop "${QT_VERSION}" linux_gcc_64 \
+            --outputdir "$RUNNER_TEMP/Qt" \
+            --modules $QT_MODULES
+
+      - name: Install Qt Android with aqtinstall
+        run: |
+          python -m aqt install-qt linux android "${QT_VERSION}" "${{ matrix.qt_arch }}" \
+            --outputdir "$RUNNER_TEMP/Qt" \
+            --modules $QT_MODULES
+
+      - name: Check complete core bridge
+        run: ./ish-qt-qml/ci/check-source-completeness.sh android
+
+      - name: Configure Android
+        env:
+          QT_HOST_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/gcc_64
+          QT_ANDROID_ROOT: ${{ runner.temp }}/Qt/${{ env.QT_VERSION }}/${{ matrix.qt_arch }}
+          ANDROID_NDK_VERSION: 27.2.12479018
+        run: |
+          command -v ninja
+          ninja --version
+          QT_TOOLCHAIN="$QT_ANDROID_ROOT/lib/cmake/Qt6/qt.toolchain.cmake"
+          test -f "$QT_TOOLCHAIN"
+          echo "Using Qt toolchain: $QT_TOOLCHAIN"
+          cmake -S ish-qt-qml/android-qt -B "build-${{ matrix.abi }}" -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DQT_HOST_PATH="$QT_HOST_ROOT" \
+            -DCMAKE_TOOLCHAIN_FILE="$QT_TOOLCHAIN" \
+            -DANDROID_ABI="${{ matrix.abi }}" \
+            -DANDROID_PLATFORM=android-28 \
+            -DQT_ANDROID_SIGN_APK=ON
+
+      - name: Build Android Release
+        run: cmake --build "build-${{ matrix.abi }}" --parallel 2
+
+      - name: Verify signed Android APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find "build-${{ matrix.abi }}/android-build/build/outputs/apk/release" -type f -name '*.apk' ! -name '*unsigned.apk' | head -n 1 || true)"
+          test -n "$apk"
+          test ! -e "${apk%.apk}-unsigned.apk"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose "$apk"
+          echo "Signed APK: $apk"
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-qt-android-${{ matrix.abi }}
+          path: build-${{ matrix.abi }}/android-build/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  test-android-avd-linux:
+    name: Android AVD smoke test with full LLDB lifecycle (Linux + KVM)
+    needs: build-android-debug
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable KVM group permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -e /dev/kvm
+          ls -l /dev/kvm
+
+      - name: Download Android APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ish-qt-android-x86_64-debug
+          path: apk
+          merge-multiple: false
+
+      - name: Install pinned NDK for Android LLDB
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager_bin="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -path '*/bin/sdkmanager' -print -quit 2>/dev/null || true)"
+          if [[ -z "$sdkmanager_bin" ]]; then
+            echo "sdkmanager was not found below $ANDROID_SDK_ROOT/cmdline-tools" >&2
+            exit 127
+          fi
+          "$sdkmanager_bin" "ndk;27.2.12479018"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          test -x "$ANDROID_SDK_ROOT/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/lldb.sh"
+          test -f "$ANDROID_SDK_ROOT/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/18/lib/linux/x86_64/lldb-server"
+
+      - name: Run x86_64 AVD with Android Emulator Runner
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash ci/run-android-avd-lldb.sh
+
+      - name: Upload Linux AVD diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ish-android-avd-linux-diagnostics
+          path: |
+            avd-linux-screenshot.png
+            avd-linux-captures/**
+            avd-linux-ui/**
+            avd-linux-logcat/**
+            avd-linux-logcat.txt
+            avd-linux-activity.txt
+            ish-qt-errors-device.log
+            avd-linux-logcat/lldb-full-runtime.log
+            avd-linux-logcat/lldb-server.log
+          if-no-files-found: warn
