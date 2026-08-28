@@ -61,7 +61,9 @@ gogio -target android -arch amd64 -o ish-go-x86_64.apk ./cmd/ish-go-gui
 
 تم بناء `ish-core-smoke` كـAArch64 ELF static وتشغيله بواسطة [`qemu-aarch64`](https://www.qemu.org/docs/master/user/main.html) مع fakefs/SQLite وAlpine i386 الحقيقيين. نجح smoke الأساسي واختبار الضغط الذي نفّذ 100 دورة `exec` وقراءة/كتابة ملفات، وأظهر كلاهما `3.19.0` وخرجاً `0` دون segmentation fault أو assertion أو QEMU signal. كما أظهر تفكيك binary سبعة استدعاءات فعلية إلى `__clear_cache` من مسارات Asbestos.
 
-بعد ذلك نجح [GitHub Actions run 33134571794](https://github.com/mostafa637/mostafa637/actions/runs/33134571794) على commit الإصلاح `49a141ce63ebe7fecbf35c0d28ee1c8b720f2496`: اختبارات Go و`go vet`، بناء Linux، بناء APK arm64 وx86_64 وتوقيعهما، واختبار AVD x86_64 مع probe لـAPK arm64. هذا يثبت إصلاح مسار البناء والتشغيل، لكنه لا يساوي اختبار AVD arm64 guest أصلي؛ ذلك المسار ما زال يتخطى بوضوح عند عدم توفر Android Emulator/SDK arm64 على runner.
+أضيف أيضاً إصلاح دورة حياة `jetsam` من PR #2، لكن بصيغة آمنة: block الذي دخل `jetsam` عبر `asbestos_invalidate_range` يكون قد مرّ بالفعل عبر `fiber_block_disconnect`، لذلك يمنع `fiber_free_jetsam` إعادة فصل block نفسه مرتين. هذا يحافظ على إزالة المراجع قبل التحرير من دون تكرار `list_remove` أو إنقاص counters مرتين.
+
+نجح [GitHub Actions run 33160964142](https://github.com/mostafa637/mostafa637/actions/runs/33160964142) بعد الدمج الآمن: اختبارات Go و`go vet`، بناء Linux، بناء APK arm64 وx86_64 وتوقيعهما، واختبار AVD x86_64 مع probe لـAPK arm64. كما نجح تشغيل C Core arm64 بعد هذا التعديل على QEMU مع Alpine `3.19.0` والخروج `0`. هذا لا يساوي اختبار AVD arm64 guest أصلي؛ ذلك المسار ما زال يتخطى بوضوح عند عدم توفر Android Emulator/SDK arm64 على runner.
 
 ## مستورد rootfs
 
