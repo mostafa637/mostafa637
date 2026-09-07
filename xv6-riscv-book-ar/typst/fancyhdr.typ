@@ -45,11 +45,12 @@
 #let _tokens(places) = {
   if type(places) == str {
     let cleaned = places.trim()
-    if cleaned == "" { ("",) } else { cleaned.split(",").map(token => token.trim()) }
+if cleaned == "" { ("",) } else { cleaned.split(",").map(token => token.trim()) }
   } else if type(places) == array {
     places.map(token => token)
   } else {
-    panic("fancyhdr: places must be a selector string or an array of selector strings")
+panic("fancyhdr:
+places must be a selector string or an array of selector strings")
   }
 }
 
@@ -67,7 +68,7 @@
 
 #let _side-list(token) = {
   let result = ()
-  if not _has(token, "L", "l") and not _has(token, "C", "c") and not _has(token, "R", "r") {
+if not _has(token, "L", "l") and not _has(token, "C", "c") and not _has(token, "R", "r") {
     _sides
   } else {
     if _has(token, "L", "l") { result.push("left") }
@@ -95,10 +96,11 @@
   let current-page = counter(page).get().first()
   let items = query(metadata).filter(item => {
     let value = item.value
-    type(value) == dictionary and value.at("fancyhdr_kind", default: none) == "standard" and value.at(side, default: none) != none
+type(value) == dictionary and value.at("fancyhdr_kind", default:
+none) == "standard" and value.at(side, default: none) != none
   })
-  let current = items.filter(item => counter(page).at(item.location()).first() == current-page)
-  let prior = items.filter(item => counter(page).at(item.location()).first() < current-page)
+let current = items.filter(item => counter(page).at(item.location()).first() == current-page)
+let prior = items.filter(item => counter(page).at(item.location()).first() < current-page)
   let chosen = if current.len() > 0 {
     if which == "first" { current.first() } else { current.last() }
   } else if prior.len() > 0 {
@@ -125,9 +127,11 @@
   // fancyhdr's default `fancy` style: the standard marks in the sides and
   // the page number in the footer center. The content functions are resolved
   // in page context when the style is rendered.
-  odd_header_left: conditions => if conditions.at("two-sided", default: false) { _default-mark-query("left", "last") } else { _default-mark-query("right", "first") },
+odd_header_left: conditions => if conditions.at("two-sided", default:
+false) { _default-mark-query("left", "last") } else { _default-mark-query("right", "first") },
   odd_header_center: none,
-  odd_header_right: conditions => if conditions.at("two-sided", default: false) { _default-mark-query("right", "first") } else { _default-mark-query("left", "last") },
+odd_header_right: conditions => if conditions.at("two-sided", default:
+false) { _default-mark-query("right", "first") } else { _default-mark-query("left", "last") },
   even_header_left: conditions => _default-mark-query("right", "first"),
   even_header_center: none,
   even_header_right: conditions => _default-mark-query("left", "last"),
@@ -216,11 +220,11 @@
   else if type(requested) != str { false }
   else if requested.len() == 1 {
     let letter = requested.first(default: "")
-    letter == "T" or letter == "t" or letter == "c" or letter == "C" or letter == "b" or letter == "B" or letter == "-" or letter == "l" or letter == "L" or letter == "r" or letter == "R" or letter == "j" or letter == "J"
+letter == "T" or letter == "t" or letter == "c" or letter == "C" or letter == "b" or letter == "B" or letter == "-" or letter == "l" or letter == "L" or letter == "r" or letter == "R" or letter == "j" or letter == "J"
   } else if requested.len() == 2 {
     let vertical = requested.first(default: "")
     let horizontal = requested.at(1, default: "")
-    (vertical == "T" or vertical == "t" or vertical == "c" or vertical == "b" or vertical == "B" or vertical == "-") and (horizontal == "l" or horizontal == "L" or horizontal == "c" or horizontal == "C" or horizontal == "r" or horizontal == "R" or horizontal == "j" or horizontal == "J")
+(vertical == "T" or vertical == "t" or vertical == "c" or vertical == "b" or vertical == "B" or vertical == "-") and (horizontal == "l" or horizontal == "L" or horizontal == "c" or horizontal == "C" or horizontal == "r" or horizontal == "R" or horizontal == "j" or horizontal == "J")
   } else { false }
 }
 
@@ -256,23 +260,25 @@
 
 #let _render-field(style, parity, kind, side, conditions: (), row-width: auto, page-width: auto, physical-side: auto) = {
   let content = style.at(_field-key(parity, kind, side))
-  let content = if type(content) == function { content(conditions) } else { content }
+let content = if type(content) == function { content(conditions) } else { content }
   if _is-empty-field(content) {
     box(width: 0pt)[ ]
   } else {
     let requested = style.at(_align-key(parity, kind, side))
     let display-side = if physical-side == auto { side } else { physical-side }
-    let default-h = if display-side == "left" { left } else if display-side == "right" { right } else { center }
+let default-h = if display-side == "left" { left } else if display-side == "right" { right } else { center }
     let default-v = if kind == "header" { bottom } else { top }
     let width-value = style.at(_width-key(parity, kind, side))
-    let field-width = if type(width-value) == dictionary and width-value.at("fancyhdr_fixed_width", default: false) {
+let field-width = if type(width-value) == dictionary and width-value.at("fancyhdr_fixed_width", default:
+false) {
       let requested-width = width-value.at("value")
       let base-spec = width-value.at("base", default: auto)
       let base-delta = width-value.at("base-delta", default: 0pt)
-      let fixed-base = (if base-spec == auto { page-width } else if type(base-spec) == ratio { base-spec * page-width } else { base-spec }) + base-delta
-      if type(requested-width) == ratio { requested-width * fixed-base } else { requested-width }
-    } else if width-value == auto { auto } else if type(width-value) == ratio { width-value * row-width } else { width-value }
-    let content = if _is-justified(requested) { par(justify: true)[#content] } else { content }
+let fixed-base = (if base-spec == auto { page-width } else if type(base-spec) == ratio { base-spec * page-width } else { base-spec }) + base-delta
+if type(requested-width) == ratio { requested-width * fixed-base } else { requested-width }
+} else if width-value == auto { auto } else if type(width-value) == ratio { width-value * row-width } else { width-value }
+let content = if _is-justified(requested) { par(justify:
+true)[#content] } else { content }
     let content = align(_horizontal-align(requested, default-h), content)
     if field-width == auto {
       box(baseline: _vertical-align(requested, default-v))[#content]
@@ -287,19 +293,26 @@
 
 #let _render-row(style, parity, kind, conditions: ()) = layout(size => {
   let delta = style.at("headwidth_delta", default: 0pt)
-  let base-width = (if style.headwidth == auto { size.width } else if type(style.headwidth) == ratio { style.headwidth * size.width } else { style.headwidth }) + delta
-  let direction = conditions.at("direction", default: style.at("direction", default: "ltr"))
+let base-width = (if style.headwidth == auto { size.width } else if type(style.headwidth) == ratio { style.headwidth * size.width } else { style.headwidth }) + delta
+let direction = conditions.at("direction", default:
+style.at("direction", default: "ltr"))
   let logical-left-offset = style.at(_offset-key(parity, kind, "left"))
   let logical-right-offset = style.at(_offset-key(parity, kind, "right"))
-  let physical-left-offset = if direction == "rtl" { logical-right-offset } else { logical-left-offset }
-  let physical-right-offset = if direction == "rtl" { logical-left-offset } else { logical-right-offset }
+let physical-left-offset = if direction == "rtl" { logical-right-offset } else { logical-left-offset }
+let physical-right-offset = if direction == "rtl" { logical-left-offset } else { logical-right-offset }
   let logical-left = _logical-to-physical("left", direction)
   let logical-center = _logical-to-physical("center", direction)
   let logical-right = _logical-to-physical("right", direction)
-  let left-field = _render-field(style, parity, kind, "left", conditions: conditions, row-width: base-width, page-width: size.width, physical-side: logical-left)
-  let center-field = _render-field(style, parity, kind, "center", conditions: conditions, row-width: base-width, page-width: size.width, physical-side: logical-center)
-  let right-field = _render-field(style, parity, kind, "right", conditions: conditions, row-width: base-width, page-width: size.width, physical-side: logical-right)
-  let physical-fields = if direction == "rtl" { (right-field, center-field, left-field) } else { (left-field, center-field, right-field) }
+let left-field = _render-field(style, parity, kind, "left", conditions:
+conditions, row-width: base-width, page-width: size.width, physical-side:
+logical-left)
+let center-field = _render-field(style, parity, kind, "center", conditions:
+conditions, row-width: base-width, page-width: size.width, physical-side:
+logical-center)
+let right-field = _render-field(style, parity, kind, "right", conditions:
+conditions, row-width: base-width, page-width: size.width, physical-side:
+logical-right)
+let physical-fields = if direction == "rtl" { (right-field, center-field, left-field) } else { (left-field, center-field, right-field) }
   let row = box(width: base-width)[
     #grid(
       columns: (1fr, auto, 1fr),
@@ -309,7 +322,7 @@
     )
   ]
   let total-width = base-width + physical-left-offset + physical-right-offset
-  if physical-left-offset == 0pt and physical-right-offset == 0pt and base-width == size.width {
+if physical-left-offset == 0pt and physical-right-offset == 0pt and base-width == size.width {
     row
   } else {
     box(width: total-width)[#h(-physical-left-offset)#row]
@@ -321,15 +334,17 @@
 #let _hook-slot(name) = {
   if name == "fancyhdr/before" or name == "before" { "before" }
   else if name == "fancyhdr/after" or name == "after" { "after" }
-  else if name == "fancyhdr/head/begin" or name == "head-begin" { "head_begin" }
+else if name == "fancyhdr/head/begin" or name == "head-begin" { "head_begin" }
   else if name == "fancyhdr/head/end" or name == "head-end" { "head_end" }
-  else if name == "fancyhdr/foot/begin" or name == "foot-begin" { "foot_begin" }
+else if name == "fancyhdr/foot/begin" or name == "foot-begin" { "foot_begin" }
   else if name == "fancyhdr/foot/end" or name == "foot-end" { "foot_end" }
-  else { panic("fancyhdr: unknown hook; use fancyhdr/before, fancyhdr/after, fancyhdr/head/begin, fancyhdr/head/end, fancyhdr/foot/begin, or fancyhdr/foot/end") }
+else { panic("fancyhdr:
+unknown hook; use fancyhdr/before, fancyhdr/after, fancyhdr/head/begin, fancyhdr/head/end, fancyhdr/foot/begin, or fancyhdr/foot/end") }
 }
 #let _hook-values(style, name, conditions) = {
   let slot = _hook-slot(name)
-  let hooks = style.at("hooks", default: _default-style.hooks).at(slot, default: ())
+let hooks = style.at("hooks", default:
+_default-style.hooks).at(slot, default: ())
   let values = ()
   for hook in hooks {
     let value = _eval(hook, conditions)
@@ -339,23 +354,26 @@
 }
 #let _hooks-content(style, name, conditions) = {
   let values = _hook-values(style, name, conditions)
-  if values.len() == 0 { [] } else { stack(dir: ttb, spacing: 0pt, ..values) }
+if values.len() == 0 { [] } else { stack(dir: ttb, spacing:
+0pt, ..values) }
 }
 
 #let _resolved-space-limit(limit, page-height) = {
   if type(limit) == length { limit }
-  else if type(limit) == ratio and page-height != auto { limit * page-height }
+else if type(limit) == ratio and page-height != auto { limit * page-height }
   else { none }
 }
 #let _guard-page-box(content, kind, limit, mode, page-number, page-height: auto) = layout(size => {
   let measured = measure(content, width: size.width).height
   let resolved-limit = _resolved-space-limit(limit, page-height)
-  let overflowing = resolved-limit != none and measured > resolved-limit + 0.5pt
+let overflowing = resolved-limit != none and measured > resolved-limit + 0.5pt
   if overflowing {
     if mode == "error" {
-      panic("fancyhdr: " + kind + " is too tall (" + repr(measured) + "); increase the reserved page space or use nocheck/compat-v3")
+panic("fancyhdr:
+" + kind + " is too tall (" + repr(measured) + "); increase the reserved page space or use nocheck/compat-v3")
     } else if mode == "expand" {
-      metadata((fancyhdr_kind: "overflow", box: kind, page: page-number, measured: measured, limit: resolved-limit))
+metadata((fancyhdr_kind: "overflow", box: kind, page:
+page-number, measured: measured, limit: resolved-limit))
       box(height: measured, clip: false)[#content]
     } else {
       content
@@ -368,16 +386,18 @@
 #let fancy-overflow-events(page-number: auto) = context {
   query(metadata).filter(item => {
     let value = item.value
-    type(value) == dictionary and value.at("fancyhdr_kind", default: none) == "overflow" and (page-number == auto or value.at("page", default: none) == page-number)
+type(value) == dictionary and value.at("fancyhdr_kind", default:
+none) == "overflow" and (page-number == auto or value.at("page", default:
+none) == page-number)
   }).map(item => item.value)
 }
 
 #let _automatic-heading-mark(conditions) = context {
   let current-page = counter(page).get().first()
   let all-headings = query(heading.where(level: 1))
-  let on-page = all-headings.filter(item => counter(page).at(item.location()).first() == current-page)
-  let prior = all-headings.filter(item => counter(page).at(item.location()).first() < current-page)
-  let chosen = if on-page.len() > 0 { on-page.last() } else if prior.len() > 0 { prior.last() } else { none }
+let on-page = all-headings.filter(item => counter(page).at(item.location()).first() == current-page)
+let prior = all-headings.filter(item => counter(page).at(item.location()).first() < current-page)
+let chosen = if on-page.len() > 0 { on-page.last() } else if prior.len() > 0 { prior.last() } else { none }
   if chosen == none { none } else { chosen.body }
 }
 
@@ -388,11 +408,12 @@
     _items-on-page(footnote, page-number).len() > 0
   } else if kind == "top-float" or kind == "bottom-float" {
     let wanted = if kind == "top-float" { "top" } else { "bottom" }
-    _items-on-page(figure, page-number).filter(item => _figure-placement-name(item) == wanted).len() > 0
+_items-on-page(figure, page-number).filter(item => _figure-placement-name(item) == wanted).len() > 0
   } else if kind == "float-page" {
     _items-on-page(metadata, page-number).filter(item => {
       let value = item.value
-      type(value) == dictionary and value.at("fancyhdr_kind", default: none) == "float-page"
+type(value) == dictionary and value.at("fancyhdr_kind", default:
+none) == "float-page"
     }).len() > 0
   } else {
     false
@@ -406,7 +427,7 @@
 
 #let _effective-style(style) = {
   let page-number = conditions => context counter(page).display("1")
-  let out = if style.option_headings or style.option_myheadings { _clear-all-fields(style) } else { style }
+let out = if style.option_headings or style.option_myheadings { _clear-all-fields(style) } else { style }
   if style.option_headings {
     out.insert("odd_header_left", _default-mark-query("right", "first"))
     out.insert("odd_header_right", page-number)
@@ -420,7 +441,9 @@
     out.insert("even_header_right", _default-mark-query("left", "last"))
     out.insert("head_rule", (width: 0.4pt, stroke: auto, body: none))
   }
-  if style.at("compat_v3", default: false) and not style.at("nocheck", default: false) and style.at("overflow", default: "error") == "error" {
+if style.at("compat_v3", default:
+false) and not style.at("nocheck", default:
+false) and style.at("overflow", default: "error") == "error" {
     out.insert("overflow", "expand")
   }
   out
@@ -432,27 +455,31 @@
     if type(value) != dictionary { false } else {
       let kind = value.at("fancyhdr_kind", default: none)
       let marker-page = counter(page).at(item.location()).first()
-      (kind == "page-style" and marker-page == page-number) or (kind == "page-style-switch" and marker-page <= page-number)
+(kind == "page-style" and marker-page == page-number) or (kind == "page-style-switch" and marker-page <= page-number)
     }
   })
   if candidates.len() == 0 {
     (style: fallback, page-style: none, suppress: false)
   } else {
     let selected = candidates.last().value
-    (style: selected.at("style", default: fallback), page-style: selected.at("page-style", default: none), suppress: selected.at("suppress", default: false))
+(style: selected.at("style", default: fallback), page-style:
+selected.at("page-style", default: none), suppress:
+selected.at("suppress", default: false))
   }
 }
 #let _style-on-page(fallback, page-number) = _page-selection(fallback, page-number).style
 #let _render-style-for-page(style, suppress) = if suppress { _clear-all-fields(style) } else { style }
 
 #let fancy-page-style-scope(style, body, page-style: "fancy") = [
-  #metadata((fancyhdr_kind: "page-style", style: style, page-style: page-style, suppress: page-style == "plain"))
+#metadata((fancyhdr_kind: "page-style", style: style, page-style:
+page-style, suppress: page-style == "plain"))
   #body
 ]
 #let fancy-this-page-style = fancy-page-style-scope
 
 #let fancy-page-style-switch(style, body, page-style: "fancy") = [
-  #metadata((fancyhdr_kind: "page-style-switch", style: style, page-style: page-style, suppress: page-style == "plain"))
+#metadata((fancyhdr_kind: "page-style-switch", style: style, page-style:
+page-style, suppress: page-style == "plain"))
   #body
 ]
 #let pagestyle = fancy-page-style-switch
@@ -467,25 +494,29 @@
 #let _render-rule(style, kind, conditions: ()) = layout(size => {
   let is-plain = conditions.at("plain", default: false)
   let rule = if is-plain {
-    if kind == "header" { style.plain_head_rule } else { style.plain_foot_rule }
+if kind == "header" { style.plain_head_rule } else { style.plain_foot_rule }
   } else if kind == "header" { style.head_rule } else { style.foot_rule }
   let width = _eval(rule.width, conditions)
   let stroke = _eval(rule.stroke, conditions)
   let body = _eval(rule.body, conditions)
   let delta = style.at("headwidth_delta", default: 0pt)
-  let base-width = (if style.headwidth == auto { size.width } else if type(style.headwidth) == ratio { style.headwidth * size.width } else { style.headwidth }) + delta
-  let direction = conditions.at("direction", default: style.at("direction", default: "ltr"))
-  let logical-left-offset = style.at(_offset-key(conditions.at("parity", default: "odd"), kind, "left"))
-  let logical-right-offset = style.at(_offset-key(conditions.at("parity", default: "odd"), kind, "right"))
-  let physical-left-offset = if direction == "rtl" { logical-right-offset } else { logical-left-offset }
-  let physical-right-offset = if direction == "rtl" { logical-left-offset } else { logical-right-offset }
+let base-width = (if style.headwidth == auto { size.width } else if type(style.headwidth) == ratio { style.headwidth * size.width } else { style.headwidth }) + delta
+let direction = conditions.at("direction", default:
+style.at("direction", default: "ltr"))
+let logical-left-offset = style.at(_offset-key(conditions.at("parity", default:
+"odd"), kind, "left"))
+let logical-right-offset = style.at(_offset-key(conditions.at("parity", default:
+"odd"), kind, "right"))
+let physical-left-offset = if direction == "rtl" { logical-right-offset } else { logical-left-offset }
+let physical-right-offset = if direction == "rtl" { logical-left-offset } else { logical-right-offset }
   let total-width = base-width + physical-left-offset + physical-right-offset
   if body != none {
     box(width: total-width)[#h(-physical-left-offset)#body]
   } else if width == 0pt {
     none
   } else {
-    box(width: total-width)[#h(-physical-left-offset)#line(length: total-width, stroke: if stroke == auto { width } else { stroke })]
+box(width: total-width)[#h(-physical-left-offset)#line(length:
+total-width, stroke: if stroke == auto { width } else { stroke })]
   }
 })
 
@@ -504,7 +535,8 @@
   _guard-page-box(
     content,
     "header",
-    conditions.at("header-ascent", default: style.at("header_ascent", default: 30%)),
+conditions.at("header-ascent", default: style.at("header_ascent", default:
+30%)),
     conditions.at("overflow", default: "error"),
     conditions.at("page", default: 0),
     page-height: conditions.at("page-height", default: auto),
@@ -528,7 +560,8 @@
   _guard-page-box(
     content,
     "footer",
-    conditions.at("footer-descent", default: style.at("footer_descent", default: 30%)),
+conditions.at("footer-descent", default:
+style.at("footer_descent", default: 30%)),
     conditions.at("overflow", default: "error"),
     conditions.at("page", default: 0),
     page-height: conditions.at("page-height", default: auto),
@@ -597,14 +630,22 @@
   footnote: auto,
 ) = {
   let style = _effective-style(style)
-  let use-two-sided = if two-sided == auto { style.two_sided } else { two-sided }
-  let use-direction = if direction == auto { style.at("direction", default: "ltr") } else { direction }
-  let use-overflow = if overflow == auto { if style.at("nocheck", default: false) { "ignore" } else { style.at("overflow", default: "error") } } else { overflow }
-  if not _direction-valid(use-direction) { panic("fancyhdr: direction must be `ltr` or `rtl`") }
-  if use-overflow != "error" and use-overflow != "ignore" and use-overflow != "expand" { panic("fancyhdr: overflow must be `error`, `ignore`, or `expand`") }
-  let conditions = (page-style: page-style, two-sided: use-two-sided, direction: use-direction, overflow: use-overflow, float-page: float-page, top-float: top-float, bottom-float: bottom-float, footnote: footnote)
-  let use-ascent = if header-ascent == auto { style.header_ascent } else { header-ascent }
-  let use-descent = if footer-descent == auto { style.footer_descent } else { footer-descent }
+let use-two-sided = if two-sided == auto { style.two_sided } else { two-sided }
+let use-direction = if direction == auto { style.at("direction", default:
+"ltr") } else { direction }
+let use-overflow = if overflow == auto { if style.at("nocheck", default:
+false) { "ignore" } else { style.at("overflow", default:
+"error") } } else { overflow }
+if not _direction-valid(use-direction) { panic("fancyhdr:
+direction must be `ltr` or `rtl`") }
+if use-overflow != "error" and use-overflow != "ignore" and use-overflow != "expand" { panic("fancyhdr:
+overflow must be `error`, `ignore`, or `expand`") }
+let conditions = (page-style: page-style, two-sided:
+use-two-sided, direction: use-direction, overflow:
+use-overflow, float-page: float-page, top-float: top-float, bottom-float:
+bottom-float, footnote: footnote)
+let use-ascent = if header-ascent == auto { style.header_ascent } else { header-ascent }
+let use-descent = if footer-descent == auto { style.footer_descent } else { footer-descent }
   set page(
     paper: paper,
     margin: margin,
@@ -612,12 +653,15 @@
     footer-descent: use-descent,
     header: context {
       let page-number = counter(page).get().first()
-      let parity = if use-two-sided and calc.rem(page-number, 2) == 0 { "even" } else { "odd" }
+let parity = if use-two-sided and calc.rem(page-number, 2) == 0 { "even" } else { "odd" }
       let selection = _page-selection(style, page-number)
-      let active-page-style = if selection.page-style == none { page-style } else { selection.page-style }
-      let active-style = _render-style-for-page(_effective-style(selection.style), selection.suppress)
-      let active-direction = if direction != auto { use-direction } else { active-style.at("direction", default: use-direction) }
-      let active-overflow = if overflow != auto { use-overflow } else if active-style.at("nocheck", default: false) { "ignore" } else { active-style.at("overflow", default: use-overflow) }
+let active-page-style = if selection.page-style == none { page-style } else { selection.page-style }
+let active-style = _render-style-for-page(_effective-style(selection.style), selection.suppress)
+let active-direction = if direction != auto { use-direction } else { active-style.at("direction", default:
+use-direction) }
+let active-overflow = if overflow != auto { use-overflow } else if active-style.at("nocheck", default:
+false) { "ignore" } else { active-style.at("overflow", default:
+use-overflow) }
       let current = conditions
       current.insert("page", page-number)
       current.insert("parity", parity)
@@ -628,20 +672,23 @@
       current.insert("header-ascent", use-ascent)
       current.insert("footer-descent", use-descent)
       current.insert("page-height", page.height)
-      current.insert("float-page", _resolve-page-condition(float-page, "float-page", page-number))
-      current.insert("top-float", _resolve-page-condition(top-float, "top-float", page-number))
-      current.insert("bottom-float", _resolve-page-condition(bottom-float, "bottom-float", page-number))
-      current.insert("footnote", _resolve-page-condition(footnote, "footnote", page-number))
+current.insert("float-page", _resolve-page-condition(float-page, "float-page", page-number))
+current.insert("top-float", _resolve-page-condition(top-float, "top-float", page-number))
+current.insert("bottom-float", _resolve-page-condition(bottom-float, "bottom-float", page-number))
+current.insert("footnote", _resolve-page-condition(footnote, "footnote", page-number))
       _render-header(active-style, parity, conditions: current)
     },
     footer: context {
       let page-number = counter(page).get().first()
-      let parity = if use-two-sided and calc.rem(page-number, 2) == 0 { "even" } else { "odd" }
+let parity = if use-two-sided and calc.rem(page-number, 2) == 0 { "even" } else { "odd" }
       let selection = _page-selection(style, page-number)
-      let active-page-style = if selection.page-style == none { page-style } else { selection.page-style }
-      let active-style = _render-style-for-page(_effective-style(selection.style), selection.suppress)
-      let active-direction = if direction != auto { use-direction } else { active-style.at("direction", default: use-direction) }
-      let active-overflow = if overflow != auto { use-overflow } else if active-style.at("nocheck", default: false) { "ignore" } else { active-style.at("overflow", default: use-overflow) }
+let active-page-style = if selection.page-style == none { page-style } else { selection.page-style }
+let active-style = _render-style-for-page(_effective-style(selection.style), selection.suppress)
+let active-direction = if direction != auto { use-direction } else { active-style.at("direction", default:
+use-direction) }
+let active-overflow = if overflow != auto { use-overflow } else if active-style.at("nocheck", default:
+false) { "ignore" } else { active-style.at("overflow", default:
+use-overflow) }
       let current = conditions
       current.insert("page", page-number)
       current.insert("parity", parity)
@@ -652,10 +699,10 @@
       current.insert("header-ascent", use-ascent)
       current.insert("footer-descent", use-descent)
       current.insert("page-height", page.height)
-      current.insert("float-page", _resolve-page-condition(float-page, "float-page", page-number))
-      current.insert("top-float", _resolve-page-condition(top-float, "top-float", page-number))
-      current.insert("bottom-float", _resolve-page-condition(bottom-float, "bottom-float", page-number))
-      current.insert("footnote", _resolve-page-condition(footnote, "footnote", page-number))
+current.insert("float-page", _resolve-page-condition(float-page, "float-page", page-number))
+current.insert("top-float", _resolve-page-condition(top-float, "top-float", page-number))
+current.insert("bottom-float", _resolve-page-condition(bottom-float, "bottom-float", page-number))
+current.insert("footnote", _resolve-page-condition(footnote, "footnote", page-number))
       _render-footer(active-style, parity, conditions: current)
     },
   )
@@ -671,7 +718,7 @@
       .replace(" ", "")
       .replace("\\t", "")
       .replace("\\n", "")
-    for letter in ("E", "O", "L", "C", "R", "H", "F", "e", "o", "l", "c", "r", "h", "f") {
+for letter in ("E", "O", "L", "C", "R", "H", "F", "e", "o", "l", "c", "r", "h", "f") {
       invalid = invalid.replace(letter, "")
     }
     invalid.len() == 0
@@ -685,7 +732,8 @@
       continue
     }
     if not _selector-valid(token) {
-      panic("fancyhdr: illegal field selector; allowed letters are E/O/L/C/R/H/F")
+panic("fancyhdr:
+illegal field selector; allowed letters are E/O/L/C/R/H/F")
     }
     if forbid-center and _has(token, "C", "c") {
       panic("fancyhdr: the C selector is not allowed for offsets")
@@ -747,7 +795,9 @@
       for kind in _kind-list(token, default-kind) {
         for side in _side-list(token) {
           let stored-width = if fixed {
-            (fancyhdr_fixed_width: true, value: width, base: style.at("headwidth", default: auto), base-delta: style.at("headwidth_delta", default: 0pt))
+(fancyhdr_fixed_width: true, value: width, base:
+style.at("headwidth", default: auto), base-delta:
+style.at("headwidth_delta", default: 0pt))
           } else { width }
           out.insert(_width-key(parity, kind, side), stored-width)
           out.insert(_align-key(parity, kind, side), alignment)
@@ -804,21 +854,32 @@
 #let _rule-width(style, rule-key, default: 0pt) = style.at(rule-key, default: (width: default, stroke: auto, body: none)).at("width", default: default)
 #let fancy-register-get(style, name, default: auto) = {
   if name == "headwidth" { style.at("headwidth", default: default) }
-  else if name == "headwidth-delta" or name == "headwidth_delta" { style.at("headwidth_delta", default: default) }
-  else if name == "headrulewidth" or name == "head-rule-width" { _rule-width(style, "head_rule", default: default) }
-  else if name == "footrulewidth" or name == "foot-rule-width" { _rule-width(style, "foot_rule", default: default) }
-  else if name == "plainheadrulewidth" or name == "plain-head-rule-width" { _rule-width(style, "plain_head_rule", default: default) }
-  else if name == "plainfootrulewidth" or name == "plain-foot-rule-width" { _rule-width(style, "plain_foot_rule", default: default) }
-  else if name == "headruleskip" or name == "head-rule-skip" { style.at("head_skip", default: default) }
-  else if name == "footruleskip" or name == "foot-rule-skip" { style.at("foot_skip", default: default) }
-  else if name == "header-ascent" or name == "header_ascent" { style.at("header_ascent", default: default) }
-  else if name == "footer-descent" or name == "footer_descent" { style.at("footer_descent", default: default) }
-  else if name == "footer-align" or name == "footer_align" { style.at("footer_align", default: default) }
+else if name == "headwidth-delta" or name == "headwidth_delta" { style.at("headwidth_delta", default:
+default) }
+else if name == "headrulewidth" or name == "head-rule-width" { _rule-width(style, "head_rule", default:
+default) }
+else if name == "footrulewidth" or name == "foot-rule-width" { _rule-width(style, "foot_rule", default:
+default) }
+else if name == "plainheadrulewidth" or name == "plain-head-rule-width" { _rule-width(style, "plain_head_rule", default:
+default) }
+else if name == "plainfootrulewidth" or name == "plain-foot-rule-width" { _rule-width(style, "plain_foot_rule", default:
+default) }
+else if name == "headruleskip" or name == "head-rule-skip" { style.at("head_skip", default:
+default) }
+else if name == "footruleskip" or name == "foot-rule-skip" { style.at("foot_skip", default:
+default) }
+else if name == "header-ascent" or name == "header_ascent" { style.at("header_ascent", default:
+default) }
+else if name == "footer-descent" or name == "footer_descent" { style.at("footer_descent", default:
+default) }
+else if name == "footer-align" or name == "footer_align" { style.at("footer_align", default:
+default) }
   else { default }
 }
 #let _set-rule-width(style, rule-key, value) = {
   let out = style
-  let rule = style.at(rule-key, default: (width: 0pt, stroke: auto, body: none))
+let rule = style.at(rule-key, default: (width: 0pt, stroke: auto, body:
+none))
   let updated = rule
   updated.insert("width", value)
   out.insert(rule-key, updated)
@@ -830,12 +891,12 @@
     let out = style
     out.insert("headwidth_delta", value)
     out
-  } else if name == "headrulewidth" or name == "head-rule-width" { _set-rule-width(style, "head_rule", value) }
-  else if name == "footrulewidth" or name == "foot-rule-width" { _set-rule-width(style, "foot_rule", value) }
-  else if name == "plainheadrulewidth" or name == "plain-head-rule-width" { _set-rule-width(style, "plain_head_rule", value) }
-  else if name == "plainfootrulewidth" or name == "plain-foot-rule-width" { _set-rule-width(style, "plain_foot_rule", value) }
-  else if name == "headruleskip" or name == "head-rule-skip" { fancy-head-skip(style, value) }
-  else if name == "footruleskip" or name == "foot-rule-skip" { fancy-foot-skip(style, value) }
+} else if name == "headrulewidth" or name == "head-rule-width" { _set-rule-width(style, "head_rule", value) }
+else if name == "footrulewidth" or name == "foot-rule-width" { _set-rule-width(style, "foot_rule", value) }
+else if name == "plainheadrulewidth" or name == "plain-head-rule-width" { _set-rule-width(style, "plain_head_rule", value) }
+else if name == "plainfootrulewidth" or name == "plain-foot-rule-width" { _set-rule-width(style, "plain_foot_rule", value) }
+else if name == "headruleskip" or name == "head-rule-skip" { fancy-head-skip(style, value) }
+else if name == "footruleskip" or name == "foot-rule-skip" { fancy-foot-skip(style, value) }
   else if name == "header-ascent" or name == "header_ascent" {
     let out = style
     out.insert("header_ascent", value)
@@ -844,7 +905,7 @@
     let out = style
     out.insert("footer_descent", value)
     out
-  } else if name == "footer-align" or name == "footer_align" { fancyfootalign(style, value) }
+} else if name == "footer-align" or name == "footer_align" { fancyfootalign(style, value) }
   else { style }
 }
 #let fancy-register-add(style, name, amount) = {
@@ -859,7 +920,7 @@
   if name == "headwidth" { fancy-headwidth-reset(style) }
   else {
     let fallback = fancy-register-get(_default-style, name, default: auto)
-    if fallback == auto { style } else { fancy-register-set(style, name, fallback) }
+if fallback == auto { style } else { fancy-register-set(style, name, fallback) }
   }
 }
 #let fancy-head-rule(style, width, stroke: auto, body: none) = {
@@ -982,13 +1043,18 @@
 #let fancy-style-registry(base: _default-style) = (base: base)
 #let _style-entry(kind, base, definition) = (__fancy_style_entry: true, kind: kind, base: base, definition: definition)
 #let _resolve-style-entry(registry, entry, environment: _default-style) = {
-  if type(entry) != dictionary or not entry.at("__fancy_style_entry", default: false) {
+if type(entry) != dictionary or not entry.at("__fancy_style_entry", default:
+false) {
     entry
   } else {
     let base = if entry.kind == "open" {
-      if entry.base == "base" { registry.at("base", default: environment) } else { _resolve-style-entry(registry, registry.at(entry.base, default: environment), environment: environment) }
+if entry.base == "base" { registry.at("base", default:
+environment) } else { _resolve-style-entry(registry, registry.at(entry.base, default:
+environment), environment: environment) }
     } else {
-      if entry.base == "base" { registry.at("base", default: environment) } else { _resolve-style-entry(registry, registry.at(entry.base, default: environment), environment: environment) }
+if entry.base == "base" { registry.at("base", default:
+environment) } else { _resolve-style-entry(registry, registry.at(entry.base, default:
+environment), environment: environment) }
     }
     if entry.definition == none { base } else { (entry.definition)(base) }
   }
@@ -996,7 +1062,9 @@
 #let fancy-style-define(registry, name, base: "base", definition: none, closed: false) = {
   let out = registry
   if closed {
-    let parent = if base == "base" { registry.at("base", default: _default-style) } else { _resolve-style-entry(registry, registry.at(base, default: _default-style)) }
+let parent = if base == "base" { registry.at("base", default:
+_default-style) } else { _resolve-style-entry(registry, registry.at(base, default:
+_default-style)) }
     let result = if definition == none { parent } else { definition(parent) }
     out.insert(name, result)
   } else {
@@ -1007,7 +1075,8 @@
 #let fancy-style-define-closed(registry, name, base: "base", definition: none) = fancy-style-define(registry, name, base: base, definition: definition, closed: true)
 #let fancy-style-assign(registry, name, source, environment: _default-style) = {
   let out = registry
-  out.insert(name, _resolve-style-entry(registry, registry.at(source, default: environment), environment: environment))
+out.insert(name, _resolve-style-entry(registry, registry.at(source, default:
+environment), environment: environment))
   out
 }
 #let fancy-style-get(registry, name, environment: _default-style) = _resolve-style-entry(registry, registry.at(name, default: environment), environment: environment)
@@ -1059,7 +1128,7 @@
     )
   } else {
     let center-width = measure(center-content, width: available).width
-    let limit = available - 2 * (stretch * gap-width + calc.max(left-width, right-width))
+let limit = available - 2 * (stretch * gap-width + calc.max(left-width, right-width))
     if center-width <= limit {
       grid(
         columns: (1fr, auto, 1fr),
@@ -1085,19 +1154,20 @@
 #let _box-alignment-valid(alignment) = {
   if type(alignment) != str { false }
   else if alignment.len() == 1 {
-    alignment == "T" or alignment == "t" or alignment == "c" or alignment == "C" or alignment == "b" or alignment == "B" or alignment == "l" or alignment == "L" or alignment == "r" or alignment == "R"
+alignment == "T" or alignment == "t" or alignment == "c" or alignment == "C" or alignment == "b" or alignment == "B" or alignment == "l" or alignment == "L" or alignment == "r" or alignment == "R"
   } else if alignment.len() == 2 {
     let vertical = alignment.first(default: "")
     let horizontal = alignment.at(1, default: "")
-    (vertical == "T" or vertical == "t" or vertical == "c" or vertical == "C" or vertical == "b" or vertical == "B") and (horizontal == "l" or horizontal == "L" or horizontal == "c" or horizontal == "C" or horizontal == "r" or horizontal == "R")
+(vertical == "T" or vertical == "t" or vertical == "c" or vertical == "C" or vertical == "b" or vertical == "B") and (horizontal == "l" or horizontal == "L" or horizontal == "c" or horizontal == "C" or horizontal == "r" or horizontal == "R")
   } else { false }
 }
 #let _box-alignments(alignment) = {
   if not _box-alignment-valid(alignment) {
-    panic("fancyhdr-box: illegal alignment; use T/t/c/b/B with l/c/r, or a single c/l/r")
+panic("fancyhdr-box:
+illegal alignment; use T/t/c/b/B with l/c/r, or a single c/l/r")
   }
   let single-center = alignment == "c" or alignment == "C"
-  let vertical = if single-center or alignment.contains("c") or alignment.contains("C") { horizon }
+let vertical = if single-center or alignment.contains("c") or alignment.contains("C") { horizon }
     else if alignment.contains("T") or alignment.contains("t") { top }
     else if alignment.contains("B") or alignment.contains("b") { bottom }
     else { horizon }
@@ -1123,10 +1193,14 @@
 }
 #let _box-item(item, include-after: true) = {
   let is-dictionary = type(item) == dictionary
-  let content = if is-dictionary { item.at("content", default: none) } else { item }
-  let rule = if is-dictionary { item.at("rule", default: none) } else { none }
-  let before = if is-dictionary { item.at("before", default: 0pt) } else { 0pt }
-  let after = if is-dictionary { item.at("after", default: 0pt) } else { 0pt }
+let content = if is-dictionary { item.at("content", default:
+none) } else { item }
+let rule = if is-dictionary { item.at("rule", default:
+none) } else { none }
+let before = if is-dictionary { item.at("before", default:
+0pt) } else { 0pt }
+let after = if is-dictionary { item.at("after", default:
+0pt) } else { 0pt }
   let rule-content = _box-rule(rule)
   let core = if rule-content == none {
     content
@@ -1147,20 +1221,23 @@
     let row = _box-with-strut(_box-item(line-content), strut)
     cells.push(align(alignments.horizontal, row))
   }
-  box(width: width, baseline: alignments.vertical)[#stack(dir: ttb, spacing: gap, ..cells)]
+box(width: width, baseline: alignments.vertical)[#stack(dir: ttb, spacing:
+gap, ..cells)]
 }
 
 #let fancyhdr-box-spaced(lines, alignment: "cl", width: auto, gap: 0pt, strut: false) = {
   let alignments = _box-alignments(alignment)
   let cells = ()
   for item in _box-line-list(lines) {
-    let after = if type(item) == dictionary { item.at("after", default: 0pt) } else { 0pt }
+let after = if type(item) == dictionary { item.at("after", default:
+0pt) } else { 0pt }
     let body = _box-item(item, include-after: false)
     let body = if after == 0pt { body } else { [#body #v(after)] }
     let body = _box-with-strut(body, strut)
     cells.push(align(alignments.horizontal, body))
   }
-  box(width: width, baseline: alignments.vertical)[#stack(dir: ttb, spacing: gap, ..cells)]
+box(width: width, baseline: alignments.vertical)[#stack(dir: ttb, spacing:
+gap, ..cells)]
 }
 
 #let fancy-layout-measure(body, width: auto) = context layout(size => {
@@ -1171,7 +1248,9 @@
 #let fancyhdrsettoheight(body, width: auto) = fancy-measure(body, width: width)
 #let fancy-measure-field(style, parity: "odd", kind: "header", side: "center", width: auto) = context {
   let value = style.at(_field-key(parity, kind, side), default: none)
-  let value = if type(value) == function { value((page: counter(page).get().first(), parity: parity, page-style: "fancy")) } else { value }
+let value = if type(value) == function { value((page:
+counter(page).get().first(), parity: parity, page-style:
+"fancy")) } else { value }
   fancy-measure(value, width: width)
 }
 #let fancy-measure-header(style, parity: "odd", side: "center", width: auto) = fancy-measure-field(style, parity: parity, kind: "header", side: side, width: width)
@@ -1183,14 +1262,18 @@
 #let fancy-plain = fancyplain
 #let fancy-plain-style(style, head-rule: auto, foot-rule: auto, head-stroke: auto, foot-stroke: auto) = {
   let out = style
-  if head-rule != auto { out.insert("plain_head_rule", (width: head-rule, stroke: head-stroke, body: none)) }
-  if foot-rule != auto { out.insert("plain_foot_rule", (width: foot-rule, stroke: foot-stroke, body: none)) }
+if head-rule != auto { out.insert("plain_head_rule", (width:
+head-rule, stroke: head-stroke, body: none)) }
+if foot-rule != auto { out.insert("plain_foot_rule", (width:
+foot-rule, stroke: foot-stroke, body: none)) }
   out
 }
 #let fancy-plain-rules(style, head-width: auto, foot-width: auto, head-stroke: auto, foot-stroke: auto) = {
   let out = style
-  if head-width != auto { out.insert("plain_head_rule", (width: head-width, stroke: head-stroke, body: none)) }
-  if foot-width != auto { out.insert("plain_foot_rule", (width: foot-width, stroke: foot-stroke, body: none)) }
+if head-width != auto { out.insert("plain_head_rule", (width:
+head-width, stroke: head-stroke, body: none)) }
+if foot-width != auto { out.insert("plain_foot_rule", (width:
+foot-width, stroke: foot-stroke, body: none)) }
   out
 }
 #let fancy-plain-head-rule-width(style, width, stroke: auto) = fancy-plain-rules(style, head-width: width, head-stroke: stroke)
@@ -1231,14 +1314,17 @@
 
 #let _mark-items(kind, mark-class: none) = query(metadata).filter(item => {
   let value = item.value
-  type(value) == dictionary and value.at("fancyhdr_kind", default: none) == kind and (mark-class == none or value.at("fancyhdr_class", default: "default") == mark-class)
+type(value) == dictionary and value.at("fancyhdr_kind", default:
+none) == kind and (mark-class == none or value.at("fancyhdr_class", default:
+"default") == mark-class)
 })
 
 #let _query-mark(kind, side, which, mark-class: none) = context {
   let current-page = counter(page).get().first()
-  let items = _mark-items(kind, mark-class: mark-class).filter(item => item.value.at(side, default: none) != none)
-  let current = items.filter(item => counter(page).at(item.location()).first() == current-page)
-  let prior = items.filter(item => counter(page).at(item.location()).first() < current-page)
+let items = _mark-items(kind, mark-class:
+mark-class).filter(item => item.value.at(side, default: none) != none)
+let current = items.filter(item => counter(page).at(item.location()).first() == current-page)
+let prior = items.filter(item => counter(page).at(item.location()).first() < current-page)
   let chosen = if which == "top" {
     if prior.len() > 0 { prior.last() } else { none }
   } else if current.len() > 0 {
@@ -1272,9 +1358,12 @@
 
 #let fancy-heading-marks(body, chapter-level: 1, section-level: 2, subsection-level: 3, transform: none) = {
   let title(value) = if transform == none { value } else { transform(value) }
-  show heading.where(level: chapter-level): it => [#fancy-chapter-mark(title(it.body)) #it]
-  show heading.where(level: section-level): it => [#fancy-section-mark(title(it.body)) #it]
-  show heading.where(level: subsection-level): it => [#fancy-subsection-mark(title(it.body)) #it]
+show heading.where(level: chapter-level):
+it => [#fancy-chapter-mark(title(it.body)) #it]
+show heading.where(level: section-level):
+it => [#fancy-section-mark(title(it.body)) #it]
+show heading.where(level: subsection-level):
+it => [#fancy-subsection-mark(title(it.body)) #it]
   body
 }
 #let fancy-auto-heading-marks = fancy-heading-marks
@@ -1318,9 +1407,10 @@
 
 #let _query-class-value(mark-class, which) = context {
   let current-page = counter(page).get().first()
-  let items = _mark-items("named", mark-class: mark-class).filter(item => item.value.at("value", default: none) != none)
-  let current = items.filter(item => counter(page).at(item.location()).first() == current-page)
-  let prior = items.filter(item => counter(page).at(item.location()).first() < current-page)
+let items = _mark-items("named", mark-class:
+mark-class).filter(item => item.value.at("value", default: none) != none)
+let current = items.filter(item => counter(page).at(item.location()).first() == current-page)
+let prior = items.filter(item => counter(page).at(item.location()).first() < current-page)
   let chosen = if which == "top" {
     if prior.len() > 0 { prior.last() } else { none }
   } else if current.len() > 0 {
@@ -1342,8 +1432,8 @@
 #let fancy-heading-mark(level: 1, which: "last") = context {
   let current-page = counter(page).get().first()
   let all-headings = query(heading.where(level: level))
-  let on-page = all-headings.filter(item => counter(page).at(item.location()).first() == current-page)
-  let prior = all-headings.filter(item => counter(page).at(item.location()).first() < current-page)
+let on-page = all-headings.filter(item => counter(page).at(item.location()).first() == current-page)
+let prior = all-headings.filter(item => counter(page).at(item.location()).first() < current-page)
   let chosen = if on-page.len() > 0 {
     if which == "first" { on-page.first() } else { on-page.last() }
   } else if prior.len() > 0 {
@@ -1376,7 +1466,7 @@
 #let rightmark = fancy-right-mark
 
 #let _legacy-field(style, side, kind, odd-content, even-content) = {
-  let out = if even-content == none { style } else { _set-fields(style, "E" + side + kind, none, even-content) }
+let out = if even-content == none { style } else { _set-fields(style, "E" + side + kind, none, even-content) }
   _set-fields(out, "O" + side + kind, none, odd-content)
 }
 #let _even-value(even-content, even) = if even != auto { even } else if even-content != auto { even-content } else { none }
