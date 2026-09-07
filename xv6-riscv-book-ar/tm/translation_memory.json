@@ -1,0 +1,86 @@
+{
+  "metadata": {
+    "source_language": "en-US",
+    "target_language": "ar-EG",
+    "domain": "Computer Science / Operating Systems",
+    "subject": "MIT xv6-riscv Textbook Translation Memory",
+    "standards": "Al-Alsun Translation Methodology & Localization Best Practices"
+  },
+  "segments": [
+    {
+      "id": "header_ch1",
+      "source": "Operating system interfaces",
+      "target": "واجهات نظام التشغيل"
+    },
+    {
+      "id": "header_ch2",
+      "source": "Operating system organization",
+      "target": "تنظيم نظام التشغيل"
+    },
+    {
+      "id": "header_ch3",
+      "source": "Page tables",
+      "target": "جداول الصفحات"
+    },
+    {
+      "id": "header_ch4",
+      "source": "Traps and system calls",
+      "target": "المصايد واستدعاءات النظام"
+    },
+    {
+      "id": "header_ch5",
+      "source": "Page-fault exceptions",
+      "target": "استثناءات أخطاء الصفحات"
+    },
+    {
+      "id": "header_ch6",
+      "source": "Interrupts and device drivers",
+      "target": "المقاطعات ومحركات الأجهزة"
+    },
+    {
+      "id": "header_ch7",
+      "source": "Locking",
+      "target": "الأقفال والتزامن"
+    },
+    {
+      "id": "header_ch8",
+      "source": "Scheduling",
+      "target": "الجدولة"
+    },
+    {
+      "id": "header_ch9",
+      "source": "Coordination (Sleep/Wakeup)",
+      "target": "التنسيق: النوم والاستيقاظ"
+    },
+    {
+      "id": "header_ch10",
+      "source": "File system",
+      "target": "نظام الملفات"
+    },
+    {
+      "id": "header_ch11",
+      "source": "Logging",
+      "target": "التسجيل الدوري والتعافي"
+    },
+    {
+      "id": "header_ch12",
+      "source": "Concurrency revisited",
+      "target": "إعادة نظر في التزامن"
+    },
+    {
+      "id": "header_ch13",
+      "source": "Summary",
+      "target": "الخاتمة والملخص"
+    },
+    {
+      "id": "os_def",
+      "source": "The job of an operating system is to share a computer among multiple programs and to provide a more useful set of services than the hardware alone supports.",
+      "target": "إن مهمة نظام التشغيل هي مشاركة جهاز الحاسوب بين برامج متعددة وتوفير مجموعة من الخدمات أكثر فائدة مما يدعمه العتاد بمفرده."
+    },
+    {
+      "id": "isolation_def",
+      "source": "A key requirement for operating system design is strong isolation.",
+      "target": "يُعد العزل القوي متطلباً رئيساً ومحورياً في تصميم أنظمة التشغيل."
+    }
+  ]
+}

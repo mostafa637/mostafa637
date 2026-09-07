@@ -1,0 +1,108 @@
+\chapter{المصايد واستدعاءات النظام}
+\label{CH:TRAP}
+
+تحدث \indextext{المصيدة} (trap) عندما يحتاج المعالج إلى تحويل السيطرة والتنفيذ بصورة قسرية من البرمجية الحالية إلى النواة.
+وتحدث المصايد في الحالات التالية:
+\begin{enumerate}
+\item استدعاء نظام (System Call): عندما تنفذ عملية مستخدم تعليمة \lstinline{ecall}.
+\item استثناء (Exception): عندما تنفذ تعليمة غير صالحة أو يحدث خطأ في الذاكرة (مثل القسمة على صفر أو خطأ الصفحة).
+\item مقاطعة عتادية (Interrupt): عندما يرسل جهاز عتادي (مثل مؤقت الساعة أو القرص الصلب) إشارة طلب خدمة.
+\end{enumerate}
+
+يقدم هذا الفصل الآليات العتادية والبرمجية لمعالجة المصايد في RISC-V، وكيفية التعامل مع المصايد القادمة من فضاء المستخدم وفضاء النواة.
+
+\section{عتاد المصايد في RISC-V}
+
+يحتوي كل معالج في RISC-V على مجموعة من السجلات العتادية الخاصة بوضع المشرف (Supervisor CSRs) للتحكم في المصايد:
+\begin{itemize}
+\item \lstinline{stvec} (Supervisor Trap Vector Base Address Register): يحتوي على عنوان دالة معالجة المصايد في النواة.
+\item \lstinline{sepc} (Supervisor Exception Program Counter): يحفظ فيه العتاد عنوان التعليمة التي حدثت عندها المصيدة.
+\item \lstinline{scause} (Supervisor Cause Register): يحفظ فيه العتاد سبب وقوع المصيدة (استدعاء نظام، مقاطعة، أو استثناء معين).
+\item \lstinline{sstatus} (Supervisor Status Register): يحتوي على رايات الحالة مثل \lstinline{SIE} (تفعيل المقاطعات) و \lstinline{SPP} (الوضع السابق قبل المصيدة).
+\item \lstinline{stval} (Supervisor Trap Value Register): يحفظ القيمة المصاحبة للخطأ (مثل العنوان غير الصالح عند خطأ الصفحة).
+\end{itemize}
+
+عند حدوث مصيدة، يقوم عتاد RISC-V تلقائيًا بالخطوات المباشرة التالية:
+\begin{enumerate}
+\item إذا كانت المصيدة مقاطعة عتادية وراية \lstinline{SIE} معطلة، يتم تجاهل المقاطعة.
+\item يحفظ المعالج قيمة عداد البرنامج الحالي \lstinline{pc} في \lstinline{sepc}.
+\item يحفظ المعالج الوضع الحالي (U-mode أو S-mode) في راية \lstinline{SPP} داخل \lstinline{sstatus}.
+\item يكتب المعالج كود السبب في \lstinline{scause}.
+\item يعطل المقاطعات بمسح الراية \lstinline{SIE}.
+\item ينسخ وضع المشرف (S-mode) ليكون الوضع الحالي.
+\item يحمل قيمة \lstinline{stvec} إلى عداد البرنامج \lstinline{pc} للقفز فورًا إلى معالج النواة.
+\end{enumerate}
+
+\section{المصايد القادمة من فضاء المستخدم}
+
+عند حدوث مصيدة أثناء تنفيذ برنامج مستخدم، يتطلب الأمر تبديل جدول الصفحات وسجلات المعالج والمكدس بأمان تام دون تمكين المستخدم من التلاعب بالحالات النواتية.
+
+تُدار العملية في xv6 بواسطة صفحة المنصة القافزة \lstinline{TRAMPOLINE} المتواجدة في نفس العنوان الافتراضي في كلي جدولَي الصفحات:
+\begin{enumerate}
+\item يضمن العتاد التحويل إلى \lstinline{stvec} المحتوي على عنوان \lstinline{uservec} داخل كود التجميع في \lstinline{kernel/trampoline.S}.
+\item تقوم \lstinline{uservec} بحفظ كافة سجلات المعالج الـ 31 الخاصة بالمستخدم داخل هيكل \lstinline{trapframe} الخاص بالعملية.
+\item تحمل \lstinline{uservec} عنوان مكدس النواة للعملية، وعنوان جدول صفحات النواة إلى \lstinline{satp}.
+\item تقفز \lstinline{uservec} إلى الدالة \lstinline{usertrap()} المكتوبة بلغة C في \lstinline{kernel/trap.c}.
+\end{enumerate}
+
+تتفحص \lstinline{usertrap()} السجل \lstinline{scause}:
+\begin{itemize}
+\item إذا كان السبب استدعاء نظام (\lstinline{scause == 8})، تزيد \lstinline{epc} بمقدار 4 لتخطي تعليمة \lstinline{ecall} وتستدعي \lstinline{syscall()}.
+\item إذا كانت مقاطعة عتادية، تستدعي \lstinline{devintr()}.
+\item خلاف ذلك، يكون استثناءً غير متوقع، فتنهي النواة العملية فورًا وتطبع رسالة خطأ.
+\end{itemize}
+
+بعد انتهاء المعالجة، تعود \lstinline{usertrap()} عبر \lstinline{usertrapret()} التي تستدعي \lstinline{userret} لإعادة استرجاع سجلات المستخدم وتحديث \lstinline{satp} بالعودة إلى فضاء المستخدم وتنفيذ \lstinline{sret}.
+
+\section{الكود البرمجي: تنفيذ استدعاءات النظام}
+
+تقوم الدالة \lstinline{syscall()} المحددة في \lstinline{kernel/syscall.c} بقراءة رقم استدعاء النظام المخزن في سجل المستخدم \lstinline{a7} (\lstinline{p->trapframe->a7}).
+
+تتحقق \lstinline{syscall()} من صحة الرقم وفهرسته داخل جدول الدوال \lstinline{syscalls[]}:
+\begin{lstlisting}
+void
+syscall(void)
+{
+  int num;
+  struct proc *p = myproc();
+
+  num = p->trapframe->a7;
+  if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+    p->trapframe->a0 = syscalls[num]();
+  } else {
+    p->trapframe->a0 = -1;
+  }
+}
+\end{lstlisting}
+يُخزن المخرج الناتج عن دالة استدعاء النظام داخل سجل المستخدم \lstinline{a0} ليقرأه البرنامج.
+
+\section{الكود البرمجي: وسائط استدعاءات النظام}
+
+تمرر برامج المستخدم وسائط استدعاءات النظام عبر سجلات المعالج القياسية (\lstinline{a0} إلى \lstinline{a5}).
+توفر النواة دوال مساعدة لاستخراج هذه الوسائط بأمان في \lstinline{kernel/syscall.c}:
+\begin{itemize}
+\item \lstinline{argint(n, &ip)}: جلب الوسيط رقم $n$ كعدد صحيح (32-bit integer).
+\item \lstinline{argaddr(n, &ip)}: جلب الوسيط رقم $n$ كعنوان ذاكرة (64-bit address).
+\item \lstinline{argstr(n, buf, max)}: جلب سلسلة نصية من فضاء ذاكرة المستخدم ونسخها بأمان في ذاكرة النواة باستخدام \lstinline{fetchstr()}.
+\end{itemize}
+
+ولأن فضاء ذاكرة المستخدم منفصل عن فضاء النواة، توفر النواة الدوال \lstinline{copyin()} و \lstinline{copyout()} لنقل البيانات بين فضاء العناوين الافتراضي للعملية وفضاء النواة مع التحقق من صحة المداخل.
+
+\section{المصايد القادمة من فضاء النواة}
+
+عندما تنفذ النواة كودًا في وضع المشرف (S-mode) وتحدث مقاطعة أو استثناء، يختلف التعامل قليلاً:
+\begin{enumerate}
+\item جدول الصفحات هو بالفعل جدول صفحات النواة، ومكدس النواة مثبت بالفعل.
+\item يتم تحويل \lstinline{stvec} ليرير إلى الدالة \lstinline{kernelvec} في \lstinline{kernel/kernelvec.S}.
+\item تحفظ \lstinline{kernelvec} سجلات المعالج على مكدس النواة الحالي وتستدعي \lstinline{kerneltrap()} المحددة في \lstinline{kernel/trap.c}.
+\item بعد معالجة المقاطعة أو الاستثناء، تسترجع \lstinline{kernelvec} السجلات من المكدس وتنفذ \lstinline{sret}.
+\end{enumerate}
+
+\section{العالم الحقيقي}
+
+تستخدم المعالجات الحديثة آليات مصايد معقدة تدعم المتجهات المباشرة (Vectored Interrupts) بحيث ترتبط كل مقاطعة بعنصر محدد في جدول المتجهات لتسريع الاستجابة. كما تتطلب آليات الأمن المتطورة مثل Meltdown و Spectre معالجة دقيقة للغاية لصفحات القفز وعزل جداول الصفحات لتجنب تسريب السجلات المخبئية.
+
+\section{تمارين}
+
+1. تتبع خطوات نقل القيمة من سجل المستخدم \lstinline{a0} إلى متغير النواة في استدعاء النظام \lstinline{sys_write}.
+2. قم بتعديل xv6 لدعم معالجة خطأ الصفحة لتقديم صفحة صفرية عند الحاجة (Null Page Guard).

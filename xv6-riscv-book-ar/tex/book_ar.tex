@@ -1,0 +1,66 @@
+\documentclass[12pt]{book}
+\usepackage[T1]{fontenc}
+\usepackage{times}
+\usepackage{listings}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{imakeidx}
+\usepackage{booktabs}
+\usepackage{etoolbox}
+\usepackage{fullpage}
+\usepackage{soul}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+
+\hypersetup{
+    pdfauthor={Russ Cox, Frans Kaashoek, Robert Morris},
+    pdftitle={xv6: نظام تشغيل تعليمي بسيط شبيه بـ Unix - الترجمة العربية},
+    pdfsubject={Operating Systems, RISC-V, MIT 6.1810},
+    pdfkeywords={Operating Systems, xv6, RISC-V, Arabic Translation}
+}
+
+\lstset{basicstyle=\small\ttfamily}
+\lstset{morecomment=[is]{[[[}{]]]}}
+\lstset{escapeinside={(*@}{@*)}}
+\lstset{xleftmargin=5.0ex}
+
+\newcommand{\github}{https://github.com/mit-pdos/xv6-riscv/blob/riscv}
+\newcommand{\fileref}[1]{\small{\textcolor{red}{(#1)}}}
+\newcommand{\lineref}[2]{\small{\textcolor{red}{(#1:#2)}}}
+\newcommand{\linerefs}[3]{\small{\textcolor{red}{(#1:#2-#3)}}}
+\newcommand{\indextext}[1]{\textit{#1}\index{#1}}
+\newcommand{\indextextx}[1]{{#1}\index{#1}}
+\newcommand{\indexcode}[1]{\lstinline{#1}\index{#1@\lstinline{#1}}}
+
+\title{\textbf{xv6: نظام تشغيل تعليمي بسيط شبيه بـ Unix}\\
+\large الترجمة العربية الأكاديمية الرسمية وفق معايير الترجمة المعتمدة}
+\author{روس كوكس \and فرانس كاشوك \and روبيرت موريس\\
+\small قسم الهندسة الكهربائية وعلم الحاسوب - معهد ماساتشوستس للتكنولوجيا (MIT)}
+
+\makeindex
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+
+\input{acks_ar}
+\input{unix_ar}
+\input{first_ar}
+\input{mem_ar}
+\input{trap_ar}
+\input{pgfault_ar}
+\input{interrupt_ar}
+\input{lock_ar}
+\input{sched_ar}
+\input{sleep_ar}
+\input{fs_ar}
+\input{log_ar}
+\input{lock2_ar}
+\input{sum_ar}
+
+\printindex
+
+\end{document}

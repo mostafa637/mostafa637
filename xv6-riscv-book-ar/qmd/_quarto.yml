@@ -1,0 +1,38 @@
+project:
+  type: book
+  output-dir: ../html_out
+
+book:
+  title: "xv6: نظام تشغيل تعليمي بسيط شبيه بـ Unix (الترجمة العربية الرسمية)"
+  author:
+    - Russ Cox
+    - Frans Kaashoek
+    - Robert Morris
+  language: ar
+  dir: rtl
+  sidebar:
+    style: docked
+    collapse-level: 1
+  chapters:
+    - index.qmd
+    - unix.qmd
+    - first.qmd
+    - mem.qmd
+    - trap.qmd
+    - pgfault.qmd
+    - interrupt.qmd
+    - lock.qmd
+    - sched.qmd
+    - sleep.qmd
+    - fs.qmd
+    - log.qmd
+    - lock2.qmd
+    - sum.qmd
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    code-overflow: wrap
+    number-sections: true

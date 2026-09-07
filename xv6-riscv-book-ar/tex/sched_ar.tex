@@ -1,0 +1,70 @@
+\chapter{الجدولة}
+\label{CH:SCHED}
+
+يمتلك نظام التشغيل القدرة على تشغيل عدد من العمليات أكبر بكثير من عدد أنوية المعالج المتاحة عتاديًا.
+يقوم نظام التشغيل بذلك عن طريق مشاركة الوقت والتعددية بين العمليات، بحيث يُعطى كل خيط تنفيذي مهلة زمنية للتنفيذ على المعالج قبل الانتقال لعملية أخرى.
+
+يقدم هذا الفصل كيفية التعددية (Multiplexing)، وآلية تبديل السياق (Context Switch)، ودالة المجدول (Scheduler) في xv6.
+
+\section{التعددية والتجميع}
+
+يقوم xv6 بـ \indextext{التعددية} (multiplexing) عبر مدخلين:
+\begin{enumerate}
+\item الإيقاف الطوعي: عندما تنظر العملية إدخالاً وإخراجًا أو حدوث حدث معين، تنادي \lstinline{sleep()} وتتخلى طواعية عن المعالج.
+\item الإيقاف القسري (Preemption): عندما تحدث مقاطعة مؤقت زمني دقيق، تنادي النواة \lstinline{yield()} لإيقاف العملية وتوزيع الوقت بالتساوي.
+\end{enumerate}
+
+\section{نظرة عامة على تبديل السياق}
+
+يتطلب الانتقال من تشغيل عملية $P_1$ إلى عملية $P_2$ تبديل حالة المعالج عبر خطوتين:
+\begin{enumerate}
+\item الانتقال من سياق العملية $P_1$ إلى سياق المجدول الخاص بنواة المعالج الحالية (\lstinline{scheduler}).
+\item الانتقال من سياق المجدول إلى سياق العملية $P_2$.
+\end{enumerate}
+
+يُحفظ سياق النواة داخل هيكل \lstinline{struct context} المحدد في \lstinline{kernel/proc.h}.
+يحتوي هذا الهيكل على السجلات المحفوظة بواسطة المستدعي (Callee-saved registers):
+سجل العودة \lstinline{ra}، مكدس النواة \lstinline{sp}، والسجلات المساعدة \lstinline{s0} إلى \lstinline{s11}.
+
+\section{الكود البرمجي: تبديل السياق}
+
+تُنفذ عملية تبديل السياق بلغة التجميع داخل الدالة \lstinline{swtch()} في \lstinline{kernel/swtch.S}:
+\begin{lstlisting}
+void swtch(struct context *old, struct context *new);
+\end{lstlisting}
+
+تقوم \lstinline{swtch} بالخطوات الآتية:
+\begin{enumerate}
+\item تحفظ السجلات الحالية في الهيكل \lstinline{*old}.
+\item تحمل السجلات المحفوظة مسبقًا من الهيكل \lstinline{*new}.
+\item تنفذ تعليمة العودة \lstinline{ret} لتستأنف التنفيذ عند عنوان العودة \lstinline{ra} المخزن في السياق الجديد.
+\end{enumerate}
+
+\section{الكود البرمجي: الجدولة}
+
+تمتلك كل نوات معالجة في xv6 خيط مجدول خاص بها ينفذ دالة \lstinline{scheduler()} اللانهائية في \lstinline{kernel/proc.c}:
+\begin{enumerate}
+\item تبحث \lstinline{scheduler()} في جدول العمليات \lstinline{proc[]} عن عملية حالتها \lstinline{RUNNABLE}.
+\item تحوز النواة قفل العملية \lstinline{p->lock}.
+\item تغير حالة العملية إلى \lstinline{RUNNING}.
+\item تربط سياق المعالج بسياق العملية عبر \lstinline{swtch(&c->context, &p->context)}.
+\item عند عودة العملية للتخلي عن المعالج (عبر \lstinline{yield()} أو \lstinline{sleep()})، تعود \lstinline{swtch()} إلى المجدول، وتفتح قفل العملية لتستمر الحلقة في البحث عن العملية التالية.
+\end{enumerate}
+
+\section{الكود البرمجي: mycpu و myproc}
+
+تحتاج النواة لمعرفة النواة الحالية والعملية الشغالة حاليًا:
+\begin{itemize}
+\item \lstinline{mycpu()}: تقرأ رقم النواة الحالي المخزن في سجل المعالج \lstinline{tp} وتعيد مؤشر هيكل المعالج \lstinline{struct cpu}.
+\item \lstinline{myproc()}: تعطّل المقاطعات وتسترجع مؤشر العملية الحالية \lstinline{c->proc} المعين على المعالج الحالية.
+\end{itemize}
+
+\section{العالم الحقيقي}
+
+تعتمد أنظمة التشغيل الإنتاجية مثل Linux على مجدولات متطورة مثل \textbf{Completely Fair Scheduler (CFS)}.
+تعتمد مجدولات CFS على أشجار متوازنة (Red-Black Trees) مع تخصيص الأولوية الزمنية بناءً على الأوزان والحصص (nice values)، بدلاً من الحلقة التكرارية البسيطة المستعملة في xv6.
+
+\section{تمارين}
+
+1. ما السبب الذي يفرض على دالة \lstinline{sched()} حيازة قفل العملية \lstinline{p->lock} أثناء الاستدعاء لـ \lstinline{swtch()}؟
+2. أضف مجدول أولوية تناوبي (Priority Scheduler) إلى xv6.
