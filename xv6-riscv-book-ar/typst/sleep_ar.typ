@@ -42,10 +42,10 @@ void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
-
+  
   // حيازة p->lock لحماية حالة العملية
   acquire(&p->lock);
-
+  
   // تحرير قفل الشرط الممرر
   release(lk);
 

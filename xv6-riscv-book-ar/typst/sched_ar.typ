@@ -70,7 +70,7 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-
+  
   c->proc = 0;
   for(;;){
     // تفعيل المقاطعات لتجنب الجمود أثناء الانتظار
