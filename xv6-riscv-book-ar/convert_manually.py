@@ -1,4 +1,24 @@
-#import "listings.typ": *
+import os
+
+typst_dir = "/home/user/mostafa637/xv6-riscv-book-ar/typst"
+
+# 1. acks_ar.typ
+acks_typ = """= المقدمة والشكر والتقدير
+
+هذا النص هو مسودة معدّة لمقرر دراسي في أنظمة التشغيل. يوضح المفاهيم الأساسية لأنظمة التشغيل من خلال دراسة نواة نموذجية تُدعى xv6. تقتدي xv6 بنظام Unix الإصدار السادس (v6) الذي طوره دينيس ريتشي (Dennis Ritchie) وكين ثومبسون (Ken Thompson). تتبع xv6 البنية والأسلوب العام لـ v6، ولكن تم تنفيذها بلغة ANSI C لمعمارية RISC-V متعددة الأنوية.
+
+يجب قراءة هذا النص بالتزامن مع الشفرة المصدرية لـ xv6، وهو نهج مستوحى من كتاب جون ليونز "تعليق على نظام UNIX الإصدار السادس" (John Lions' Commentary on UNIX 6th Edition)؛ يحتوي النص على وصلات شعبية للشفرة المصدرية على #link("https://github.com/mit-pdos/xv6-riscv")[https://github.com/mit-pdos/xv6-riscv]. انظر #link("https://pdos.csail.mit.edu/6.1810")[https://pdos.csail.mit.edu/6.1810] للحصول على مؤشرات إضافية للموارد المتاحة على الإنترنت الخاصة بـ v6 و xv6، بما في ذلك العديد من الواجبات المعملية (Labs) التي تستخدم xv6.
+
+لقد استخدمنا هذا النص في المقررين 6.828 و 6.1810، وهما مقررا أنظمة التشغيل في معهد ماساتشوستس للتكنولوجيا (MIT). نتوجه بالشكر لأعضاء هيئة التدريس، والمساعدين المدرسين، والطلاب في تلك المقررات الذين ساهموا جميعًا بشكل مباشر أو غير مباشر في xv6. ونخص بالذكر آدم بيلاي (Adam Belay)، وأوستن كليمنتس (Austin Clements)، ونيكولاي زيلدوفيتش (Nickolai Zeldovich). وأخيرًا، نود أن نشكر كل من أرسل لنا عبر البريد الإلكتروني أخطاءً في النص أو اقتراحات للتحسين.
+
+إذا اكتشفت أخطاءً أو كانت لديك اقتراحات للتحسين، يُرجى إرسال بريد إلكتروني إلى فرانس كاشوك (Frans Kaashoek) وروبيرت موريس (Robert Morris) على: (kaashoek,rtm@csail.mit.edu).
+"""
+
+with open(os.path.join(typst_dir, "acks_ar.typ"), "w", encoding="utf-8") as f:
+    f.write(acks_typ)
+
+# 2. unix_ar.typ
+unix_typ = """#import "listings.typ": *
 
 = واجهات نظام التشغيل < CH:UNIX >
 
@@ -37,14 +57,14 @@
 #lstlisting[
 int pid = fork();
 if(pid > 0){
-  printf("parent: child=%d\n", pid);
+  printf("parent: child=%d\\n", pid);
   pid = wait((int *) 0);
-  printf("child %d is done\n", pid);
+  printf("child %d is done\\n", pid);
 } else if(pid == 0){
-  printf("child: exiting\n");
+  printf("child: exiting\\n");
   exit(0);
 } else {
-  printf("fork error\n");
+  printf("fork error\\n");
 }
 ]
 
@@ -68,7 +88,7 @@ argv[0] = "echo";
 argv[1] = "hello";
 argv[2] = 0;
 exec("/bin/echo", argv);
-printf("exec error\n");
+printf("exec error\\n");
 ]
 
 == الإدخال/الخرج وواصفات الملفات
@@ -86,11 +106,11 @@ for(;;){
   if(n == 0)
     break;
   if(n < 0){
-    fprintf(2, "read error\n");
+    fprintf(2, "read error\\n");
     exit(1);
   }
   if(write(1, buf, n) != n){
-    fprintf(2, "write error\n");
+    fprintf(2, "write error\\n");
     exit(1);
   }
 }
@@ -113,7 +133,7 @@ if(fork() == 0) {
 #lstlisting[
 fd = dup(1);
 write(1, "hello ", 6);
-write(fd, "world\n", 6);
+write(fd, "world\\n", 6);
 ]
 
 == الأنابيب
@@ -137,7 +157,7 @@ if(fork() == 0) {
   exec("/bin/wc", argv);
 } else {
   close(p[0]);
-  write(p[1], "hello world\n", 12);
+  write(p[1], "hello world\\n", 12);
   close(p[1]);
 }
 ]
@@ -184,7 +204,7 @@ open("a", O_CREATE|O_WRONLY);
 link("a", "b");
 ]
 
-وعند استدعاء #lstinline("unlink("a")") يتم حسم الاسم الأول مع الإبقاء على الملف المتاح باسم #lstinline("b").
+وعند استدعاء #lstinline("unlink(\"a\")") يتم حسم الاسم الأول مع الإبقاء على الملف المتاح باسم #lstinline("b").
 
 == العالم الحقيقي
 
@@ -194,3 +214,9 @@ link("a", "b");
 
 1. اكتب برنامجًا يستخدم استدعاءات النظام في xv6 لإرسال مصفوفة أرقام عبر أنبوب بين عمليتين وتجميعها.
 2. قم بتعديل الشِل لدعم إعادة التوجيه لمدخلات ومخرجات الأوامر باستخدام #lstinline("<") و #lstinline(">").
+"""
+
+with open(os.path.join(typst_dir, "unix_ar.typ"), "w", encoding="utf-8") as f:
+    f.write(unix_typ)
+
+print("Manual conversion of acks_ar and unix_ar complete.")

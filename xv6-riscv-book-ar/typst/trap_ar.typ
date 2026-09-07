@@ -1,64 +1,55 @@
-= المصايد واستدعاءات النظام
-< CH:TRAP >
+#import "listings.typ": *
+
+= المصايد واستدعاءات النظام < CH:TRAP >
 
 تحدث *المصيدة* (trap) عندما يحتاج المعالج إلى تحويل السيطرة والتنفيذ بصورة قسرية من البرمجية الحالية إلى النواة.
 وتحدث المصايد في الحالات التالية:
-
-- استدعاء نظام (System Call): عندما تنفذ عملية مستخدم تعليمة #lstinline("ecall").
-- استثناء (Exception): عندما تنفذ تعليمة غير صالحة أو يحدث خطأ في الذاكرة (مثل القسمة على صفر أو خطأ الصفحة).
-- مقاطعة عتادية (Interrupt): عندما يرسل جهاز عتادي (مثل مؤقت الساعة أو القرص الصلب) إشارة طلب خدمة.
-
+1. استدعاء نظام (System Call): عندما تنفذ عملية مستخدم تعليمة #lstinline("ecall") .
+2. استثناء (Exception): عندما تنفذ تعليمة غير صالحة أو يحدث خطأ في الذاكرة (مثل القسمة على صفر أو خطأ الصفحة).
+3. مقاطعة عتادية (Interrupt): عندما يرسل جهاز عتادي (مثل مؤقت الساعة أو القرص الصلب) إشارة طلب خدمة.
 
 يقدم هذا الفصل الآليات العتادية والبرمجية لمعالجة المصايد في RISC-V، وكيفية التعامل مع المصايد القادمة من فضاء المستخدم وفضاء النواة.
 
 == عتاد المصايد في RISC-V
 
 يحتوي كل معالج في RISC-V على مجموعة من السجلات العتادية الخاصة بوضع المشرف (Supervisor CSRs) للتحكم في المصايد:
-
 - #lstinline("stvec") (Supervisor Trap Vector Base Address Register): يحتوي على عنوان دالة معالجة المصايد في النواة.
 - #lstinline("sepc") (Supervisor Exception Program Counter): يحفظ فيه العتاد عنوان التعليمة التي حدثت عندها المصيدة.
 - #lstinline("scause") (Supervisor Cause Register): يحفظ فيه العتاد سبب وقوع المصيدة (استدعاء نظام، مقاطعة، أو استثناء معين).
 - #lstinline("sstatus") (Supervisor Status Register): يحتوي على رايات الحالة مثل #lstinline("SIE") (تفعيل المقاطعات) و #lstinline("SPP") (الوضع السابق قبل المصيدة).
 - #lstinline("stval") (Supervisor Trap Value Register): يحفظ القيمة المصاحبة للخطأ (مثل العنوان غير الصالح عند خطأ الصفحة).
 
-
 عند حدوث مصيدة، يقوم عتاد RISC-V تلقائيًا بالخطوات المباشرة التالية:
-
-- إذا كانت المصيدة مقاطعة عتادية وراية #lstinline("SIE") معطلة، يتم تجاهل المقاطعة.
-- يحفظ المعالج قيمة عداد البرنامج الحالي #lstinline("pc") في #lstinline("sepc").
-- يحفظ المعالج الوضع الحالي (U-mode أو S-mode) في راية #lstinline("SPP") داخل #lstinline("sstatus").
-- يكتب المعالج كود السبب في #lstinline("scause").
-- يعطل المقاطعات بمسح الراية #lstinline("SIE").
-- ينسخ وضع المشرف (S-mode) ليكون الوضع الحالي.
-- يحمل قيمة #lstinline("stvec") إلى عداد البرنامج #lstinline("pc") للقفز فورًا إلى معالج النواة.
-
+1. إذا كانت المصيدة مقاطعة عتادية وراية #lstinline("SIE") معطلة، يتم تجاهل المقاطعة.
+2. يحفظ المعالج قيمة عداد البرنامج الحالي #lstinline("pc") في #lstinline("sepc") .
+3. يحفظ المعالج الوضع الحالي (U-mode أو S-mode) في راية #lstinline("SPP") داخل #lstinline("sstatus") .
+4. يكتب المعالج كود السبب في #lstinline("scause") .
+5. يعطل المقاطعات بمسح الراية #lstinline("SIE") .
+6. ينسخ وضع المشرف (S-mode) ليكون الوضع الحالي.
+7. يحمل قيمة #lstinline("stvec") إلى عداد البرنامج #lstinline("pc") للقفز فورًا إلى معالج النواة.
 
 == المصايد القادمة من فضاء المستخدم
 
 عند حدوث مصيدة أثناء تنفيذ برنامج مستخدم، يتطلب الأمر تبديل جدول الصفحات وسجلات المعالج والمكدس بأمان تام دون تمكين المستخدم من التلاعب بالحالات النواتية.
 
 تُدار العملية في xv6 بواسطة صفحة المنصة القافزة #lstinline("TRAMPOLINE") المتواجدة في نفس العنوان الافتراضي في كلي جدولَي الصفحات:
+1. يضمن العتاد التحويل إلى #lstinline("stvec") المحتوي على عنوان #lstinline("uservec") داخل كود التجميع في #lstinline("kernel/trampoline.S") .
+2. تقوم #lstinline("uservec") بحفظ كافة سجلات المعالج الـ 31 الخاصة بالمستخدم داخل هيكل #lstinline("trapframe") الخاص بالعملية.
+3. تحمل #lstinline("uservec") عنوان مكدس النواة للعملية، وعنوان جدول صفحات النواة إلى #lstinline("satp") .
+4. تقفز #lstinline("uservec") إلى الدالة #lstinline("usertrap()") المكتوبة بلغة C في #lstinline("kernel/trap.c") .
 
-- يضمن العتاد التحويل إلى #lstinline("stvec") المحتوي على عنوان #lstinline("uservec") داخل كود التجميع في #lstinline("kernel/trampoline.S").
-- تقوم #lstinline("uservec") بحفظ كافة سجلات المعالج الـ 31 الخاصة بالمستخدم داخل هيكل #lstinline("trapframe") الخاص بالعملية.
-- تحمل #lstinline("uservec") عنوان مكدس النواة للعملية، وعنوان جدول صفحات النواة إلى #lstinline("satp").
-- تقفز #lstinline("uservec") إلى الدالة #lstinline("usertrap()") المكتوبة بلغة C في #lstinline("kernel/trap.c").
-
-
-تتفحص #lstinline("usertrap()") السجل #lstinline("scause"):
-
-- إذا كان السبب استدعاء نظام (#lstinline("scause == 8"))، تزيد #lstinline("epc") بمقدار 4 لتخطي تعليمة #lstinline("ecall") وتستدعي #lstinline("syscall()").
-- إذا كانت مقاطعة عتادية، تستدعي #lstinline("devintr()").
+تتفحص #lstinline("usertrap()") السجل #lstinline("scause") :
+- إذا كان السبب استدعاء نظام ( #lstinline("scause == 8") )، تزيد #lstinline("epc") بمقدار 4 لتخطي تعليمة #lstinline("ecall") وتستدعي #lstinline("syscall()") .
+- إذا كانت مقاطعة عتادية، تستدعي #lstinline("devintr()") .
 - خلاف ذلك، يكون استثناءً غير متوقع، فتنهي النواة العملية فورًا وتطبع رسالة خطأ.
 
-
-بعد انتهاء المعالجة، تعود #lstinline("usertrap()") عبر #lstinline("usertrapret()") التي تستدعي #lstinline("userret") لإعادة استرجاع سجلات المستخدم وتحديث #lstinline("satp") بالعودة إلى فضاء المستخدم وتنفيذ #lstinline("sret").
+بعد انتهاء المعالجة، تعود #lstinline("usertrap()") عبر #lstinline("usertrapret()") التي تستدعي #lstinline("userret") لإعادة استرجاع سجلات المستخدم وتحديث #lstinline("satp") بالعودة إلى فضاء المستخدم وتنفيذ #lstinline("sret") .
 
 == الكود البرمجي: تنفيذ استدعاءات النظام
 
-تقوم الدالة #lstinline("syscall()") المحددة في #lstinline("kernel/syscall.c") بقراءة رقم استدعاء النظام المخزن في سجل المستخدم #lstinline("a7") (#lstinline("p->trapframe->a7")).
+تقوم الدالة #lstinline("syscall()") المحددة في #lstinline("kernel/syscall.c") بقراءة رقم استدعاء النظام المخزن في سجل المستخدم #lstinline("a7") ( #lstinline("p->trapframe->a7") ).
 
-تتحقق #lstinline("syscall()") من صحة الرقم وفهرسته داخل جدول الدوال #lstinline("syscalls[]"):
+تتحقق #lstinline("syscall()") من صحة الرقم وفهرسته داخل جدول الدوال #lstinline("syscalls[]") :
 #lstlisting[
 void
 syscall(void)
@@ -78,25 +69,21 @@ syscall(void)
 
 == الكود البرمجي: وسائط استدعاءات النظام
 
-تمرر برامج المستخدم وسائط استدعاءات النظام عبر سجلات المعالج القياسية (#lstinline("a0") إلى #lstinline("a5")).
-توفر النواة دوال مساعدة لاستخراج هذه الوسائط بأمان في #lstinline("kernel/syscall.c"):
-
-- #lstinline("argint(n, &ip)"): جلب الوسيط رقم $n$ كعدد صحيح (32-bit integer).
-- #lstinline("argaddr(n, &ip)"): جلب الوسيط رقم $n$ كعنوان ذاكرة (64-bit address).
-- #lstinline("argstr(n, buf, max)"): جلب سلسلة نصية من فضاء ذاكرة المستخدم ونسخها بأمان في ذاكرة النواة باستخدام #lstinline("fetchstr()").
-
+تمرر برامج المستخدم وسائط استدعاءات النظام عبر سجلات المعالج القياسية ( #lstinline("a0") إلى #lstinline("a5") ).
+توفر النواة دوال مساعدة لاستخراج هذه الوسائط بأمان في #lstinline("kernel/syscall.c") :
+- #lstinline("argint(n, &ip)") : جلب الوسيط رقم $n$ كعدد صحيح (32-bit integer).
+- #lstinline("argaddr(n, &ip)") : جلب الوسيط رقم $n$ كعنوان ذاكرة (64-bit address).
+- #lstinline("argstr(n, buf, max)") : جلب سلسلة نصية من فضاء ذاكرة المستخدم ونسخها بأمان في ذاكرة النواة باستخدام #lstinline("fetchstr()") .
 
 ولأن فضاء ذاكرة المستخدم منفصل عن فضاء النواة، توفر النواة الدوال #lstinline("copyin()") و #lstinline("copyout()") لنقل البيانات بين فضاء العناوين الافتراضي للعملية وفضاء النواة مع التحقق من صحة المداخل.
 
 == المصايد القادمة من فضاء النواة
 
 عندما تنفذ النواة كودًا في وضع المشرف (S-mode) وتحدث مقاطعة أو استثناء، يختلف التعامل قليلاً:
-
-- جدول الصفحات هو بالفعل جدول صفحات النواة، ومكدس النواة مثبت بالفعل.
-- يتم تحويل #lstinline("stvec") ليرير إلى الدالة #lstinline("kernelvec") في #lstinline("kernel/kernelvec.S").
-- تحفظ #lstinline("kernelvec") سجلات المعالج على مكدس النواة الحالي وتستدعي #lstinline("kerneltrap()") المحددة في #lstinline("kernel/trap.c").
-- بعد معالجة المقاطعة أو الاستثناء، تسترجع #lstinline("kernelvec") السجلات من المكدس وتنفذ #lstinline("sret").
-
+1. جدول الصفحات هو بالفعل جدول صفحات النواة، ومكدس النواة مثبت بالفعل.
+2. يتم تحويل #lstinline("stvec") ليرير إلى الدالة #lstinline("kernelvec") في #lstinline("kernel/kernelvec.S") .
+3. تحفظ #lstinline("kernelvec") سجلات المعالج على مكدس النواة الحالي وتستدعي #lstinline("kerneltrap()") المحددة في #lstinline("kernel/trap.c") .
+4. بعد معالجة المقاطعة أو الاستثناء، تسترجع #lstinline("kernelvec") السجلات من المكدس وتنفذ #lstinline("sret") .
 
 == العالم الحقيقي
 
@@ -104,5 +91,5 @@ syscall(void)
 
 == تمارين
 
-1. تتبع خطوات نقل القيمة من سجل المستخدم #lstinline("a0") إلى متغير النواة في استدعاء النظام #lstinline("sys_write").
+1. تتبع خطوات نقل القيمة من سجل المستخدم #lstinline("a0") إلى متغير النواة في استدعاء النظام #lstinline("sys_write") .
 2. قم بتعديل xv6 لدعم معالجة خطأ الصفحة لتقديم صفحة صفرية عند الحاجة (Null Page Guard).

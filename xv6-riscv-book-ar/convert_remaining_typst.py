@@ -1,4 +1,9 @@
-#import "listings.typ": *
+import os
+
+typst_dir = "/home/user/mostafa637/xv6-riscv-book-ar/typst"
+
+# 3. first_ar.typ
+first_typ = """#import "listings.typ": *
 
 = تنظيم نظام التشغيل < CH:FIRST >
 
@@ -69,7 +74,7 @@
 3. تنتقل السيطرة إلى الدالة #lstinline("main()") في #lstinline("kernel/main.c") في وضع المشرف (S-mode).
 4. تقوم النواة بتهيئة الأقفال، ووحدة إدارة الذاكرة، ومجمع المقاطعات PLIC، والذاكرة المخبئية.
 5. تدعو #lstinline("main()") الدالة #lstinline("userinit()") لإنشاء أول عملية مستخدم.
-6. تنفذ العملية الأولى كوداً مجمعاً صغيراً بداخل #lstinline("usercnt.S") يتضمن استدعاء النظام #lstinline("exec("/init")") ليعمل برنامج البدء الرسمي الشارح لمغلف الأوامر #lstinline("sh") .
+6. تنفذ العملية الأولى كوداً مجمعاً صغيراً بداخل #lstinline("usercnt.S") يتضمن استدعاء النظام #lstinline("exec(\"/init\")") ليعمل برنامج البدء الرسمي الشارح لمغلف الأوامر #lstinline("sh") .
 
 == نموذج الأمان
 
@@ -83,3 +88,9 @@
 
 1. تتبع خطوات تنفيذ تعليمة #lstinline("ecall") بدءًا من وضع المستخدم وصولاً إلى معالج #lstinline("syscall()") في #lstinline("kernel/syscall.c") .
 2. أضف استدعاء نظام جديد باسم #lstinline("trace(mask)") يقوم بطباعة أسماء استدعاءات النظام المنفذة لاحقاً.
+"""
+
+with open(os.path.join(typst_dir, "first_ar.typ"), "w", encoding="utf-8") as f:
+    f.write(first_typ)
+
+print("first_ar.typ converted.")
