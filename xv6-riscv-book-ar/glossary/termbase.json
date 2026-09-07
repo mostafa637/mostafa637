@@ -40,6 +40,13 @@
     "Task": "مهمة فرعية",
     "Errant": "شاردة",
     "Runaway": "جامحة",
-    "Deadlock": "الجمود"
+    "Deadlock": "الجمود",
+    "blocking": "حاجب",
+    "non-blocking": "غير حاجب",
+    "blocked": "محظور",
+    "Monitor": "مراقِب",
+    "Monitors": "مراقِبات",
+    "monitor lock": "قفل المراقِب",
+    "monitor synchronization": "مزامنة المراقِب"
   }
 }
