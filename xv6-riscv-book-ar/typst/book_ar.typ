@@ -1,8 +1,8 @@
 // Master Typst Document for xv6 RISC-V Arabic Translation
-// Imports native libraries: listings.typ and fancyhdr.typ
+// Imports native templates: listings.typ and fancyhdr.typ
 
-#import "listings.typ": *
-#import "fancyhdr.typ": *
+#import "template/listings.typ": *
+#import "template/fancyhdr.typ": *
 
 // Global document configuration
 #set text(
@@ -40,11 +40,10 @@
 #align(center + horizon)[
   #v(2cm)
   #text(size: 22pt, weight: "bold")[xv6: نظام تشغيل تعليمي بسيط شبيه بـ Unix]
-
+  
   #v(0.5cm)
-#text(size: 14pt, style:
-"italic")[الترجمة العربية الأكاديمية المعتمدة وفق معايير الترجمة البرمجية]
-
+  #text(size: 14pt, style: "italic")[الترجمة العربية الأكاديمية المعتمدة وفق معايير الترجمة البرمجية]
+  
   #v(2cm)
   #text(size: 12pt)[
     *تأليف:* روس كوكس ، فرانس كاشوك ، روبيرت موريس \
@@ -63,18 +62,18 @@
 
 #pagebreak()
 
-// Include all chapters
-#include "acks_ar.typ"
-#include "unix_ar.typ"
-#include "first_ar.typ"
-#include "mem_ar.typ"
-#include "trap_ar.typ"
-#include "pgfault_ar.typ"
-#include "interrupt_ar.typ"
-#include "lock_ar.typ"
-#include "sched_ar.typ"
-#include "sleep_ar.typ"
-#include "fs_ar.typ"
-#include "log_ar.typ"
-#include "lock2_ar.typ"
-#include "sum_ar.typ"
+// Include all chapters in order from chapters/
+#include "chapters/00_acks.typ"
+#include "chapters/01_unix.typ"
+#include "chapters/02_first.typ"
+#include "chapters/03_mem.typ"
+#include "chapters/04_trap.typ"
+#include "chapters/05_pgfault.typ"
+#include "chapters/06_interrupt.typ"
+#include "chapters/07_lock.typ"
+#include "chapters/08_sched.typ"
+#include "chapters/09_sleep.typ"
+#include "chapters/10_fs.typ"
+#include "chapters/11_log.typ"
+#include "chapters/12_lock2.typ"
+#include "chapters/13_sum.typ"

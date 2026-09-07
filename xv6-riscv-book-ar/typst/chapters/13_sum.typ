@@ -1,4 +1,4 @@
-#import "listings.typ": *
+#import "../template/listings.typ": *
 
 = الخاتمة والتطورات
 <CH:SUM>

@@ -1,4 +1,4 @@
-#import "listings.typ": *
+#import "../template/listings.typ": *
 
 = طبقة سجل العمليات (Logging Layer)
 <CH:LOG>

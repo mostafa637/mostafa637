@@ -1,66 +1,42 @@
-\documentclass[12pt]{book}
-\usepackage[T1]{fontenc}
-\usepackage{times}
-\usepackage{listings}
-\usepackage{graphicx}
-\usepackage{xcolor}
-\usepackage{url}
-\usepackage{imakeidx}
-\usepackage{booktabs}
-\usepackage{etoolbox}
-\usepackage{fullpage}
-\usepackage{soul}
-\usepackage[utf8]{inputenc}
-\usepackage{hyperref}
+\documentclass[11pt,a4paper,twoside]{book}
 
-\hypersetup{
-    pdfauthor={Russ Cox, Frans Kaashoek, Robert Morris},
-    pdftitle={xv6: نظام تشغيل تعليمي بسيط شبيه بـ Unix - الترجمة العربية},
-    pdfsubject={Operating Systems, RISC-V, MIT 6.1810},
-    pdfkeywords={Operating Systems, xv6, RISC-V, Arabic Translation}
-}
-
-\lstset{basicstyle=\small\ttfamily}
-\lstset{morecomment=[is]{[[[}{]]]}}
-\lstset{escapeinside={(*@}{@*)}}
-\lstset{xleftmargin=5.0ex}
-
-\newcommand{\github}{https://github.com/mit-pdos/xv6-riscv/blob/riscv}
-\newcommand{\fileref}[1]{\small{\textcolor{red}{(#1)}}}
-\newcommand{\lineref}[2]{\small{\textcolor{red}{(#1:#2)}}}
-\newcommand{\linerefs}[3]{\small{\textcolor{red}{(#1:#2-#3)}}}
-\newcommand{\indextext}[1]{\textit{#1}\index{#1}}
-\newcommand{\indextextx}[1]{{#1}\index{#1}}
-\newcommand{\indexcode}[1]{\lstinline{#1}\index{#1@\lstinline{#1}}}
-
-\title{\textbf{xv6: نظام تشغيل تعليمي بسيط شبيه بـ Unix}\\
-\large الترجمة العربية الأكاديمية الرسمية وفق معايير الترجمة المعتمدة}
-\author{روس كوكس \and فرانس كاشوك \and روبيرت موريس\\
-\small قسم الهندسة الكهربائية وعلم الحاسوب - معهد ماساتشوستس للتكنولوجيا (MIT)}
-
-\makeindex
+% Load custom style package
+\usepackage{sty/xv6_style}
 
 \begin{document}
 
-\maketitle
+% Title Page
+\begin{titlepage}
+  \centering
+  \vspace*{2cm}
+  {\Huge\bfseries xv6: نظام تشغيل تعليمي بسيط شبيه بـ Unix\par}
+  \vspace{1cm}
+  {\Large\itshape الترجمة العربية الأكاديمية المعتمدة وفق معايير الترجمة البرمجية\par}
+  \vspace{2cm}
+  {\large\textbf{تأليف:}\par}
+  {\large روس كوكس ، فرانس كاشوك ، روبيرت موريس\par}
+  {\itshape قسم الهندسة الكهربائية وعلم الحاسوب - معهد ماساتشوستس للتكنولوجيا (MIT)\par}
+  \vfill
+  {\large 2026 م / 1448 هـ\par}
+\end{titlepage}
 
 \tableofcontents
+\cleardoublepage
 
-\input{acks_ar}
-\input{unix_ar}
-\input{first_ar}
-\input{mem_ar}
-\input{trap_ar}
-\input{pgfault_ar}
-\input{interrupt_ar}
-\input{lock_ar}
-\input{sched_ar}
-\input{sleep_ar}
-\input{fs_ar}
-\input{log_ar}
-\input{lock2_ar}
-\input{sum_ar}
-
-\printindex
+% Include all chapters in order
+\include{chapters/00_acks}
+\include{chapters/01_unix}
+\include{chapters/02_first}
+\include{chapters/03_mem}
+\include{chapters/04_trap}
+\include{chapters/05_pgfault}
+\include{chapters/06_interrupt}
+\include{chapters/07_lock}
+\include{chapters/08_sched}
+\include{chapters/09_sleep}
+\include{chapters/10_fs}
+\include{chapters/11_log}
+\include{chapters/12_lock2}
+\include{chapters/13_sum}
 
 \end{document}

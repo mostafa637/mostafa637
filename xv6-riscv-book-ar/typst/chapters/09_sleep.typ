@@ -1,4 +1,4 @@
-#import "listings.typ": *
+#import "../template/listings.typ": *
 
 = تنسيق وإشارات التزامن عبر النوم واليقظة
 <CH:SLEEP>

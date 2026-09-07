@@ -1,4 +1,4 @@
-#import "listings.typ": *
+#import "../template/listings.typ": *
 
 = إعادة فحص الأقفال والتزامن المتقدم
 <CH:LOCK2>

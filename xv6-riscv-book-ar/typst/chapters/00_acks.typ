@@ -1,4 +1,4 @@
-#import "listings.typ": *
+#import "../template/listings.typ": *
 
 = تصدير وشكر وتقدير
 <CH:ACKS>

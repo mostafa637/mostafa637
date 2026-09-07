@@ -1,38 +1,38 @@
 project:
   type: book
-  output-dir: ../html_out
+  output-dir: _site
 
 book:
-  title: "xv6: نظام تشغيل تعليمي بسيط شبيه بـ Unix (الترجمة العربية الرسمية)"
-  author:
-    - Russ Cox
-    - Frans Kaashoek
-    - Robert Morris
-  language: ar
+  title: "xv6 RISC-V: ترجمة عربية أكاديمية"
+  author: "روس كوكس ، فرانس كاشوك ، روبيرت موريس"
+  date: "2026-09-08"
   dir: rtl
+  language: ar
   sidebar:
-    style: docked
-    collapse-level: 1
+    style: "docked"
+    search: true
   chapters:
     - index.qmd
-    - unix.qmd
-    - first.qmd
-    - mem.qmd
-    - trap.qmd
-    - pgfault.qmd
-    - interrupt.qmd
-    - lock.qmd
-    - sched.qmd
-    - sleep.qmd
-    - fs.qmd
-    - log.qmd
-    - lock2.qmd
-    - sum.qmd
+    - chapters/01_unix.qmd
+    - chapters/02_first.qmd
+    - chapters/03_mem.qmd
+    - chapters/04_trap.qmd
+    - chapters/05_pgfault.qmd
+    - chapters/06_interrupt.qmd
+    - chapters/07_lock.qmd
+    - chapters/08_sched.qmd
+    - chapters/09_sleep.qmd
+    - chapters/10_fs.qmd
+    - chapters/11_log.qmd
+    - chapters/12_lock2.qmd
+    - chapters/13_sum.qmd
 
 format:
   html:
     theme: cosmo
+    code-copy: true
     toc: true
-    toc-depth: 3
-    code-overflow: wrap
     number-sections: true
+
+lang: ar
+dir: rtl
