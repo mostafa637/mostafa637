@@ -1,274 +1,76 @@
 #import "../template/listings.typ": *
 
-= Page faults <CH:PGFAULTS>
+= استثناءات أخطاء الصفحات
+<CH:PGFAULT>
 
-The RISC-V CPU raises a page-fault exception
-when a virtual address is used that has no mapping
-in the page table, or has a mapping whose `PTE_V`
-flag is clear, or a mapping whose permission bits
-(`PTE_R`,
-`PTE_W`,
-`PTE_X`,
-`PTE_U`)
-forbid the operation being attempted.
-RISC-V distinguishes three
-kinds of page fault: load page faults (caused by load instructions),
-store page faults (caused by store instructions),
-and instruction
-page faults (caused by fetches of instructions to be executed).  The
-`scause` register indicates the type of the
-page fault and the `stval` register contains the address
-that couldn't be translated.
+تُتيح استثناءات أخطاء الصفحات (Page Fault Exceptions) لنظام التشغيل تقديم تقنيات متقدمة لإدارة الذاكرة عبر الاعتراض التلقائي للوصول غير الصالح للذاكرة.
 
-The combination of page tables and page faults is a powerful tool.
-Page tables give the kernel a level of indirection between virtual and
-physical addresses, so that the kernel can control the structure and
-content of address spaces. Page faults allow the kernel to intercept
-loads and stores and, by modifying the page table, specify on the fly
-what data those references refer to. The kernel can use these
-capabilities to increase efficiency: for example, copy-on-write fork
-allows the kernel to transparently share memory between parent and
-child, avoiding the cost of copying pages that neither write.
-Application programmers can also benefit. One possibility is
-memory-mapped files, where the kernel uses paging to cause a file's
-content to appear in an application's address space, transparently
-reading file blocks in response to page faults. Another is lazy memory
-allocation, which allows a program to ask for a huge virtual
-address space, but only to pay the cost of allocating physical memory
-for the pages the program actually reads and writes. xv6 uses page
-faults for only one purpose: lazy allocation.
+يولد المعالج في RISC-V استثناء خطأ الصفحة في الحالات الآتية:
+- الوصول إلى عنوان افتراضي لا تقابله مدخلة صالحة بداخل جدول الصفحات (`PTE_V == 0`).
+- محاولة كتابة صفحة محمية بقراءة فقط (`PTE_W == 0`).
+- محاولة تنفيذ شفرة بداخل صفحة غير قابلة للتنفيذ (`PTE_X == 0`).
+- محاولة عملية بوضع المستخدم U-mode الوصول لصفحة خاصة بالنواة (`PTE_U == 0`).
 
-Before proceeding, please read the functions `sys\_sbrk()` in
-  `kernel/sysproc.c` `kernel/sysproc.c`, and `vmfault` in `kernel/vm.c` `kernel/vm.c`.
-Search for calls to `vmfault` in `kernel/trap.c` `kernel/trap.c` and `kernel/vm.c` `kernel/vm.c`.
+يحفظ المعالج العنوان الافتراضي الذي تسبب في الاستثناء بداخل السجل الخاص `stval`؛
+ويحفظ رقم سبب الاستثناء بداخل السجل `scause` (الرقم `13` لخطأ القراءة/التنفيذ، والرقم `15` لخطأ الكتابة).
 
-== Lazy allocation <sec:lazy>
+== التخصيص التكاسلي للذاكرة
+<sec:lazy_allocation>
 
-xv6's _lazy allocation_ has two parts.
-First, when an application asks for memory by calling
-`sbrk` with the flag `SBRK_LAZY`, the kernel notes the increase in size, but does not
-allocate physical memory and does not create PTEs for the new range of
-virtual addresses.  Second, on a page fault on one of those new
-addresses, the kernel allocates a page of physical memory and maps it
-into the page table.  The kernel implements lazy allocation
-transparently to applications: no modifications to applications are
-necessary for them to benefit.
+تستخدم معظم البرامج استدعاء النظام `sbrk()` لتوسيع ذاكرتها المخصصة؛
+ولكن في كثير من الأحيان، تحجز البرامج مساحات كبيرة من الذاكرة الاحتياطية دون أن تستخدمها فوراً.
 
-Lazy allocation is convenient for applications because they don't have
-to accurately predict how much memory they will need.  For example, an
-application may process input, but not know in advance how large the
-input will be.  With lazy allocations an application can ask for
-memory for the worst case, but not have to pay for this worst case:
-the kernel doesn't have to do any work for pages that the
-application never uses, and other applications can allocate the unused
-pages.
+في التخصيص التكاسلي (Lazy Allocation):
+عندما تطلب العملية زيادة ذاكرتها عبر `sbrk(n)`، لا تخصص النواة صفحات فيزيائية فوراً ولا تحدّث جدول الصفحات؛
+بل تكتفي فقط بزيادة حجم العملية المسجل في `p->sz` وتُعيد العنوان القديم.
 
-Furthermore, if the application is asking to grow the address space by
-a lot, then `sbrk` without lazy allocation is expensive: if
-an application asks for a gigabyte of memory, the kernel has to
-allocate and zero 262,144 4096-byte physical pages.  Lazy allocation allows
-this cost to be spread over time.  On the other hand, lazy allocation
-incurs the extra overhead of page faults, which involve a user/kernel
-transition.  Operating systems can reduce this cost by allocating a
-batch of consecutive pages per page fault instead of one page and by
-specializing the kernel entry/exit code for such page-faults (though
-xv6 does neither).
+عندما تحاول العملية القراءة أو الكتابة بداخل العنوان الجديد، يكتشف عتاد المعالج أن المدخلة غير صالحة ويولد استثناء خطأ صفحة.
+تتدخل النواة بداخل معالج المصايد `usertrap()`:
+1. تقرأ العنوان الافتراضي التالف من السجل `stval`.
+2. تتأكد من أن العنوان يقع بداخل حدود مساحة العملية (`stval < p->sz`).
+3. تخصص صفحة فيزيائية حرة عبر `kalloc()`.
+4. تُصفر بيانات الصفحة الفيزيائية وتُدرجها بداخل جدول صفحات العملية مع تفعيل بتات الصلاحيات (`PTE_V`, `PTE_R`, `PTE_W`, `PTE_U`).
+5. تعود لتنفيذ التعليمية التي تسببت في الخطأ مجدداً، فتكتمل عملية الوصول بنجاح ودون أن يشعر برنامج المستخدم بأي تعثر.
 
-On the other hand, when taking a page fault for a lazily-allocated
-page, the kernel may find that it has not free memory to allocate.  In
-this case, the kernel has no easy way of returning an out-of-memory
-error to the application and instead kills the application.  For
-applications that prefer an error on a failed allocation, xv6 allows
-an application to allocate memory eagerly by calling `sbrk`
-with the flag `SBRK_EAGER`.
+== الكود البرمجي
+<sec:code_lazy_alloc>
 
-== Code
+يتطلب تنفيذ التخصيص التكاسلي بداخل `xv6` تعديل الشفرة في عدة مواضع:
+- تعديل `sys_sbrk()` في `sysproc.c` لتكتفي بزيادة `p->sz` دون استدعاء `growproc()`.
+- تعديل `usertrap()` بداخل `trap.c` للتعرف على أخطاء الصفحات القادمة من السجل `scause` وتخصيص الصفحات عند الطلب.
+- تعديل `uvmunmap()` و `uvmcopy()` بداخل `vm.c` للتعامل بمرونة مع الصفحات غير المخصصة دون إحداث `panic`.
 
-The system call `sbrk(n)` grows (or shrinks if `n`
-is negative) a process's memory size by `n` bytes, and returns
-the start of the newly allocated region (i.e., the old size).
-The kernel implementation is `sys_sbrk`
-سطر `kernel/sysproc.c:/^sys_sbrk/`.
+== العالم الحقيقي: النسخ عند الكتابة (COW fork)
+<sec:cow_fork>
 
-If the application specifies `SBRK_EAGER`, the system
-call is implemented by the function
-`growproc`
-سطر `kernel/proc.c:/^growproc/`.
-`growproc` calls `uvmalloc`.
-`uvmalloc`
-سطر `kernel/vm.c:/^uvmalloc/`
-allocates physical memory with `kalloc`, zeros the allocated memory,
-and adds PTEs to the user page table with `mappages`.
+تُعد تقنية النسخ عند الكتابة (Copy-On-Write - COW) إحدى أهم التطبيقات الاستفادية من أخطاء الصفحات عند استدعاء `fork()`.
 
-If the applications allocates memory lazily, `sys_sbrk`
-just increments the process's size
-(`myproc()->sz`) by `n` and returns the old size; it does
-not allocate physical memory or add PTEs to the process's page table.
+في `fork()` التقليدي، تخصص النواة صفحات فيزيائية جديدة وتنسخ كامل ذاكرة الأب للابن؛
+ولكن في كثير من الحالات، تستدعي العملية الابن `exec()` فوراً بعد `fork()`، مما يتسبب في ضياع الجهد والذاكرة المخصصة.
 
-When a process loads or stores to a virtual address that
-lacks a valid page-table mapping, the CPU will
-raise _page-fault exception_.
-`usertrap` checks for this case
-سطر `kernel/trap.c:/page fault/`
-and calls `vmfault`
-سطر `kernel/vm.c:/^vmfault/`
-to handle the page fault.  `vmfault`
-checks that the faulting address is within the
-region previously granted by `sbrk`,
-allocates a page of physical memory with `kalloc`,
-zeros the allocated page, and adds a PTE to the user page table with
-`mappages`.  Xv6 sets the `PTE_W`, `PTE_R`,
-`PTE_U`, and `PTE_V` flags in the PTE for the
-new page. Then, `usertrap` resumes the
-process at the instruction that caused the fault. Because the
-PTE is now valid, the re-executed load or store instruction
-will execute without a fault.
+باستخدام تقنية COW:
+عند استدعاء `fork()`، لا تخصص النواة صفحات فيزيائية للابن؛
+بل تجعل الابن يتشارك نفس الصفحات الفيزيائية للأب مع تعطيل بت الكتابة `PTE_W` وتفعيل بت خاص بـ COW بداخل مدخلات جدول الصفحات لكلتا العمليتين.
 
-If an application frees memory using `sbrk`, `sys_sbrk`
-calls `shrinkproc`, which calls `uvmdealloc`.  The
-real work is done by `uvmunmap` سطر `kernel/vm.c:/^uvmunmap/`,
-which uses `walk` to find PTEs.  Since some pages may never have
-been used by the process and thus never have been allocated by `vmfault`, `uvmunmap` skips PTEs without the `PTE_V`
-flag.  If a PTE mapping is valid, `uvmunmap` calls `kfree`
-to free the physical memory it refers to.
+طالما تقرأ العمليتان البيانات، تستمر المشاركة؛
+وعندما تحاول إحداهما الكتابة بداخل صفحة مشتركة، يولد المعالج استثناء خطأ صفحة.
+تتدخل النواة: تكتشف أن الصفحة محمية بـ COW، فتخصص صفحة فيزيائية جديدة لتك العملية المداعية فقط، وتنسخ المحتوى إليها، وتفعل بت الكتابة `PTE_W` للصفحة الجديدة، ثم تستأنف التنفيذ.
 
-Note that Xv6 uses a process's page table not just to tell the
-hardware how to map user virtual addresses, but also as the only
-record of which physical memory pages are allocated to that
-process. That is the reason why freeing user memory (in `uvmunmap`) requires examination of the user page table.
+== العالم الحقيقي: التصفح بالمطالبة
+<sec:demand_paging>
 
-== Real world: Copy-On-Write (COW) fork
+تستغل نظم التشغيل تقنية التصفح بالمطالبة (Demand Paging) لتحميل الشفرات والبيانات من الملف التنفيذي إلى الذاكرة تدريجياً عند استدعاء `exec()`.
+لا تُحمل كافة كتل الملف التنفيذي إلى الذاكرة دفعة واحدة، بل تُحمل الصفحة من القرص فقط عندما تحاول العملية الوصول إليها ويقع خطأ صفحة.
 
-Many kernels (though not xv6) use page faults to implement
-_copy-on-write (COW) fork_. The `fork` system call
-promises that the
-child sees memory whose initial content is the same as the parent's
-memory at the time of the fork. One way to implement this is to copy
-the entire memory of the parent to newly allocated physical memory for
-the child; this is what xv6 does. Copying can be slow, and it
-would be more efficient if the child could share the parent's physical
-memory. A straightforward implementation of this would not work,
-however, since it would cause the parent and child to disrupt each
-other's execution with their writes to the shared stack and heap.
+== العالم الحقيقي: الملفات المربوطة بالذاكرة
+<sec:mmap>
 
-Copy-on-write fork causes parent and child to safely share physical
-memory by appropriate use of page-table permissions and page faults.
-The basic plan is for the parent and child to initially share all
-physical pages, but for each to map them read-only (with the
-`PTE_W` flag clear). Parent and child can then read from the
-shared physical memory. If either writes a shared page, the RISC-V CPU
-raises a page-fault exception. A kernel supporting COW would respond
-by allocating a new page of physical memory and copying the shared
-page into that new page. Then kernel would change the relevant PTE in
-the faulting process's page table to point to the copy and to allow
-writes as well as reads, and then resume the faulting process at the
-instruction that caused the fault. Because the PTE now allows writes,
-the re-executed store instruction will execute without a fault, and
-will modify a private copy of the page rather than the shared page.
+تتيح تقنية الذاكرة المضمومة بملف (Memory-Mapped Files - `mmap`) ربط كتل الملف بالعناوين الافتراضية للعملية؛
+بحيث تقرأ وتكتب العملية بداخل كتل الملف عبر مؤشرات الذاكرة العادية، وتتولى النواة قراءة وتفريغ الصفحات للقرص عند وقوع أخطاء الصفحات والاستبدال.
 
-Copy-on-write requires book-keeping
-to help decide when physical pages can be freed, since each page can
-be referenced by a varying number of page tables depending on the history of
-forks, page faults, execs, and exits. This book-keeping allows
-an important optimization: if a process incurs a store page
-fault and the physical page is only referred to from that process's
-page table, no copy is needed.
+== تمارين
+<sec:pgfault_exercises>
 
-Copy-on-write makes `fork` faster, since `fork`
-need not copy memory. Some of the memory will have to be copied
-later, when written, but it's often the case that most of the
-memory never has to be copied.
-A common example is
-`fork` followed by `exec`:
-a few pages may be written after the `fork`,
-but then the child's `exec` releases
-the bulk of the memory inherited from the parent.
-Copy-on-write `fork` eliminates the need to
-ever copy this memory.
-Furthermore, COW fork is transparent:
-no modifications to applications are necessary for
-them to benefit.
-
-== Real world: Demand paging
-
-Yet another widely-used feature that exploits page faults is
-_demand paging_.  In the `exec` system call, xv6 loads all 
-of an application's text
-and data into memory before starting
-the application.  Since applications
-can be large and reading from disk takes time, this startup cost can
-be noticeable to users. To
-decrease startup time, a modern kernel doesn't initially load
-the executable file into memory, but just creates the user page table with
-all PTEs marked invalid. The kernel starts the program running;
-each time the program uses a page for the first time, a page
-fault occurs, and in response
-the kernel reads the content of the page from disk and
-maps it into the user address space.  Like COW fork and lazy
-allocation, the kernel can implement this feature transparently to
-applications.
-
-The programs running on a computer may need more memory than the
-computer has RAM. To cope gracefully, the operating system may
-implement _paging to disk_. The idea is to store only a
-fraction of user pages in RAM, and to store the rest on disk in a
-_paging area_. The kernel marks PTEs that correspond to
-memory stored in the paging area (and thus not in RAM) as invalid. If
-an application tries to use one of the pages that has been {\it paged
-  out} to disk, the application will incur a page fault, and the page
-must be {\it paged in}: the kernel trap handler will allocate a page
-of physical RAM, read the page from disk into the RAM, and modify the
-relevant PTE to point to the RAM.
-
-What happens if a page needs to be paged in, but there is no free
-physical RAM? In that case, the kernel must first free a physical page
-by paging it out or {\it evicting} it to the paging area on disk, and
-marking the PTEs referring to that physical page as invalid. Eviction
-is expensive, so paging performs best if it's infrequent: if
-applications use only a subset of their memory pages and the union of
-the subsets fits in RAM. This property is often referred to as having
-good locality of reference. As with many virtual memory techniques,
-kernels usually implement paging to disk in a way that's transparent
-to applications.
-
-Computers often operate with little or no {\it free} physical memory,
-regardless of how much RAM the hardware provides. For example, cloud
-providers multiplex many customers on a single machine to use their
-hardware cost-effectively. As another example, users run many
-applications on smart phones in a small amount of physical memory. In
-such settings allocating a page may require first evicting an existing
-page. Thus, when free physical memory is scarce, allocation is
-expensive.
-
-Lazy allocation and demand paging are particularly advantageous when
-free memory is scarce and programs actively use only a fraction of
-their allocated memory. These techniques can also avoid the work
-wasted when a page is allocated or loaded but either never used or
-evicted before it can be used.
-
-== Real world: Memory-mapped files
-
-Other features that combine paging and page-fault exceptions include
-automatically extending stacks and _memory-mapped files_,
-which are files that a program maps into its address space using
-the `mmap` system call so that the program can read and write
-them using load and store instructions.
-
-\begin{enumerate}
-
-\item Write a user program that grows its address space by one byte by calling
-`sbrk(1)`.
-Run the  program and investigate the page table for the program before the call
-to
-`sbrk`
-and after the call to
-`sbrk`.
-How much space has the kernel allocated?  What does the
-PTE
-for the new memory contain?
-
-\item Implement COW fork.
-
-\item Implement `mmap`.
-
-\end{enumerate}
++ نفذ التخصيص التكاسلي للذاكرة بداخل `xv6` واختبره عبر تشغيل برامج المستخدم.
++ نفذ استدعاء `fork` المعتمد على تقنية النسخ عند الكتابة (COW) وافحص عدد الصفحات الفيزيائية الموفرة.
++ اكتب دعماً مصغراً لاستدعاء النظام `mmap()` لربط الملفات بالذاكرة الافتراضية.
