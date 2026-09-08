@@ -42,7 +42,7 @@
   #text(size: 22pt, weight: "bold")[xv6: نظام تشغيل تعليمي بسيط شبيه بـ Unix]
   
   #v(0.5cm)
-  #text(size: 14pt, style: "italic")[الترجمة العربية الأكاديمية المعتمدة وفق معايير الترجمة البرمجية]
+  #text(size: 14pt, style: "italic")[الترجمة العربية الأكاديمية المعتمدة وفق معايير الترجمة البرمجية والتحليل النحوي]
   
   #v(2cm)
   #text(size: 12pt)[
@@ -77,3 +77,4 @@
 #include "chapters/11_log.typ"
 #include "chapters/12_lock2.typ"
 #include "chapters/13_sum.typ"
+#include "chapters/14_irab.typ"
