@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 300" width="700" height="300" style="background:#fff; font-family: sans-serif; font-size: 14px;">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#333" />
+    </marker>
+  </defs>
+
+  <rect x="50" y="20" width="180" height="40" rx="5" fill="#f8f9fa" stroke="#333" stroke-width="1.5"/>
+  <text x="140" y="45" text-anchor="middle">User code</text>
+
+  <line x1="140" y1="60" x2="140" y2="90" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)" />
+
+  <rect x="50" y="90" width="180" height="40" rx="5" fill="#e9ecef" stroke="#333" stroke-width="1.5"/>
+  <text x="140" y="110" text-anchor="middle">trampoline</text>
+  <text x="140" y="124" text-anchor="middle" font-family="monospace" font-size="12">uservec</text>
+
+  <line x1="140" y1="130" x2="140" y2="160" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)" />
+
+  <rect x="50" y="160" width="180" height="40" rx="5" fill="#dee2e6" stroke="#333" stroke-width="1.5"/>
+  <text x="140" y="185" text-anchor="middle" font-family="monospace">usertrap</text>
+
+  <line x1="140" y1="200" x2="140" y2="230" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)" />
+
+  <rect x="50" y="230" width="180" height="40" rx="5" fill="#f8f9fa" stroke="#333" stroke-width="1.5"/>
+  <text x="140" y="248" text-anchor="middle">syscall or</text>
+  <text x="140" y="262" text-anchor="middle">device driver</text>
+
+  <line x1="140" y1="180" x2="480" y2="180" stroke="#333" stroke-width="1.5" />
+  <line x1="480" y1="180" x2="480" y2="130" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)" />
+
+  <rect x="390" y="90" width="180" height="40" rx="5" fill="#e9ecef" stroke="#333" stroke-width="1.5"/>
+  <text x="480" y="110" text-anchor="middle">trampoline</text>
+  <text x="480" y="124" text-anchor="middle" font-family="monospace" font-size="12">userret</text>
+
+  <line x1="480" y1="90" x2="480" y2="60" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)" />
+
+  <rect x="390" y="20" width="180" height="40" rx="5" fill="#f8f9fa" stroke="#333" stroke-width="1.5"/>
+  <text x="480" y="45" text-anchor="middle">User code</text>
+</svg>

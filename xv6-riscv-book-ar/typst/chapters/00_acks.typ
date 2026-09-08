@@ -1,13 +1,19 @@
 #import "../template/listings.typ": *
 
-\chapter*{تصدير وشكر وتقدير}
+= التصدير والشكر والتقدير
 <CH:ACKS>
 
-كُتب هذا الكتاب للتدريس في مادة أنظمة التشغيل بمعهد ماساتشوستس للتكنولوجيا (MIT)، وتحديدًا المقررين الدراسيين 6.037 و 6.1810.
-يقدم هذا الكتاب شرحًا تفصيليًا ونقديًا لنظام التشغيل `xv6`، وهو إعادة تنفيذ شبيهة بـ Unix V6 صُممت خصيصًا لتوضيح مفاهيم معمارية *RISC-V* 64-bit.
+هذا نص مسودة مخصص لفصل دراسي بداخل نظم التشغيل.
+يشرح المفاهيم الرئيسية لنظم التشغيل عبر دراسة نواة نموذجية تُسمى `xv6`.
+نُمذت `xv6` بناءً على الإصدار السادس من Unix (v6) الكائن لـ Dennis Ritchie و Ken Thompson.
+تتبع `xv6` بمرونة تركيب وأسلوب v6، ولكنها تُنفذ بـ ANSI C لمعالج RISC-V متعدد النوى.
 
-تستند نواة `xv6` إلى تصميم أنظمة Unix المبكرة التي طوّرها كين طومسون ودنيس ريتشي في مختبرات بل (Bell Labs)، ولكن تم كودتها بالكامل بلغة C الحديثة لدعم المعالجات متعددة الأنوية (Multicore CPUs).
+ينبغي قراءة هذا النص جنباً إلى جنب مع الشفرة المصدرية لـ `xv6`، وهو نهج مستوحى من تعليقات John Lions على الإصدار السادس من UNIX؛ ويحتوي النص على وصلات شعبية للشفرة المصدرية عند #link("https://github.com/mit-pdos/xv6-riscv").
+انظر #link("https://pdos.csail.mit.edu/6.1810") لمؤشرات إضافية للموارد على الشبكة لـ v6 و `xv6`، بما بداخل ذلك عدة واجبات معملية تستخدم `xv6`.
 
-نود أن نعرب عن امتنانا العميق لكل من ساهم في تطوير `xv6` وفي تحسين هذا الكتاب الأكاديمي، ونخص بالذكر الطلاب والمساعدين الأكاديميين في معهد MIT الذين قدموا ملاحظات واقتراحات قيمة على مر السنين.
+لقد استخدمنا هذا النص بداخل المقررات 6.828 و 6.1810، فصول نظم التشغيل بـ MIT.
+نشكر أعضاء هيئة التدريس، المساعدين التعليميين، والطلاب بداخل تلك الفصول الذين ساهموا جميعاً مباشرة أو غير مباشرة بـ `xv6`.
+وبصفة خاصة، نود شكر Adam Belay و Austin Clements و Nickolai Zeldovich.
+أخيراً نود شكر الأشخاص الذين أرسلوا لنا بريداً إلكترونياً بأخطاء بداخل النص أو اقتراحات للتحسينات: Abutalib Aghayev, Sebastian Boehm, brandb97, Anton Burtsev, Raphael Carvalho, Tej Chajed, Brendan Davidson, Rasit Eskicioglu, Color Fuzzy, Wojciech Gac, Giuseppe, Tao Guo, Haibo Hao, Naoki Hayama, Chris Henderson, Robert Hilderman, Eden Hochbaum, Wolfgang Keller, Paweł Kraszewski, Henry Laih, Jin Li, Austin Liew, `lyazj@github.com`, Pavan Maddamsetti, Jacek Masiulaniec, Michael McConville, m3hm00d, Mes0903, miguelgvieira, Mark Morrissey, Muhammed Mourad, Harry Pan, Harry Porter, pr3pony, Siyuan Qian, Zhefeng Qiao, Askar Safin, Salman Shah, Huang Sha, Vikram Shenoy, Adeodato Simó, Ruslan Savchenko, Pawel Szczurko, Warren Toomey, tyfkda, tzerbib, unicornx, Vanush Vaswani, Chen Wang, Xi Wang, and Zou Chang Wei, Sam Whitlock, Qiongsi Wu, LucyShawYang, `ykf1114@gmail.com`, and Meng Zhou.
 
-نشكر خصوصًا فرانس كاشوك، وروبيرت موريس، وروس كوكس على قيادتهم وتصميمهم لنظام `xv6`، وكذلك المساهمين من مجتمع المصادر المفتوحة الذين ساعدوا في نقل النظام إلى معمارية RISC-V.
+إذا لاحظت أخطاء أو حزت اقتراحات للتحسين، يُرجى إرسال بريد إلكتروني لـ Frans Kaashoek و Robert Morris على (`kaashoek,rtm@csail.mit.edu`).

@@ -22,6 +22,8 @@
   leading: 0.8em,
 )
 
+#set heading(numbering: "1.1")
+
 // Initialize fancyhdr page style
 #let book-style = fancy-style(
   direction: "rtl",

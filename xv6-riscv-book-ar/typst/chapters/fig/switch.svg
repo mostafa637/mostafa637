@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 650 220" width="650" height="220" style="background:#fff; font-family: monospace; font-size: 12px;">
+  <text x="100" y="25" font-family="sans-serif" font-weight="bold" text-anchor="middle">Process 1</text>
+  <text x="325" y="25" font-family="sans-serif" font-weight="bold" text-anchor="middle">Scheduler</text>
+  <text x="550" y="25" font-family="sans-serif" font-weight="bold" text-anchor="middle">Process 2</text>
+
+  <rect x="20" y="40" width="180" height="80" fill="#f8f9fa" stroke="#333" stroke-width="1" rx="4" />
+  <text x="30" y="65" fill="#2563eb">acquire(&amp;p->lock);</text>
+  <text x="30" y="85">p->state = RUNNABLE;</text>
+  <text x="30" y="105">swtch(&amp;p->context..);</text>
+
+  <rect x="230" y="100" width="190" height="100" fill="#f8f9fa" stroke="#333" stroke-width="1" rx="4" />
+  <text x="240" y="120">swtch(...); // return</text>
+  <text x="240" y="140" fill="#2563eb">release(&amp;p->lock);</text>
+  <text x="240" y="160" fill="#16a34a">acquire(&amp;p->lock);</text>
+  <text x="240" y="180">p->state = RUNNING;</text>
+
+  <rect x="450" y="140" width="180" height="60" fill="#f8f9fa" stroke="#333" stroke-width="1" rx="4" />
+  <text x="460" y="165">swtch(&amp;p->context..);</text>
+  <text x="460" y="185" fill="#16a34a">release(&amp;p->lock);</text>
+</svg>

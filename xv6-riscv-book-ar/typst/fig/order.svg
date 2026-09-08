@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 450 160" width="450" height="160" style="background:#fff; font-family: monospace; font-size: 13px;">
+  <text x="110" y="25" font-family="sans-serif" font-weight="bold" text-anchor="middle">CPU C1</text>
+  <text x="330" y="25" font-family="sans-serif" font-weight="bold" text-anchor="middle">CPU C2</text>
+
+  <rect x="20" y="40" width="180" height="100" fill="#f8f9fa" stroke="#333" stroke-width="1" rx="4" />
+  <text x="35" y="65">acquire(&amp;A);</text>
+  <text x="35" y="85">acquire(&amp;B);</text>
+  <text x="35" y="105">release(&amp;B);</text>
+  <text x="35" y="125">release(&amp;A);</text>
+
+  <rect x="240" y="40" width="180" height="100" fill="#f8f9fa" stroke="#333" stroke-width="1" rx="4" />
+  <text x="255" y="65">acquire(&amp;B);</text>
+  <text x="255" y="85">acquire(&amp;A);</text>
+  <text x="255" y="105">release(&amp;A);</text>
+  <text x="255" y="125">release(&amp;B);</text>
+</svg>

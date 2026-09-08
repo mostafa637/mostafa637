@@ -1356,16 +1356,13 @@ let prior = items.filter(item => counter(page).at(item.location()).first() < cur
 #let sectionmark = fancy-section-mark
 #let subsectionmark = fancy-subsection-mark
 
-#let fancy-heading-marks(body, chapter-level: 1, section-level: 2, subsection-level: 3, transform: none) = {
-  let title(value) = if transform == none { value } else { transform(value) }
-show heading.where(level: chapter-level):
-it => [#fancy-chapter-mark(title(it.body)) #it]
-show heading.where(level: section-level):
-it => [#fancy-section-mark(title(it.body)) #it]
-show heading.where(level: subsection-level):
-it => [#fancy-subsection-mark(title(it.body)) #it]
-  body
-}
+#let fancy-heading-marks(body, chapter-level: 1, section-level: 2, subsection-level: 3, transform: none) = [
+  #let title(value) = if transform == none { value } else { transform(value) }
+  #show heading.where(level: chapter-level): it => [#fancy-chapter-mark(title(it.body)) #it]
+  #show heading.where(level: section-level): it => [#fancy-section-mark(title(it.body)) #it]
+  #show heading.where(level: subsection-level): it => [#fancy-subsection-mark(title(it.body)) #it]
+  #body
+]
 #let fancy-auto-heading-marks = fancy-heading-marks
 
 #let fancy-first-left-mark() = _query-mark("standard", "left", "first", mark-class: "standard")
