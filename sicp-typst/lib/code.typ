@@ -36,20 +36,42 @@
 
 // Interpreter transcripts are executed through Calepin
 // (https://typst.app/universe/package/calepin). `calepin compile` runs every
-// transcript against a real, persistent python3 session and stores the
-// results in `.calepin/`; plain `typst compile` cannot execute code, so it
-// renders whatever the last Calepin run stored (nothing on a fresh clone).
-// The facade in /.calepin/ is that runtime once generated, and a thin shim
-// re-exporting the published compatibility package until then.
+// transcript against a real, persistent python3 session and publishes the
+// captured output through the Calepin store; the store then hands the output
+// string to the book's own listings engine, which typesets it with the same
+// machinery as every other code block. Plain `typst compile` cannot execute
+// code, so transcripts render empty on a fresh clone and after any prose
+// edit, until Calepin runs again. The facade in /.calepin/ is the generated
+// runtime once Calepin has run, and a thin shim re-exporting the published
+// compatibility package until then.
 #import "/.calepin/calepin.typ" as calepin
 #import "listings.typ": listings
+
+/// `calepin.store.get`, spelled so it works with both exports: the generated
+/// runtime exports `store` as a module (dot call), the compatibility shim as
+/// a dictionary (dot calls on dictionary values are an error).
+#let _store-get(key, default: "") = {
+  let get = if type(calepin.store) == module {
+    calepin.store.get
+  } else {
+    calepin.store.at("get")
+  }
+  get(key, default: default)
+}
+
+// One store key (and engine variable) per transcript, numbered in document
+// order. The state advances identically in Calepin's query pass — which turns
+// each chunk into an execution spec — and the render pass, so key N names the
+// same transcript in both.
+#let _transcript-index = state("sicp-transcript", 0)
 
 /// The code Calepin executes for one interpreter transcript: the snippet runs
 /// under `exec` (script semantics, exactly as the book narrates), so only
 /// `print` output appears — a bare expression such as `486` prints nothing —
-/// and a snippet that raises shows nothing either. The code is embedded as a
-/// JSON literal, which is also a valid Python string literal.
-#let transcript-source(code) = (
+/// and a snippet that raises shows nothing either. The captured output is
+/// published under `var` for `store-set`; the code is embedded as a JSON
+/// literal, which is also a valid Python string literal.
+#let transcript-source(code, var) = (
   "import sys, io",
   "_u = " + json.encode(code),
   "_b = io.StringIO()",
@@ -61,38 +83,53 @@
   "    pass",
   "finally:",
   "    sys.stdout = _o",
-  "_out = _b.getvalue()",
-  "if _out:",
-  "    print(_out, end=\"\")",
+  var + " = _b.getvalue()",
 ).join("\n")
 
+/// The listings configuration of an interpreter response: slanted mono on
+/// white inside the book's hairline border, as in the printed book.
+#let transcript-options = (
+  basicstyle: (font: code-font, size: code-size, style: "oblique"),
+  backgroundcolor: white,
+  frame: "single",
+  framerule: 0.5pt,
+  rulecolor: luma(235),
+  frameround: "t",
+  framesep: 6pt,
+  aboveskip: 1em,
+  belowskip: 1em,
+)
+
 /// Interpreter response, shown slanted as in the printed book. The transcript
-/// is emitted as a Calepin chunk; `calepin compile` fills in the output, and
-/// silence (no box at all) when the snippet prints nothing or fails.
-#let output(code) = {
+/// is emitted as a hidden Calepin chunk that publishes the interpreter's
+/// output through the store; `calepin compile` fills it in, and the output is
+/// typeset here by listings. Silence — no box at all — when the snippet
+/// prints nothing (or nothing is stored yet).
+#let output(code) = context {
+  let n = _transcript-index.get()
+  let step = _transcript-index.update(n + 1)
+  let var = "_sicp_t" + str(n)
   let text-code = if type(code) == str { code } else { code.text }
-  calepin.chunk(
-    "python",
-    raw(transcript-source(text-code), lang: "python", block: true),
-    echo: false,
-    warning: false,
-    message: false,
-    error: false,
-  )
-}
-
-/// The book's styling for one interpreter transcript, applied document-wide
-/// by the templates via a show rule on Calepin's `<calepin-output>` carrier.
-#let interpreter-output(body) = code-block(fill: white, stroke: luma(235))[
-  #set text(font: code-font, size: code-size, style: "oblique")
-  #set par(justify: false, leading: 0.55em)
-  #body
-]
-
-/// Activate the transcript styling. Call with `#show:` in each book template.
-#let show-interpreter-outputs(body) = {
-  show <calepin-output>: it => interpreter-output(it.body)
-  body
+  [
+    #step
+    #calepin.chunk(
+      "python",
+      raw(transcript-source(text-code, var), lang: "python", block: true),
+      echo: false,
+      results: "hide",
+      warning: false,
+      message: false,
+      error: false,
+      ..(("store-set": var,)),
+    )
+    #context {
+      let stored = _store-get(var)
+      let out = if type(stored) == str { stored } else { "" }
+      if out != "" {
+        listings(out, options: transcript-options)
+      }
+    }
+  ]
 }
 
 /// A Python program fragment that displays code using listings.
@@ -124,11 +161,19 @@
 /// Angle-bracketed meta-phrase: <METAPHRASE> in the XML.
 #let metaphrase(body) = box[⟨#text(style: "italic", body)⟩]
 
+/// The listings configuration of a prompt line: dim code on a gray plate.
+#let prompt-options = (
+  basicstyle: (font: code-font, size: code-size, fill: luma(70)),
+  backgroundcolor: luma(242),
+  frame: "none",
+  aboveskip: 1em,
+  belowskip: 1em,
+)
+
 /// The prompt line preceding user input in an interpreter transcript.
-#let prompt(code) = code-block(fill: luma(242))[
-  #set text(font: code-font, size: code-size, fill: luma(70))
-  #set par(justify: false, leading: 0.55em)
-  #as-raw(code)
-]
+#let prompt(code) = listings(
+  if type(code) == str { code } else { code.text },
+  options: prompt-options,
+)
 
 

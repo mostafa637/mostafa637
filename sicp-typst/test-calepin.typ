@@ -3,9 +3,10 @@
 //   calepin compile test-calepin.typ   -> executes the transcripts for real
 //   typst compile test-calepin.typ     -> compiles; transcripts stay empty
 //
-#import "lib/code.typ": output, snippet, transcript-source, show-interpreter-outputs
-
-#show: show-interpreter-outputs
+// Transcripts are emitted as hidden Calepin chunks that publish their output
+// through the store; the output string is typeset by listings.typ.
+#import "lib/code.typ": output, snippet, prompt, transcript-source, transcript-options
+#import "lib/listings.typ": listings
 
 #let program = ```python
 def factorial(n):
@@ -30,6 +31,16 @@ for i in range(1, 6):
 486
 ```)
 
+== سطر المُفسِّر التفاعلي
+
+#prompt(```python
+>>> print("ok")
+```)
+
 == نص المُشغِّل المُرسَل إلى calepin
 
-#raw(transcript-source("print(\"hi\")"), lang: "python", block: true)
+#raw(transcript-source("print(\"hi\")", "_sicp_tX"), lang: "python", block: true)
+
+== إعدادات listings للمخرجات
+
+#repr(transcript-options)

@@ -1,6 +1,5 @@
 // Page setup, headings and the structural elements of the book.
 
-#import "code.typ": show-interpreter-outputs
 #import "index.typ": make-index
 #import "exercise.typ": exercise-counter, exercise-style, list-of-exercises
 
@@ -92,7 +91,6 @@
   show ref: it => ref-dispatch(it)
 
   show: exercise-style
-  show: show-interpreter-outputs
 
   body
 }
