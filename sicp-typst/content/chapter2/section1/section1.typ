@@ -1,0 +1,61 @@
+// Generated from the SICP XML sources by tools/convert.py — do not edit.
+#import "../../../lib/sicp.typ": *
+
+#section([Introduction to Data Abstraction], label-name: <sec:data-abstraction>)
+
+In section @sec:black-box, we noted that a
+function
+used as an element in creating a more complex
+function
+could be regarded not only as a collection of particular operations but
+also as a
+functional
+abstraction. That is, the details of how the
+function
+was implemented could be suppressed, and the particular
+function
+itself could be replaced by any other
+function
+with the same overall behavior. In other words, we could make an
+abstraction that would separate the way the
+function
+would be used from the details of how the
+function
+would be implemented in terms of more primitive
+functions.
+The analogous notion for compound data is called
+#idx("data abstraction")
+#emph[data abstraction]. Data abstraction is a methodology that enables
+us to isolate how a compound data object is used from the details of how it
+is constructed from more primitive data objects.
+
+The basic idea of data abstraction is to structure the programs that are
+to use compound data objects so that they operate on
+#idx("abstract data")
+#idx("data", sub: "abstract")
+"abstract data." That is, our programs should use data in such
+a way as to make no assumptions about the data that are not strictly
+necessary for performing the task at hand. At the same time, a
+#idx("concrete data representation")
+#idx("data", sub: "concrete representation of")
+"concrete" data representation is defined independent of the
+programs that use the data. The interface between these two parts of our
+system will be a set of
+functions,
+called
+#idx("selector")
+#emph[selectors] and
+#idx("constructor")
+#emph[constructors], that implement the abstract data in terms of the
+concrete representation. To illustrate this technique, we will consider
+how to design a set of
+functions
+for manipulating rational numbers.
+
+#include "../../chapter2/section1/subsection1.typ"
+
+#include "../../chapter2/section1/subsection2.typ"
+
+#include "../../chapter2/section1/subsection3.typ"
+
+#include "../../chapter2/section1/subsection4.typ"
