@@ -10,6 +10,12 @@
 
 #show: sicp-book
 
+// Interpreter transcripts run through Calepin; `calepin compile book.typ`
+// fills them in. Plain Typst cannot execute code, and the compatibility shim
+// would otherwise print a one-time banner, so silence it here.
+#import "/.calepin/calepin.typ" as calepin
+#calepin.setup(fallback-warning: false)
+
 // ── front matter ───────────────────────────────────────────────────────────
 
 #page(numbering: none, align(center + horizon)[

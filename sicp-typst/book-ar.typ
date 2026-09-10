@@ -10,6 +10,13 @@
 // ── Apply Arabic book styling ──────────────────────────────────────────────
 #show: sicp-book-ar
 
+// تُنفَّذ مخرجات المفسِّر عبر #en[calepin]؛ الأمر
+// #en[`calepin compile book-ar.typ`]
+// يملؤها. ترجمة #en[Typst] المجردة لا تنفّذ كودًا، لذا نكتم تنبيه الواجهة
+// الاحتياطية هنا.
+#import "/.calepin/calepin.typ" as calepin
+#calepin.setup(fallback-warning: false)
+
 // ── الغلاف ─────────────────────────────────────────────────────────────────
 
 #page(numbering: none, align(center + horizon)[

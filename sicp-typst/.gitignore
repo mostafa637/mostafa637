@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 *.pdf
 sicp-check-*/
+
+# Calepin artifacts (runtime + stored transcript results) are generated at
+# build time, except the committed bootstrap facade.
+.calepin/*
+!.calepin/calepin.typ

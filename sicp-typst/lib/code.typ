@@ -34,40 +34,65 @@
   code
 }
 
-#import "@preview/pyrunner:0.3.0" as py-runner
+// Interpreter transcripts are executed through Calepin
+// (https://typst.app/universe/package/calepin). `calepin compile` runs every
+// transcript against a real, persistent python3 session and stores the
+// results in `.calepin/`; plain `typst compile` cannot execute code, so it
+// renders whatever the last Calepin run stored (nothing on a fresh clone).
+// The facade in /.calepin/ is that runtime once generated, and a thin shim
+// re-exporting the published compatibility package until then.
+#import "/.calepin/calepin.typ" as calepin
 #import "listings.typ": listings
 
-/// Run Python code dynamically using pyrunner and return printed output as string.
-#let py-exec(code) = {
-  let text-code = if type(code) == str { code } else { code.text }
-  let runner-code = ```python
-import sys, io
-_buf = io.StringIO()
-_old_out = sys.stdout
-sys.stdout = _buf
-try:
-    exec(code_str)
-except Exception:
-    pass
-finally:
-    sys.stdout = _old_out
-_buf.getvalue()
-```
-  py-runner.block(runner-code, globals: (code_str: text-code))
-}
+/// The code Calepin executes for one interpreter transcript: the snippet runs
+/// under `exec` (script semantics, exactly as the book narrates), so only
+/// `print` output appears — a bare expression such as `486` prints nothing —
+/// and a snippet that raises shows nothing either. The code is embedded as a
+/// JSON literal, which is also a valid Python string literal.
+#let transcript-source(code) = (
+  "import sys, io",
+  "_u = " + json.encode(code),
+  "_b = io.StringIO()",
+  "_o = sys.stdout",
+  "sys.stdout = _b",
+  "try:",
+  "    exec(_u)",
+  "except Exception:",
+  "    pass",
+  "finally:",
+  "    sys.stdout = _o",
+  "_out = _b.getvalue()",
+  "if _out:",
+  "    print(_out, end=\"\")",
+).join("\n")
 
-/// Interpreter response, shown slanted as in the printed book.
-/// Executes the code via pyrunner and displays the output.
+/// Interpreter response, shown slanted as in the printed book. The transcript
+/// is emitted as a Calepin chunk; `calepin compile` fills in the output, and
+/// silence (no box at all) when the snippet prints nothing or fails.
 #let output(code) = {
   let text-code = if type(code) == str { code } else { code.text }
-  let out = py-exec(text-code)
-  if out != "" and out != none [
-    code-block(fill: white, stroke: luma(235))[
-      #set text(font: code-font, size: code-size, style: "oblique")
-      #set par(justify: false, leading: 0.55em)
-      #raw(out)
-    ]
-  ]
+  calepin.chunk(
+    "python",
+    raw(transcript-source(text-code), lang: "python", block: true),
+    echo: false,
+    warning: false,
+    message: false,
+    error: false,
+  )
+}
+
+/// The book's styling for one interpreter transcript, applied document-wide
+/// by the templates via a show rule on Calepin's `<calepin-output>` carrier.
+#let interpreter-output(body) = code-block(fill: white, stroke: luma(235))[
+  #set text(font: code-font, size: code-size, style: "oblique")
+  #set par(justify: false, leading: 0.55em)
+  #body
+]
+
+/// Activate the transcript styling. Call with `#show:` in each book template.
+#let show-interpreter-outputs(body) = {
+  show <calepin-output>: it => interpreter-output(it.body)
+  body
 }
 
 /// A Python program fragment that displays code using listings.

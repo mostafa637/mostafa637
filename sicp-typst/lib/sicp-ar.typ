@@ -83,6 +83,7 @@
 
   // ── Exercises ─────────────────────────────────────────────────────────
   show: exercise-style-ar
+  show: show-interpreter-outputs
 
   body
 }
