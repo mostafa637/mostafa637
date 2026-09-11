@@ -22,7 +22,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `modrm.rs`   | `emu/modrm.h`         | 106     | **done** — ModRM/SIB decoder; 1,283 decodings (10,264 fields) verified against the C |
 | `cpuid.rs`   | `emu/cpuid.h`         | 29      | **done** — `do_cpuid` leaves 0/1 and the `CPUID_EDX_*` bits |
 | `interrupt.rs` | `emu/interrupt.h`   | 15      | **done** — the 13 `INT_*` vector numbers |
-| `decode.rs`  | `emu/decode.h`        | 1,416   | not started (instruction semantics for the gadget assembler) |
+| `decode.rs`  | `emu/decode.h`        | 1,416   | reference harness + 27,651-case corpus landed; the Rust decoder is next |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
