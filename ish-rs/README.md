@@ -24,6 +24,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `interrupt.rs` | `emu/interrupt.h`   | 15      | **done** — the 13 `INT_*` vector numbers |
 | `decode.rs`  | `emu/decode.h`        | 1,416   | **dispatch ported** — 8 opcode maps × 2 operand sizes; 140,289 events over 37,891 decodings verified against the C. The opcode table is generated from the header |
 | `memory.rs`  | `kernel/memory.{h,c}` | 346     | **done** — the guest address space: two-level page table, `pt_map`/`pt_unmap`/`pt_set_flags`/`pt_copy_on_write`/`mem_ptr`/`pt_find_hole`; 428 operations and 395 page records verified against the C |
+| `user.rs`    | `kernel/user.c`       | 97      | **done** — the guest↔kernel byte copies (`user_read`/`user_write`/`user_write_task_ptrace`/`user_read_string`/`user_write_string`); 52 operations, 77 guest pages and 192,937 bytes verified against the C |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -37,15 +38,16 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --tests
-running 107 tests  (unit tests in src/)
+running 124 tests  (unit tests in src/)
 running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
 running 2 tests    (tests/differential.rs)         -> 125,612 float80 results
 running 4 tests    (tests/fpu_differential.rs)     -> 502,552 cpu_state words
 running 2 tests    (tests/memory_differential.rs)  ->     428 page-table operations
+running 1 test     (tests/user_differential.rs)    ->     192,937 guest+host bytes
 running 3 tests    (tests/modrm_differential.rs)   ->  10,264 decode fields
 running 2 tests    (tests/tlb_differential.rs)     -> 172,312 tlb state words
 running 2 tests    (tests/vec_differential.rs)     ->   9,794 vec/mmx results
-test result: ok. 125 passed
+test result: ok. 143 passed
 $ cargo clippy --all-targets                   # clean, no warnings
 ```
 
@@ -406,6 +408,63 @@ fixture field was wrong too: the generator printed the `pt_map` offset as
 hard-coded decimal text in a line where every other page-number field is hex,
 so the script contradicted the call it described. It now prints the value.
 
+### user
+
+`kernel/user.c` is 97 lines and every syscall argument passes through it. The
+whole file is one loop: take the guest pointer, copy up to the end of its page,
+ask `mem_ptr` for the next page, repeat. Three things about that loop are
+behaviour rather than implementation, and all three are compared:
+
+* **No rollback.** Each page is copied as the walk reaches it, so a fault on
+  page *N* leaves pages *0..N-1* written. The corpus has a write that straddles
+  a writable page and a hole: it returns 1 *and* the first six bytes are there.
+  This is why the fixture dumps guest bytes (`G`) and not just return codes — a
+  port that wrote to the wrong page and faulted at the right one would pass a
+  return-code-only test.
+* **The arithmetic wraps.** `chunk_end` is an `addr_t`, so at the top of the
+  address space `(PAGE(p) + 1) << PAGE_BITS` is 0, while the loop bound
+  `addr + count` is `size_t` and is not. The corpus reads and writes at
+  `0xfffff000` with a count of 8192 to keep that comparison honest.
+* **`user_write_string` writes one byte at a time.** That is observable: every
+  byte runs `mem_ptr`, and every `mem_ptr` on a writable page invalidates the
+  page's compiled blocks. Chunking the string would reach the same bytes with
+  the same faults and one sixth of the invalidations. The fixture's trailer
+  (`asbestos_invalidations 33`) is what caught the chunked first draft.
+
+The `read_wrlock`/`read_wrunlock` around each C entry point have no counterpart
+here; there is one thread.
+
+Two deliberate deviations, both documented at the call site:
+
+* `write_string` takes a `&CStr` rather than a byte slice. The C walks `buf`
+  until it finds a NUL and has undefined behaviour if there is none.
+* `read_string` keeps the C's behaviour of returning *success* with an
+  unterminated buffer when `max` runs out first. The corpus pins both the
+  short-`max` case and the exact-fit case.
+
+The corpus also maps page 0 so the `addr == 0` checks are load-bearing: with
+nothing at page 0 they are redundant, because the access would fault anyway, and
+removing either check would go unnoticed.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_user_reference.sh
+wrote tests/fixtures/user_reference.txt: 590 lines, 52 operations, 576K
+# asbestos_invalidations 33 fd_closes 0 signals_sent 0
+```
+
+23 mutations of `src/user.rs` were injected; **22 were caught**. The survivor is
+advancing the *read* walk by one byte instead of by `chunk_end`. It is
+equivalent, and only on the read path: the copies overlap, but a read never
+changes a guest byte (grow-down maps zeroes and zeroes read back as zeroes), it
+faults on the same first unmapped page, and it bumps no counter. The identical
+change on the *write* path is caught, because there each extra `mem_ptr`
+invalidates a page.
+
+Both fixtures now state their radix in a header line. The first draft of this
+one printed byte counts in hex while every other count was decimal, and the test
+read them as decimal — a fixture field that silently changes base is worse than
+a missing one.
+
 ## Layout
 
 ```
@@ -424,13 +483,15 @@ ish-rs/
 │   ├── interrupt.rs            # emu/interrupt.h
 │   ├── tlb.rs                  # emu/tlb.{h,c}
 │   ├── vec.rs                  # emu/vec.{h,c} + emu/mmx.c
-│   └── memory.rs               # kernel/memory.{h,c}
+│   ├── memory.rs               # kernel/memory.{h,c}
+│   └── user.rs                 # kernel/user.c
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
 │   ├── decode_differential.rs  # event-exact replay of the decoder reference
 │   ├── memory_differential.rs  # operation-exact replay of the page-table reference
 │   ├── modrm_differential.rs   # field-exact replay of the ModRM/SIB reference
+│   ├── user_differential.rs    # byte-exact replay of the user-memory reference
 │   ├── tlb_differential.rs     # word-exact replay of the tlb reference
 │   ├── vec_differential.rs     # word-exact replay of the vec/mmx reference
 │   └── fixtures/
@@ -439,6 +500,7 @@ ish-rs/
 │       ├── decode_reference.txt# 37.9k instruction decodings from the C
 │       ├── memory_reference.txt# 428 page-table operations from the C
 │       ├── modrm_reference.txt # 1283 ModRM/SIB decodings from the C
+│       ├── user_reference.txt  # 52 user-memory ops, guest+host bytes from the C
 │       ├── tlb_reference.txt   # 56 full struct tlb dumps from the C
 │       └── vec_reference.txt   # 9.8k vec/mmx results from the C
 └── tools/
@@ -449,6 +511,7 @@ ish-rs/
     ├── gen_decode_table.py     # derives src/decode_table.rs from the fixture
     ├── memory-dump.c           # page-table reference generator (links memory.c)
     ├── stub-include/sqlite3.h  # three opaque typedefs memory.c reaches via fd.h
+    ├── user-dump.c             # user-memory reference generator (links user.c)
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
     ├── gen_vec_ops.py          # derives both op tables from emu/vec.h
@@ -457,6 +520,7 @@ ish-rs/
     ├── gen_fpu_reference.sh
     ├── gen_decode_reference.sh
     ├── gen_memory_reference.sh
+    ├── gen_user_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh

@@ -144,6 +144,8 @@ int main(void) {
 
     printf("# memory reference output, generated from unmodified iSH kernel/memory.c\n");
     printf("# real_page_size %zu\n", real_page_size);
+    printf("# radix: addresses, page numbers and offsets are hex;\n");
+    printf("#        page counts and flags are decimal\n");
 
 #define RET(fmt, ...) printf("R " fmt "\n", ##__VA_ARGS__)
 

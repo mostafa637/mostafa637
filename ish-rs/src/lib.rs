@@ -18,6 +18,7 @@
 //! | [`modrm`]       | `emu/modrm.h`             | ported, decode results compared against the C |
 //! | [`decode`]      | `emu/decode.h`            | ported dispatch, opcode table generated from the C |
 //! | [`memory`]      | `kernel/memory.{h,c}`     | ported, the guest address space behind `mmu`/`tlb` |
+//! | [`user`]        | `kernel/user.c`           | ported, the guest<->kernel byte copies, faults included |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -37,6 +38,7 @@ pub mod memory;
 pub mod mmu;
 pub mod modrm;
 pub mod tlb;
+pub mod user;
 pub mod vec;
 
 pub use cpu::CpuState;

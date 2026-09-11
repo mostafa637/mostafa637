@@ -1,5 +1,7 @@
 # memory reference output, generated from unmodified iSH kernel/memory.c
 # real_page_size 4096
+# radix: addresses, page numbers and offsets are hex;
+#        page counts and flags are decimal
 O MN 100 4 7
 R 0
 S main pgdir_used 1 changes 0
