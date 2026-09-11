@@ -2,9 +2,9 @@
 name = "ish-emu"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.89"
 license = "GPL-2.0-or-later"
-description = "Rust port of the iSH emulator core (emu/), starting with the 80-bit extended-precision FPU (emu/float80.c)"
+description = "Rust port of the iSH emulator and kernel core"
 repository = "https://github.com/ish-app/ish"
 readme = "README.md"
 
@@ -13,6 +13,9 @@ name = "ish_emu"
 path = "src/lib.rs"
 
 [dependencies]
+# Pure-Rust embedded ACID B-tree store, vendored at v3.1.2 so Cargo does not
+# need the unavailable crates.io registry or any native database library.
+redb = { path = "vendor/redb", default-features = false }
 
 [profile.release]
 opt-level = 3

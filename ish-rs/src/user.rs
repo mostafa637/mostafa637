@@ -100,7 +100,11 @@ impl<'m> User<'m> {
     /// `__user_write_task` — `ptrace` picks `MEM_WRITE_PTRACE`, which bypasses
     /// write protection the way a debugger has to.
     fn write_from(&mut self, addr: u32, buf: &[u8], ptrace: bool) -> Result<(), Fault> {
-        let type_ = if ptrace { MemType::WritePtrace } else { MemType::Write };
+        let type_ = if ptrace {
+            MemType::WritePtrace
+        } else {
+            MemType::Write
+        };
         let end = addr as u64 + buf.len() as u64;
         let mut p = addr;
         while (p as u64) < end {
@@ -217,11 +221,13 @@ mod tests {
     /// 0x200, a grow-down page at 0x500 and a hole everywhere else
     fn space() -> Mem {
         let mut mem = Mem::new();
-        let bytes = (0..4096u32).map(|i| (i.wrapping_mul(31).wrapping_add(1) & 0xff) as u8)
+        let bytes = (0..4096u32)
+            .map(|i| (i.wrapping_mul(31).wrapping_add(1) & 0xff) as u8)
             .collect::<Vec<u8>>()
             .into_boxed_slice();
         mem.map(0x100, 1, bytes, 0, P_RWX);
-        let ro = (0..4096u32).map(|i| (i.wrapping_mul(31).wrapping_add(2) & 0xff) as u8)
+        let ro = (0..4096u32)
+            .map(|i| (i.wrapping_mul(31).wrapping_add(2) & 0xff) as u8)
             .collect::<Vec<u8>>()
             .into_boxed_slice();
         mem.map(0x200, 1, ro, 0, P_READ);
@@ -238,7 +244,10 @@ mod tests {
     fn a_read_inside_one_page_copies_the_guest_bytes() {
         let mut mem = space();
         let mut buf = [0u8; 16];
-        assert_eq!(User::new(&mut mem).read(0x100 << PAGE_BITS, &mut buf), Ok(()));
+        assert_eq!(
+            User::new(&mut mem).read(0x100 << PAGE_BITS, &mut buf),
+            Ok(())
+        );
         assert_eq!(buf[0], 1, "the mapping's own pattern");
         assert_eq!(buf[1], 32, "31*1+1");
     }
@@ -248,7 +257,10 @@ mod tests {
         let mut mem = space();
         mem.map_nothing(0x101, 1, P_RWX);
         let mut buf = [0u8; 16];
-        assert_eq!(User::new(&mut mem).read((0x100 << PAGE_BITS) + 4090, &mut buf), Ok(()));
+        assert_eq!(
+            User::new(&mut mem).read((0x100 << PAGE_BITS) + 4090, &mut buf),
+            Ok(())
+        );
         // six bytes from the end of 0x100, ten from the start of 0x101
         assert_eq!(buf[..6], bytes_of(&mem, 0x100)[4090..]);
         assert_eq!(&buf[6..], &bytes_of(&mem, 0x101)[..10]);
@@ -259,7 +271,10 @@ mod tests {
         let mut mem = space();
         let mut buf = [0xaau8; 16];
         // 0x101 is a hole, so this faults after the first six bytes
-        assert_eq!(User::new(&mut mem).read((0x100 << PAGE_BITS) + 4090, &mut buf), Err(Fault));
+        assert_eq!(
+            User::new(&mut mem).read((0x100 << PAGE_BITS) + 4090, &mut buf),
+            Err(Fault)
+        );
         assert_eq!(buf[..6], bytes_of(&mem, 0x100)[4090..]);
         assert_eq!(&buf[6..], &[0xaa; 10], "the rest is untouched");
     }
@@ -268,9 +283,14 @@ mod tests {
     fn a_write_that_faults_halfway_keeps_the_first_page() {
         let mut mem = space();
         let before = bytes_of(&mem, 0x100);
-        let buf: Vec<u8> = (0..16u8).map(|j| j.wrapping_mul(7).wrapping_add(13)).collect();
+        let buf: Vec<u8> = (0..16u8)
+            .map(|j| j.wrapping_mul(7).wrapping_add(13))
+            .collect();
         // spans 0x100 (writable) then 0x101 (a hole)
-        assert_eq!(User::new(&mut mem).write((0x100 << PAGE_BITS) + 4090, &buf), Err(Fault));
+        assert_eq!(
+            User::new(&mut mem).write((0x100 << PAGE_BITS) + 4090, &buf),
+            Err(Fault)
+        );
         let after = bytes_of(&mem, 0x100);
         assert_eq!(&after[4090..], &buf[..6], "the reachable part is written");
         assert_eq!(&after[..4090], &before[..4090], "and nothing else moved");
@@ -280,7 +300,10 @@ mod tests {
     fn writing_to_a_read_only_page_faults_and_writes_nothing() {
         let mut mem = space();
         let before = bytes_of(&mem, 0x200);
-        assert_eq!(User::new(&mut mem).write(0x200 << PAGE_BITS, &[1, 2, 3]), Err(Fault));
+        assert_eq!(
+            User::new(&mut mem).write(0x200 << PAGE_BITS, &[1, 2, 3]),
+            Err(Fault)
+        );
         assert_eq!(bytes_of(&mem, 0x200), before);
     }
 
@@ -288,23 +311,38 @@ mod tests {
     fn a_ptrace_write_goes_through_where_a_plain_write_does_not() {
         let mut mem = space();
         let buf = [9u8, 8, 7];
-        assert_eq!(User::new(&mut mem).write(0x200 << PAGE_BITS, &buf), Err(Fault));
-        assert_eq!(User::new(&mut mem).write_ptrace(0x200 << PAGE_BITS, &buf), Ok(()));
+        assert_eq!(
+            User::new(&mut mem).write(0x200 << PAGE_BITS, &buf),
+            Err(Fault)
+        );
+        assert_eq!(
+            User::new(&mut mem).write_ptrace(0x200 << PAGE_BITS, &buf),
+            Ok(())
+        );
         assert_eq!(&bytes_of(&mem, 0x200)[..3], &buf);
         // the ptrace write broke the CoW it created, so the page stays writable
         assert_eq!(mem.pt(0x200).unwrap().flags & P_COW, 0);
-        assert_eq!(User::new(&mut mem).write((0x200 << PAGE_BITS) + 8, &buf), Ok(()));
+        assert_eq!(
+            User::new(&mut mem).write((0x200 << PAGE_BITS) + 8, &buf),
+            Ok(())
+        );
     }
 
     #[test]
     fn a_zero_length_access_touches_nothing_and_succeeds() {
         let mut mem = space();
         let mut buf = [];
-        assert_eq!(User::new(&mut mem).read(0x100 << PAGE_BITS, &mut buf), Ok(()));
+        assert_eq!(
+            User::new(&mut mem).read(0x100 << PAGE_BITS, &mut buf),
+            Ok(())
+        );
         assert_eq!(User::new(&mut mem).write(0x100 << PAGE_BITS, &[]), Ok(()));
         // even at an address that is not mapped: the walk never runs
         let mut b2 = [];
-        assert_eq!(User::new(&mut mem).read(0x400 << PAGE_BITS, &mut b2), Ok(()));
+        assert_eq!(
+            User::new(&mut mem).read(0x400 << PAGE_BITS, &mut b2),
+            Ok(())
+        );
     }
 
     #[test]
@@ -312,7 +350,10 @@ mod tests {
         let mut mem = space();
         assert!(mem.pt(0x4ff).is_none());
         let mut buf = [0u8; 4];
-        assert_eq!(User::new(&mut mem).read((0x4ff << PAGE_BITS) + 4090, &mut buf), Ok(()));
+        assert_eq!(
+            User::new(&mut mem).read((0x4ff << PAGE_BITS) + 4090, &mut buf),
+            Ok(())
+        );
         assert!(mem.pt(0x4ff).is_some(), "the read grew the region down");
         assert_eq!(buf, [0; 4], "a freshly grown page reads as zeroes");
     }
@@ -321,8 +362,11 @@ mod tests {
     fn write_string_writes_the_terminator_and_nothing_more() {
         let mut mem = space();
         mem.map_nothing(0x600, 1, P_RWX);
-        let s = CStr::from_bytes_with_nul(b"hi\0").unwrap();
-        assert_eq!(User::new(&mut mem).write_string(0x600 << PAGE_BITS, s), Ok(()));
+        let s = c"hi";
+        assert_eq!(
+            User::new(&mut mem).write_string(0x600 << PAGE_BITS, s),
+            Ok(())
+        );
         assert_eq!(&bytes_of(&mem, 0x600)[..4], b"hi\0\0");
     }
 
@@ -330,10 +374,14 @@ mod tests {
     fn read_string_stops_after_the_terminator() {
         let mut mem = space();
         mem.map_nothing(0x600, 1, P_RWX);
-        User::new(&mut mem).write_string(0x600 << PAGE_BITS, CStr::from_bytes_with_nul(b"abc\0").unwrap())
+        User::new(&mut mem)
+            .write_string(0x600 << PAGE_BITS, c"abc")
             .unwrap();
         let mut buf = [0xaau8; 8];
-        assert_eq!(User::new(&mut mem).read_string(0x600 << PAGE_BITS, &mut buf), Ok(()));
+        assert_eq!(
+            User::new(&mut mem).read_string(0x600 << PAGE_BITS, &mut buf),
+            Ok(())
+        );
         assert_eq!(&buf[..4], b"abc\0");
         assert_eq!(&buf[4..], &[0xaa; 4], "reading stops at the NUL");
     }
@@ -343,10 +391,14 @@ mod tests {
         // the C does the same: the loop ends on `i < max`, not on a terminator
         let mut mem = space();
         mem.map_nothing(0x600, 1, P_RWX);
-        User::new(&mut mem).write_string(0x600 << PAGE_BITS, CStr::from_bytes_with_nul(b"abc\0").unwrap())
+        User::new(&mut mem)
+            .write_string(0x600 << PAGE_BITS, c"abc")
             .unwrap();
         let mut buf = [0u8; 2];
-        assert_eq!(User::new(&mut mem).read_string(0x600 << PAGE_BITS, &mut buf), Ok(()));
+        assert_eq!(
+            User::new(&mut mem).read_string(0x600 << PAGE_BITS, &mut buf),
+            Ok(())
+        );
         assert_eq!(&buf, b"ab", "no terminator was stored");
     }
 
@@ -355,10 +407,7 @@ mod tests {
         let mut mem = space();
         let mut buf = [0u8; 4];
         assert_eq!(User::new(&mut mem).read_string(0, &mut buf), Err(Fault));
-        assert_eq!(
-            User::new(&mut mem).write_string(0, CStr::from_bytes_with_nul(b"x\0").unwrap()),
-            Err(Fault)
-        );
+        assert_eq!(User::new(&mut mem).write_string(0, c"x"), Err(Fault));
     }
 
     #[test]
@@ -366,7 +415,7 @@ mod tests {
         let mut mem = space();
         mem.map_nothing(0x600, 1, P_RWX);
         assert_eq!(
-            User::new(&mut mem).write_string(0x600 << PAGE_BITS, CStr::from_bytes_with_nul(b"\0").unwrap()),
+            User::new(&mut mem).write_string(0x600 << PAGE_BITS, c""),
             Ok(())
         );
         assert_eq!(bytes_of(&mem, 0x600)[0], 0);
@@ -380,15 +429,22 @@ mod tests {
         let mut mem = space();
         mem.map_nothing(0x600, 1, P_RWX);
         let before = mem.invalidations;
-        let s = CStr::from_bytes_with_nul(b"hello\0").unwrap();
+        let s = c"hello";
         {
             let mut u = User::new(&mut mem);
             assert_eq!(u.write_string(0x600 << PAGE_BITS, s), Ok(()));
         }
-        assert_eq!(mem.invalidations - before, 6, "six bytes, six invalidations");
+        assert_eq!(
+            mem.invalidations - before,
+            6,
+            "six bytes, six invalidations"
+        );
         // a plain write of the same length is one page-sized chunk
         let before = mem.invalidations;
-        assert_eq!(User::new(&mut mem).write(0x600 << PAGE_BITS, b"hello\0"), Ok(()));
+        assert_eq!(
+            User::new(&mut mem).write(0x600 << PAGE_BITS, b"hello\0"),
+            Ok(())
+        );
         assert_eq!(mem.invalidations - before, 1);
     }
 
@@ -397,12 +453,16 @@ mod tests {
         let mut mem = space();
         mem.map_nothing(0x600, 1, P_RWX);
         // only six bytes left in the page, and 0x601 is a hole
-        let s = CStr::from_bytes_with_nul(b"overflow\0").unwrap();
+        let s = c"overflow";
         assert_eq!(
             User::new(&mut mem).write_string((0x600 << PAGE_BITS) + 4090, s),
             Err(Fault)
         );
-        assert_eq!(&bytes_of(&mem, 0x600)[4090..], b"overfl", "what fitted is written");
+        assert_eq!(
+            &bytes_of(&mem, 0x600)[4090..],
+            b"overfl",
+            "what fitted is written"
+        );
     }
 
     #[test]
@@ -415,7 +475,10 @@ mod tests {
             &child.pt(0x100).unwrap().data
         ));
         let shared = bytes_of(&parent, 0x100);
-        assert_eq!(User::new(&mut child).write(0x100 << PAGE_BITS, &[0xff; 4]), Ok(()));
+        assert_eq!(
+            User::new(&mut child).write(0x100 << PAGE_BITS, &[0xff; 4]),
+            Ok(())
+        );
         assert_eq!(&bytes_of(&child, 0x100)[..4], &[0xff; 4]);
         assert_eq!(bytes_of(&parent, 0x100), shared, "the parent is untouched");
     }

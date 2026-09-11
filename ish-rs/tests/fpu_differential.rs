@@ -21,7 +21,10 @@ use ish_emu::cpu::{CpuState, FSW_TOP_MASK};
 use ish_emu::float80::{Float80, RoundingMode};
 use ish_emu::fpu::{FpuConst, FPU_CONSTS};
 
-const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/fpu_reference.txt");
+const FIXTURE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/fpu_reference.txt"
+);
 
 // ---- the same operand pools the C driver uses ---------------------------
 
@@ -31,18 +34,54 @@ struct MemVal {
 }
 
 const MEMVALS: [MemVal; 12] = [
-    MemVal { bits64: 0x0000_0000_0000_0000, f80: (0x0000_0000_0000_0000, 0x0000) },
-    MemVal { bits64: 0x0000_0000_0000_0001, f80: (0x8000_0000_0000_0000, 0x3fff) },
-    MemVal { bits64: 0xffff_ffff_ffff_ffff, f80: (0x8000_0000_0000_0000, 0xbfff) },
-    MemVal { bits64: 0x0000_0000_7fff_ffff, f80: (0xc000_0000_0000_0000, 0x4000) },
-    MemVal { bits64: 0xffff_ffff_8000_0000, f80: (0xa000_0000_0000_0000, 0x4000) },
-    MemVal { bits64: 0x0000_0000_0000_7fff, f80: (0x9a20_9a84_fbcf_f799, 0x3ffd) },
-    MemVal { bits64: 0x0000_0000_ffff_8000, f80: (0x8000_0000_0000_0000, 0x0000) },
-    MemVal { bits64: 0x0000_0000_0000_9c40, f80: (0x0000_0000_0000_0001, 0x0000) },
-    MemVal { bits64: 0x4009_21fb_5444_2d18, f80: (0xc90f_daa2_2168_c235, 0x4000) },
-    MemVal { bits64: 0xc009_21fb_5444_2d18, f80: (0xffff_ffff_ffff_ffff, 0x7ffe) },
-    MemVal { bits64: 0x7fef_ffff_ffff_ffff, f80: (0x7fff_ffff_ffff_ffff, 0x0000) },
-    MemVal { bits64: 0x3ff0_0000_0000_0000, f80: (0xc000_0000_0000_0000, 0xffff) },
+    MemVal {
+        bits64: 0x0000_0000_0000_0000,
+        f80: (0x0000_0000_0000_0000, 0x0000),
+    },
+    MemVal {
+        bits64: 0x0000_0000_0000_0001,
+        f80: (0x8000_0000_0000_0000, 0x3fff),
+    },
+    MemVal {
+        bits64: 0xffff_ffff_ffff_ffff,
+        f80: (0x8000_0000_0000_0000, 0xbfff),
+    },
+    MemVal {
+        bits64: 0x0000_0000_7fff_ffff,
+        f80: (0xc000_0000_0000_0000, 0x4000),
+    },
+    MemVal {
+        bits64: 0xffff_ffff_8000_0000,
+        f80: (0xa000_0000_0000_0000, 0x4000),
+    },
+    MemVal {
+        bits64: 0x0000_0000_0000_7fff,
+        f80: (0x9a20_9a84_fbcf_f799, 0x3ffd),
+    },
+    MemVal {
+        bits64: 0x0000_0000_ffff_8000,
+        f80: (0x8000_0000_0000_0000, 0x0000),
+    },
+    MemVal {
+        bits64: 0x0000_0000_0000_9c40,
+        f80: (0x0000_0000_0000_0001, 0x0000),
+    },
+    MemVal {
+        bits64: 0x4009_21fb_5444_2d18,
+        f80: (0xc90f_daa2_2168_c235, 0x4000),
+    },
+    MemVal {
+        bits64: 0xc009_21fb_5444_2d18,
+        f80: (0xffff_ffff_ffff_ffff, 0x7ffe),
+    },
+    MemVal {
+        bits64: 0x7fef_ffff_ffff_ffff,
+        f80: (0x7fff_ffff_ffff_ffff, 0x0000),
+    },
+    MemVal {
+        bits64: 0x3ff0_0000_0000_0000,
+        f80: (0xc000_0000_0000_0000, 0xffff),
+    },
 ];
 
 const POOL: [(u64, u16); 15] = [
@@ -68,7 +107,8 @@ struct Lcg(u64);
 
 impl Lcg {
     fn next(&mut self) -> u64 {
-        self.0 = self.0
+        self.0 = self
+            .0
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1442695040888963407);
         self.0 >> 11
@@ -139,8 +179,22 @@ fn dump_state(cpu: &CpuState) -> Vec<String> {
 }
 
 const WORD_NAMES: [&str; 16] = [
-    "top", "fsw", "fcw", "cf", "of", "zf", "sf", "pf", "af", "cf_bit", "of_bit", "res", "op1",
-    "op2", "flags_res", "eflags",
+    "top",
+    "fsw",
+    "fcw",
+    "cf",
+    "of",
+    "zf",
+    "sf",
+    "pf",
+    "af",
+    "cf_bit",
+    "of_bit",
+    "res",
+    "op1",
+    "op2",
+    "flags_res",
+    "eflags",
 ];
 
 fn word_name(i: usize) -> String {
@@ -148,7 +202,11 @@ fn word_name(i: usize) -> String {
         WORD_NAMES[i].to_string()
     } else {
         let r = (i - 16) / 2;
-        let part = if (i - 16) % 2 == 0 { "signif" } else { "signExp" };
+        let part = if (i - 16).is_multiple_of(2) {
+            "signif"
+        } else {
+            "signExp"
+        };
         format!("fp[{r}].{part}")
     }
 }
@@ -448,7 +506,10 @@ fn fpu_state_matches_c_word_for_word() {
         samples.len(),
         samples.join("\n")
     );
-    assert!(checks > 400_000, "only {checks} checks ran - fixture looks truncated");
+    assert!(
+        checks > 400_000,
+        "only {checks} checks ran - fixture looks truncated"
+    );
     eprintln!("fpu differential: {checks} state words matched the C reference exactly");
 }
 
@@ -483,7 +544,11 @@ fn fpu_const_table_is_bit_identical() {
         (0x0000_0000_0000_0000, 0x0000),
     ];
     for (i, (signif, sign_exp)) in expected.iter().enumerate() {
-        assert_eq!(FPU_CONSTS[i], Float80::from_bits(*signif, *sign_exp), "constant {i}");
+        assert_eq!(
+            FPU_CONSTS[i],
+            Float80::from_bits(*signif, *sign_exp),
+            "constant {i}"
+        );
     }
 }
 
@@ -502,6 +567,10 @@ fn state_pool_rebuilds_deterministically() {
     // top cycles 0..7 and the fsw write must not disturb it
     for (s, cpu) in a.iter().enumerate() {
         assert_eq!(cpu.top(), (s % 8) as u8, "state {s} top");
-        assert_eq!(cpu.fsw & FSW_TOP_MASK, ((s % 8) as u16) << 11, "state {s} top in fsw");
+        assert_eq!(
+            cpu.fsw & FSW_TOP_MASK,
+            ((s % 8) as u16) << 11,
+            "state {s} top in fsw"
+        );
     }
 }

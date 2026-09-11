@@ -356,7 +356,7 @@ impl CpuState {
     /// PF is set when the low byte holds an *even* number of one bits.
     pub fn pf_eval(&self) -> bool {
         if self.pf_res() {
-            (self.res & 0xff).count_ones() % 2 == 0
+            (self.res & 0xff).count_ones().is_multiple_of(2)
         } else {
             self.pf
         }
@@ -596,7 +596,10 @@ mod tests {
         assert!(!cpu.zf && cpu.sf && cpu.pf);
         assert!(cpu.cf_bit && cpu.of_bit);
         assert_eq!(cpu.flags_res, 0, "collapse clears the lazy markers");
-        assert!(cpu.pad1_1 && cpu.if_, "collapse forces the reserved/IF bits");
+        assert!(
+            cpu.pad1_1 && cpu.if_,
+            "collapse forces the reserved/IF bits"
+        );
         assert!(!cpu.pad2_0 && !cpu.pad3_0);
 
         cpu.expand_flags();

@@ -1,0 +1,12 @@
+# ipc reference output, generated from unmodified iSH kernel/ipc.c
+# every record is raw i386 call/argument bits followed by its return
+O IPC 00000000 00000000 00000000 00000000 00000000 00000000
+R ffffffda
+O IPC 00000001 00000001 00000002 00000003 00000004 00000005
+R ffffffda
+O IPC ffffffff 80000000 7fffffff ffffffff ffffffff 87654321
+R ffffffda
+O IPC 0001000d ffffff9c 10203040 fedcba98 00123000 00000063
+R ffffffda
+O IPC 00000012 ffffffd6 ffffffd5 ffffffd4 00000000 ffffffd3
+R ffffffda

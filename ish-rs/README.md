@@ -27,6 +27,17 @@ against the compiled C original**, not just against hand-written expectations.
 | `mmap.rs`    | `kernel/mmap.c` + `mm.h` | 243   | **done** — `mmap2`, the old `mmap`, `munmap`, `mremap`, `mprotect`, `brk`, the no-op syscalls and `mm_copy`; 51 operations and the full page table after each verified against the C |
 | `errno.rs`   | `kernel/errno.{h,c}`  | 105     | **done** — host→guest errno translation; 4,216 `err_map` inputs and all 10 `errno_map` probes verified against the C, table generated from the host headers |
 | `user.rs`    | `kernel/user.c`       | 97      | **done** — the guest↔kernel byte copies (`user_read`/`user_write`/`user_write_task_ptrace`/`user_read_string`/`user_write_string`); 52 operations, 77 guest pages and 192,937 bytes verified against the C |
+| `resource.rs` | `kernel/resource.{h,c}` | 265   | **done** — `rlimit`/`rusage` guest ABIs, resource-limit rules, affinity bitmap, and scheduler/priority compatibility calls; 51 deterministic C operations and 52 full state snapshots verified against unmodified C |
+| `random.rs`  | `kernel/random.{h,c}` | 35      | **done** — bounded `getrandom`, host-failure mapping, output fault ordering, and explicit iOS/Linux entropy adapter; 9 deterministic C operations verified byte-for-byte |
+| `uname.rs`   | `kernel/uname.c`      | 81      | **done** — guest `uname`/`sysinfo` layouts, C string/truncation behavior, and explicit hostname/uptime/memory host data; 10 deterministic C operations verified byte-for-byte |
+| `ipc.rs`     | `kernel/ipc.c`        | 6       | **done** — the complete legacy System V IPC multiplexor `_ENOSYS` compatibility stub; 5 raw C calls verified |
+| `log.rs`     | `kernel/log.c` + `util/fifo.c` | 250 | **done** — one-MiB printk FIFO, complete-line host sink, and old `sys_syslog` ABI; 31 C operations and all defined outputs verified |
+| `fake_db.rs` | `fs/fake-db.c` | 289 | **metadata API ported** — vendored pure-Rust `redb` storage; 40 C/SQLite operations and 41 snapshots verified; import/migration/rebuild integration follows |
+| `task.rs`    | `kernel/task.{h,c}`   | 346     | **foundation ported** — PID table, parent/child links, task creation/destruction, mm attachment, task credentials/names, thread-group topology, zombie visibility and explicit current-task selection |
+| `group.rs`   | `kernel/group.c`      | 131     | **done** — `setpgid`/`getpgid`, `setsid`/`getsid`, session and process-group membership rules |
+| `getset.rs`  | `kernel/getset.c`     | 202     | **done** — PID/UID/GID getters and setters, supplementary groups, capability stubs and personality |
+| `tls.rs`     | `kernel/tls.c`        | 42      | **done** — i386 `user_desc`, `set_thread_area` and `set_tid_address` |
+| `misc.rs`    | `kernel/misc.c`       | 59      | **done** — `prctl`, `arch_prctl` and the host-safe reboot policy |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -39,8 +50,8 @@ iSH tree, so there is nothing to port for it.
 ## Verification
 
 ```console
-$ cargo test --tests
-running 148 tests  (unit tests in src/)
+$ cargo test --all-targets
+running 190 tests  (unit tests in src/)
 running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
 running 3 tests    (tests/errno_differential.rs)   ->   4,216 err_map inputs
 running 2 tests    (tests/mmap_differential.rs)    ->      51 mmap operations
@@ -51,8 +62,14 @@ running 1 test     (tests/user_differential.rs)    ->     192,937 guest+host byt
 running 3 tests    (tests/modrm_differential.rs)   ->  10,264 decode fields
 running 2 tests    (tests/tlb_differential.rs)     -> 172,312 tlb state words
 running 2 tests    (tests/vec_differential.rs)     ->   9,794 vec/mmx results
-test result: ok. 172 passed
-$ cargo clippy --all-targets                   # clean, no warnings
+running 1 test     (tests/resource_differential.rs)->      51 resource operations + 52 full state snapshots
+running 1 test     (tests/random_differential.rs)  ->       9 getrandom operations
+running 1 test     (tests/uname_differential.rs)   ->      10 uname/sysinfo operations
+running 1 test     (tests/ipc_differential.rs)     ->       5 legacy IPC operations
+running 1 test     (tests/log_differential.rs)     ->      31 log/syslog operations
+running 1 test     (tests/fake_db_differential.rs) ->      40 C/SQLite metadata operations + 41 snapshots
+test result: ok. 220 passed
+$ cargo clippy --all-targets -- -D warnings       # clean, no warnings
 ```
 
 ### float80
@@ -374,8 +391,10 @@ comparison would not see.
 
 The reference generator links the real `kernel/memory.c`, so it needs
 `tools/stub-include/sqlite3.h`: `memory.c` → `fs/fd.h` → `fs/fake-db.h` →
-`<sqlite3.h>`, and those three types are only ever used as pointers. It also
-links the real `kernel/errno.c` (whose `EPIPE` path pulls in `current` and
+`<sqlite3.h>`. It uses only opaque pointer types; the same small compatibility
+header also lets the *C-only* fake-db oracle link unmodified `fake-db.c` where a
+host SQLite development header is absent. The Rust runtime itself uses pure-Rust
+`redb`, not this header or SQLite. It also links the real `kernel/errno.c` (whose `EPIPE` path pulls in `current` and
 `send_signal`, stubbed with counters) rather than faking the host→guest errno
 table. The generator refuses to emit a fixture unless both counters are still
 zero, i.e. unless every stub stayed off the path.
@@ -557,6 +576,163 @@ Closing the other four survivors took three new corpus cases — a non-page-alig
 `munmap` — plus a unit test that fills the whole `pt_find_hole` scan range to
 reach `do_mmap`'s `ENOMEM`.
 
+### task, groups, identity, TLS and resources
+
+The next layer is the task-owned state that turns the address-space primitives
+into a usable syscall context. `task.rs` owns an explicit `TaskTable` rather
+than reproducing C's raw global `__thread current` pointer: the caller chooses a
+live current PID, while the table retains the same observable distinction
+between `pid_get_task` (hides zombies) and `pid_get_task_zombie` (does not).
+
+The PID table is sparse in Rust but has the C's fixed range and wrap-around
+allocation policy. It also preserves the non-obvious reason `struct pid` has
+three links: a PID slot remains occupied while a session or process-group member
+still references it, even after its task pointer has gone away. Parent/child
+links, C's shallow `task_create_` copy plus field resets, and the topology split
+between a new process group and `CLONE_THREAD` are all explicit APIs, ready for
+`fork.c`.
+
+`group.rs` ports the exact ordering of `group.c`'s checks: `setpgid` can target a
+zombie because it uses `pid->task`, but `getpgid` hides one; a caller may affect
+only itself or a direct child; joining a group requires a same-session member;
+and a session leader cannot make another process-group change. `setsid` moves
+both index memberships and intentionally ignores a syscall argument because
+that is what iSH's zero-argument C implementation does.
+
+The identity and TLS syscalls use the existing guest-memory bridge rather than
+host pointers. This preserves partial writes in `getresuid`/`getresgid`, and the
+more subtle partial overwrite of the fixed supplementary-groups array when
+`setgroups` faults mid-copy. `set_thread_area` preserves all unimplemented
+`user_desc` bitfield bits and still updates `tls_ptr` before a read-only
+descriptor's write-back fails. `PR_SET_NAME` uses C `strcpy` semantics, so bytes
+after the terminating NUL in `comm[16]` remain untouched.
+
+`resource.rs` adds the exact 32- and 64-bit rlimit guest layouts (including
+C's surprising full-64-bit `setrlimit32` input), iSH's `INT_MAX` compatibility
+clamp, root/non-root maximum-limit rule, the old-before-new ordering of
+`prlimit64`, rusage wire layout and time-only
+accumulation, affinity bitset, and the intentionally narrow scheduler/priority
+stubs. `ResourceHost` makes the two host observations in the C source
+(per-thread CPU usage and online CPUs) explicit, so an iOS embedding can provide
+native telemetry rather than the core silently substituting wall-clock data.
+`ThreadGroup` now carries limits, own usage, and children usage; `exit.c` will
+connect its reaping transitions to that storage.
+
+`tests/resource_differential.rs` replays 51 calls from
+`tests/fixtures/resource_reference.txt`. `tools/resource-dump.c` compiles and
+links the **unmodified** `kernel/resource.c`; a deterministic task/group,
+two-page guest window, and linker-wrapped `getrusage(RUSAGE_THREAD)` / `sysconf`
+inputs make the comparison reproducible locally. After every call the test
+compares the raw return value, all 16 `(cur,max)` limit pairs, all 18
+`children_rusage` ABI words, effective UID, and an FNV-1a hash of the whole
+guest window. C initializes only the two timeval fields of a host rusage, so
+the fixture compares that defined prefix and explicitly clears its indeterminate
+tail before hashing rather than treating compiler stack garbage as an ABI.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_resource_reference.sh
+wrote tests/fixtures/resource_reference.txt: 182 lines, 51 C operations, 52 snapshots
+$ cargo test --test resource_differential
+… 51 resource operations and 52 full C-state snapshots matched exactly
+```
+
+`random.rs` ports `kernel/random.c` with a `RandomSource` host boundary, so an
+iOS embedding can use `CCRandomGenerateBytes` and a Linux embedding can use its
+native `getrandom` implementation without the portable core inventing entropy.
+`tests/random_differential.rs` links the unmodified C file and wraps only its
+Linux `syscall(SYS_getrandom, …)` boundary with deterministic bytes. Its nine
+records verify the one-MiB limit, zero-length call, ignored flags, host failure,
+guest-output fault ordering, and every byte written on successful calls.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_random_reference.sh
+wrote tests/fixtures/random_reference.txt: 34 lines, 9 C operations
+$ cargo test --test random_differential
+… 9 getrandom operations and every deterministic output byte matched C
+```
+
+`uname.rs` ports `kernel/uname.c`'s fixed 390-byte `uname` and 60-byte
+`sys_info` guest ABIs. `SystemInfoHost` supplies native hostname, uptime/load,
+and memory values while `UnameConfig` represents C's two mutable identity
+globals and compile-time version suffix. The direct C fixture fixes
+`SOURCE_DATE_EPOCH=0`, wraps host `uname`/`sysinfo`, and supplies `get_uptime`;
+it verifies the string fields, the 64→32-bit truncations, zeroed `bufferram` and
+padding, host calls before guest faults, override precedence, and `snprintf`
+truncation.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_uname_reference.sh
+wrote tests/fixtures/uname_reference.txt: 50 lines, 10 C operations, 11 snapshots
+$ cargo test --test uname_differential
+… 10 uname/sysinfo operations and all C-derived guest bytes matched exactly
+```
+
+`ipc.rs` completes iSH's six-line legacy System V IPC multiplexor: every raw
+selector and argument combination returns `_ENOSYS`, exactly as the original
+C stub does. Its C-derived corpus intentionally includes signed, unsigned, and
+pointer high-bit values even though the result is constant.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_ipc_reference.sh
+wrote tests/fixtures/ipc_reference.txt: 12 lines, 5 C operations
+$ cargo test --test ipc_differential
+… 5 raw ipc calls matched unmodified C exactly
+```
+
+`log.rs` ports `kernel/log.c` together with the used `util/fifo.c` behavior:
+complete `printk` lines go first to an explicit host sink and then to the
+one-MiB circular buffer; `sys_syslog` retains C's read/peek/clear ordering,
+including read-before-guest-fault behavior and the original wrapped
+`FIFO_LAST` split. The local C fixture links both unmodified files, wraps only
+the `writev(2)` output boundary, and uses a compact deterministic 255-line
+operation to exercise the actual circular-buffer wrap.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_log_reference.sh
+wrote tests/fixtures/log_reference.txt: 106 lines, 31 C operations, 32 snapshots
+$ cargo test --test log_differential
+… 31 log/syslog operations and all C-derived output bytes matched exactly
+```
+
+### Pure-Rust fake filesystem database
+
+`fake_db.rs` ports the reusable metadata operations in `fs/fake-db.c` over
+[`redb`](vendor/redb/), a vendored pure-Rust ACID B-tree library (v3.1.2). It
+has no `rusqlite`, SQLite FFI, C/C++ database engine, registry download, or
+native database linker dependency: `cargo tree --offline` resolves only
+`ish-emu` and the local `redb` package. `FakeDb` persists stat records and byte paths in separate
+tables, while `FakeDbTransaction` maps iSH's deferred/immediate transaction
+sequence to an atomic redb transaction. The port preserves implicit positive
+inode allocation, `insert or replace` orphaning, component-aware rename, links,
+missing-path zero/error behavior, `path_from_inode`, rollback, and cleanup.
+
+The backing file is intentionally redb rather than upstream SQLite's `meta.db`:
+that is what makes the runtime database stack pure Rust. Importing/migrating an
+existing SQLite fakefs image and the host-directory rebuild logic remain a later
+filesystem-layer conversion, rather than being silently faked.
+
+The C oracle still uses the original C SQLite implementation **only locally**
+to establish compatibility. `tools/fake-db-dump.c` compiles unmodified
+`fs/fake-db.c`, creates its current schema, and records 40 operations plus 41
+logical-table snapshots. The Rust replay uses redb, so it detects a behavior
+mismatch across different database engines instead of comparing two SQLite
+calls. It covers create/read/write, links, C's `UPDATE`-on-missing no-op,
+rename descendants without renaming `/apple`, replace collisions and orphan
+sweeps, path-from-inode lookup, both transaction modes, and rollback.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_fake_db_reference.sh
+wrote tests/fixtures/fake_db_reference.txt: 132 lines, 40 C operations, 41 snapshots
+$ cargo test --test fake_db_differential
+… 40 pure-Rust metadata operations and 41 C state snapshots matched
+```
+
+The host thread launcher in `task.c` and signal/tty/filesystem pointers in the
+rest of `struct task` remain later engine/kernel ports; they are intentionally
+not represented as fake implementations. The new `iSH Rust Core` workflow runs
+a focused rustfmt check (without rewriting generated decoder output), every
+unit/differential test, and strict clippy on every change under `ish-rs/`.
+
 ## Layout
 
 ```
@@ -579,7 +755,18 @@ ish-rs/
 │   ├── user.rs                 # kernel/user.c
 │   ├── mmap.rs                 # kernel/mmap.c + kernel/mm.h
 │   ├── errno.rs                # kernel/errno.{h,c}
-│   └── errno_table.rs          # generated host->guest errno table (do not edit)
+│   ├── errno_table.rs          # generated host->guest errno table (do not edit)
+│   ├── ipc.rs                  # kernel/ipc.c
+│   ├── log.rs                  # kernel/log.c + util/fifo.c
+│   ├── fake_db.rs              # fs/fake-db.c metadata over pure-Rust redb
+│   ├── resource.rs             # kernel/resource.{h,c}
+│   ├── random.rs               # kernel/random.{h,c}
+│   ├── uname.rs                # kernel/uname.c
+│   ├── task.rs                 # kernel/task.{h,c} state and PID table
+│   ├── group.rs                # kernel/group.c
+│   ├── getset.rs               # kernel/getset.c
+│   ├── tls.rs                  # kernel/tls.c
+│   └── misc.rs                 # kernel/misc.c
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
@@ -591,6 +778,12 @@ ish-rs/
 │   ├── mmap_differential.rs    # word-exact replay of the mmap reference
 │   ├── tlb_differential.rs     # word-exact replay of the tlb reference
 │   ├── vec_differential.rs     # word-exact replay of the vec/mmx reference
+│   ├── resource_differential.rs # state-exact replay of the resource reference
+│   ├── random_differential.rs  # byte-exact replay of the random reference
+│   ├── uname_differential.rs   # byte-exact replay of the uname/sysinfo reference
+│   ├── ipc_differential.rs     # raw-argument replay of the IPC stub reference
+│   ├── log_differential.rs     # output/state replay of the log/syslog reference
+│   ├── fake_db_differential.rs # pure-Rust replay of the C SQLite metadata reference
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -601,7 +794,15 @@ ish-rs/
 │       ├── errno_reference.txt # 4216 err_map inputs + host errno numbers
 │       ├── mmap_reference.txt  # 51 mmap ops + the whole page table after each
 │       ├── tlb_reference.txt   # 56 full struct tlb dumps from the C
-│       └── vec_reference.txt   # 9.8k vec/mmx results from the C
+│       ├── vec_reference.txt   # 9.8k vec/mmx results from the C
+│       ├── resource_reference.txt # 51 deterministic resource calls from the C
+│       ├── random_reference.txt # 9 deterministic getrandom calls from the C
+│       ├── uname_reference.txt # 10 deterministic uname/sysinfo calls from the C
+│       ├── ipc_reference.txt   # 5 raw legacy IPC calls from the C
+│       ├── log_reference.txt   # 31 log/syslog operations from the C
+│       └── fake_db_reference.txt # 40 fake-db operations + table states from C
+├── vendor/
+│   └── redb/                   # v3.1.2 pure-Rust embedded database library
 └── tools/
     ├── f80-dump.c              # float80 reference generator (not part of iSH)
     ├── fpu-dump.c              # cpu/fpu reference generator
@@ -609,10 +810,16 @@ ish-rs/
     ├── decode-dump.c           # decoder reference generator (drives decode.h)
     ├── gen_decode_table.py     # derives src/decode_table.rs from the fixture
     ├── memory-dump.c           # page-table reference generator (links memory.c)
-    ├── stub-include/sqlite3.h  # three opaque typedefs memory.c reaches via fd.h
+    ├── stub-include/sqlite3.h  # C-oracle declarations; the Rust runtime never links SQLite
     ├── user-dump.c             # user-memory reference generator (links user.c)
     ├── errno-dump.c            # errno reference generator (links errno.c)
     ├── mmap-dump.c             # mmap reference generator (links mmap.c)
+    ├── resource-dump.c         # deterministic resource.c reference generator
+    ├── random-dump.c           # deterministic random.c reference generator
+    ├── uname-dump.c            # deterministic uname.c reference generator
+    ├── ipc-dump.c              # deterministic ipc.c reference generator
+    ├── log-dump.c              # deterministic log.c/fifo.c reference generator
+    ├── fake-db-dump.c          # C/SQLite fake-db behavioral-oracle generator
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -625,6 +832,12 @@ ish-rs/
     ├── gen_user_reference.sh
     ├── gen_errno_reference.sh
     ├── gen_mmap_reference.sh
+    ├── gen_resource_reference.sh
+    ├── gen_random_reference.sh
+    ├── gen_uname_reference.sh
+    ├── gen_ipc_reference.sh
+    ├── gen_log_reference.sh
+    ├── gen_fake_db_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
