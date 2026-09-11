@@ -21,6 +21,11 @@
 //! | [`user`]        | `kernel/user.c`           | ported, the guest<->kernel byte copies, faults included |
 //! | [`errno`]       | `kernel/errno.{h,c}`      | ported, host to guest errno translation, table generated |
 //! | [`mmap`]        | `kernel/mmap.c` + `mm.h`  | ported, the address-space syscalls on top of `memory` |
+//! | [`task`]        | `kernel/task.{h,c}`       | ported state/PID-table foundation; host execution waits for the engine |
+//! | [`group`]       | `kernel/group.c`          | ported, sessions and process groups |
+//! | [`getset`]      | `kernel/getset.c`         | ported, identity and credential syscalls |
+//! | [`tls`]         | `kernel/tls.c`            | ported, i386 TLS descriptor calls |
+//! | [`misc`]        | `kernel/misc.c`           | ported, prctl and host-safe reboot policy |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -32,19 +37,25 @@
 pub mod cpu;
 pub mod cpuid;
 pub mod decode;
+pub mod decode_table;
 pub mod errno;
 pub mod errno_table;
-pub mod decode_table;
 pub mod float80;
 pub mod fpu;
+pub mod getset;
+pub mod group;
 pub mod interrupt;
 pub mod memory;
+pub mod misc;
 pub mod mmap;
 pub mod mmu;
 pub mod modrm;
+pub mod task;
 pub mod tlb;
+pub mod tls;
 pub mod user;
 pub mod vec;
 
 pub use cpu::CpuState;
 pub use float80::Float80;
+pub use task::{Task, TaskTable};

@@ -245,7 +245,7 @@ impl Float80 {
             let s = f.sign();
             f.sign_exp = EXP_SPECIAL;
             f.set_sign(s);
-            f.signif = if mantissa == 0 { 0x8000000000000000 } else { mantissa << 11 | CURSED_BIT };
+            f.signif = if mantissa == 0 { 0x8000000000000000 } else { (mantissa << 11) | CURSED_BIT };
         } else if biased_exp == 0 {
             if mantissa == 0 {
                 f.signif = 0;
@@ -263,7 +263,7 @@ impl Float80 {
             let s = f.sign();
             f.sign_exp = bias(biased_exp - 0x3FF);
             f.set_sign(s);
-            f.signif = mantissa << 11 | CURSED_BIT;
+            f.signif = (mantissa << 11) | CURSED_BIT;
         }
         f.normalize()
     }
@@ -287,7 +287,7 @@ impl Float80 {
             new_exp = unbias(f.exp()) + 0x3FF;
             let db_signif = u128_shift_right_round(f.signif as Float128, 11, f.sign_i32()) as u64;
             let final_exp = new_exp as u64;
-            let bits = (sign as u64) << 63 | (final_exp << 52) | (db_signif & 0x000FFFFFFFFFFFFF);
+            let bits = ((sign as u64) << 63) | (final_exp << 52) | (db_signif & 0x000FFFFFFFFFFFFF);
             return f64::from_bits(bits);
         }
 
@@ -298,7 +298,7 @@ impl Float80 {
             final_signif >>= 1;
             final_exp += 1;
         }
-        let bits = (sign as u64) << 63 | (final_exp << 52) | final_signif;
+        let bits = ((sign as u64) << 63) | (final_exp << 52) | final_signif;
         f64::from_bits(bits)
     }
 

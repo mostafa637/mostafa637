@@ -356,21 +356,25 @@ impl Mm {
         }
         let old_brk = self.brk;
 
-        if new_brk > old_brk {
-            // round up, because brk is "the first location after the end of the
-            // uninitialized data segment": at 0x2000 page 0x2000 must stay
-            // unmapped, and at 0x2001 it must not
-            let start = page_round_up(old_brk);
-            let size = page_round_up(new_brk) - page_round_up(old_brk);
-            if !self.mem.is_hole(start, size) {
-                return self.brk;
+        match new_brk.cmp(&old_brk) {
+            std::cmp::Ordering::Greater => {
+                // round up, because brk is "the first location after the end of the
+                // uninitialized data segment": at 0x2000 page 0x2000 must stay
+                // unmapped, and at 0x2001 it must not
+                let start = page_round_up(old_brk);
+                let size = page_round_up(new_brk) - page_round_up(old_brk);
+                if !self.mem.is_hole(start, size) {
+                    return self.brk;
+                }
+                let err = self.mem.map_nothing(start, size, P_WRITE);
+                if err < 0 {
+                    return self.brk;
+                }
             }
-            let err = self.mem.map_nothing(start, size, P_WRITE);
-            if err < 0 {
-                return self.brk;
+            std::cmp::Ordering::Less => {
+                self.mem.unmap_always(page(new_brk), page(old_brk) - page(new_brk));
             }
-        } else if new_brk < old_brk {
-            self.mem.unmap_always(page(new_brk), page(old_brk) - page(new_brk));
+            std::cmp::Ordering::Equal => {}
         }
 
         self.brk = new_brk;
@@ -421,7 +425,7 @@ mod tests {
     fn zero_length_and_unaligned_addresses_are_refused() {
         let mut mm = Mm::new();
         assert_eq!(mm.mmap2(0, 0, P_RWX, MMAP_ANONYMOUS, 0), Err(EINVAL));
-        assert_eq!(mm.mmap2(0x400 << PAGE_BITS | 1, 4096, P_RWX, MMAP_ANONYMOUS, 0), Err(EINVAL));
+        assert_eq!(mm.mmap2((0x400 << PAGE_BITS) | 1, 4096, P_RWX, MMAP_ANONYMOUS, 0), Err(EINVAL));
         // a length under one page still rounds up to one page here
         assert!(mm.mmap2(0, 1, P_RWX, MMAP_ANONYMOUS, 0).is_ok());
     }
@@ -454,7 +458,7 @@ mod tests {
     fn munmap_refuses_unaligned_and_empty_and_accepts_the_rest() {
         let mut mm = Mm::new();
         mm.mmap2(0x400 << PAGE_BITS, 8192, P_RWX, MMAP_ANONYMOUS, 0).unwrap();
-        assert_eq!(mm.munmap(0x400 << PAGE_BITS | 8, 4096), Err(EINVAL));
+        assert_eq!(mm.munmap((0x400 << PAGE_BITS) | 8, 4096), Err(EINVAL));
         assert_eq!(mm.munmap(0x400 << PAGE_BITS, 0), Err(EINVAL));
         assert_eq!(mm.munmap(0x400 << PAGE_BITS, 8192), Ok(()));
         assert!(mm.mem.pt(0x400).is_none());
@@ -495,7 +499,7 @@ mod tests {
         let mut mm = with_heap();
         assert_eq!(mm.mremap(0x400 << PAGE_BITS, 4096, 8192, MREMAP_FIXED), Err(EINVAL));
         assert_eq!(mm.mremap(0x400 << PAGE_BITS, 4096, 8192, 4), Err(EINVAL));
-        assert_eq!(mm.mremap(0x400 << PAGE_BITS | 1, 4096, 8192, 0), Err(EINVAL));
+        assert_eq!(mm.mremap((0x400 << PAGE_BITS) | 1, 4096, 8192, 0), Err(EINVAL));
     }
 
     #[test]

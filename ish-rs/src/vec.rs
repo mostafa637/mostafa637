@@ -1198,10 +1198,10 @@ pub fn vec_shuffle_hw128(src: &XmmReg, dst: &mut XmmReg, encoding: u8) {
     s64(&mut d, 0, lo);
     // the C writes `encoding >> 0 & 3` for symmetry with the >> 2/4/6 cases
     let a = g16(&s, ((encoding & 3) | 4) as usize) as u32;
-    let b = g16(&s, ((encoding >> 2 & 3) | 4) as usize) as u32;
+    let b = g16(&s, (((encoding >> 2) & 3) | 4) as usize) as u32;
     s32(&mut d, 2, a | (b << 16));
-    let c = g16(&s, ((encoding >> 4 & 3) | 4) as usize) as u32;
-    let e = g16(&s, ((encoding >> 6 & 3) | 4) as usize) as u32;
+    let c = g16(&s, (((encoding >> 4) & 3) | 4) as usize) as u32;
+    let e = g16(&s, (((encoding >> 6) & 3) | 4) as usize) as u32;
     s32(&mut d, 3, c | (e << 16));
     *dst = XmmReg::from_bytes(d);
 }

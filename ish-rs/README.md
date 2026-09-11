@@ -27,6 +27,11 @@ against the compiled C original**, not just against hand-written expectations.
 | `mmap.rs`    | `kernel/mmap.c` + `mm.h` | 243   | **done** — `mmap2`, the old `mmap`, `munmap`, `mremap`, `mprotect`, `brk`, the no-op syscalls and `mm_copy`; 51 operations and the full page table after each verified against the C |
 | `errno.rs`   | `kernel/errno.{h,c}`  | 105     | **done** — host→guest errno translation; 4,216 `err_map` inputs and all 10 `errno_map` probes verified against the C, table generated from the host headers |
 | `user.rs`    | `kernel/user.c`       | 97      | **done** — the guest↔kernel byte copies (`user_read`/`user_write`/`user_write_task_ptrace`/`user_read_string`/`user_write_string`); 52 operations, 77 guest pages and 192,937 bytes verified against the C |
+| `task.rs`    | `kernel/task.{h,c}`   | 346     | **foundation ported** — PID table, parent/child links, task creation/destruction, mm attachment, task credentials/names, thread-group topology, zombie visibility and explicit current-task selection |
+| `group.rs`   | `kernel/group.c`      | 131     | **done** — `setpgid`/`getpgid`, `setsid`/`getsid`, session and process-group membership rules |
+| `getset.rs`  | `kernel/getset.c`     | 202     | **done** — PID/UID/GID getters and setters, supplementary groups, capability stubs and personality |
+| `tls.rs`     | `kernel/tls.c`        | 42      | **done** — i386 `user_desc`, `set_thread_area` and `set_tid_address` |
+| `misc.rs`    | `kernel/misc.c`       | 59      | **done** — `prctl`, `arch_prctl` and the host-safe reboot policy |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -557,6 +562,43 @@ Closing the other four survivors took three new corpus cases — a non-page-alig
 `munmap` — plus a unit test that fills the whole `pt_find_hole` scan range to
 reach `do_mmap`'s `ENOMEM`.
 
+### task, groups, identity and TLS
+
+The next layer is the task-owned state that turns the address-space primitives
+into a usable syscall context. `task.rs` owns an explicit `TaskTable` rather
+than reproducing C's raw global `__thread current` pointer: the caller chooses a
+live current PID, while the table retains the same observable distinction
+between `pid_get_task` (hides zombies) and `pid_get_task_zombie` (does not).
+
+The PID table is sparse in Rust but has the C's fixed range and wrap-around
+allocation policy. It also preserves the non-obvious reason `struct pid` has
+three links: a PID slot remains occupied while a session or process-group member
+still references it, even after its task pointer has gone away. Parent/child
+links, C's shallow `task_create_` copy plus field resets, and the topology split
+between a new process group and `CLONE_THREAD` are all explicit APIs, ready for
+`fork.c`.
+
+`group.rs` ports the exact ordering of `group.c`'s checks: `setpgid` can target a
+zombie because it uses `pid->task`, but `getpgid` hides one; a caller may affect
+only itself or a direct child; joining a group requires a same-session member;
+and a session leader cannot make another process-group change. `setsid` moves
+both index memberships and intentionally ignores a syscall argument because
+that is what iSH's zero-argument C implementation does.
+
+The identity and TLS syscalls use the existing guest-memory bridge rather than
+host pointers. This preserves partial writes in `getresuid`/`getresgid`, and the
+more subtle partial overwrite of the fixed supplementary-groups array when
+`setgroups` faults mid-copy. `set_thread_area` preserves all unimplemented
+`user_desc` bitfield bits and still updates `tls_ptr` before a read-only
+descriptor's write-back fails. `PR_SET_NAME` uses C `strcpy` semantics, so bytes
+after the terminating NUL in `comm[16]` remain untouched.
+
+The host thread launcher in `task.c`, signal/tty/filesystem pointers in the rest
+of `struct task`, and resource accounting belong to later engine/kernel ports;
+they are intentionally not represented as fake implementations. The new
+`iSH Rust Core` workflow runs `fmt`, every unit/differential test, and clippy on
+every change under `ish-rs/`.
+
 ## Layout
 
 ```
@@ -579,7 +621,12 @@ ish-rs/
 │   ├── user.rs                 # kernel/user.c
 │   ├── mmap.rs                 # kernel/mmap.c + kernel/mm.h
 │   ├── errno.rs                # kernel/errno.{h,c}
-│   └── errno_table.rs          # generated host->guest errno table (do not edit)
+│   ├── errno_table.rs          # generated host->guest errno table (do not edit)
+│   ├── task.rs                 # kernel/task.{h,c} state and PID table
+│   ├── group.rs                # kernel/group.c
+│   ├── getset.rs               # kernel/getset.c
+│   ├── tls.rs                  # kernel/tls.c
+│   └── misc.rs                 # kernel/misc.c
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
