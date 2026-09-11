@@ -48,6 +48,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `dev.rs`     | `fs/dev.h` + `fs/devices.h` | 92  | **done** — the guest's 32-bit device-number encoding (`dev_make`/`dev_major`/`dev_minor`), its two host conversions, and the major/minor of every device iSH names; 28 encodings, 56 host conversions and 18 constants verified against the C |
 | `path.rs`    | `fs/path.{h,c}`       | 216     | **done** — the normalization predicate and the component walk with its `MAX_NAME` boundary; 69 paths, 107 component steps and 5 constants verified against the C. The two normalizers wait on mounts |
 | `mount.rs`   | `fs/mount.c` + part of `kernel/fs.h` | 194 | **done** — the mount table, `struct mount` and `struct fs_ops`: the list kept in descending order of mount-point length, the longest-prefix lookup at a component boundary, the reference counting that keeps a looked-up mount alive, `fs_register` and `mount_param_flag`; 8 mounts, 17 lookups, 20 references and 11 filesystem callbacks replayed against the C. `sys_mount`/`sys_umount2` wait on the path layer |
+| `inode.rs`   | `fs/inode.{h,c}`      | 159     | **done** — the `(mount, ino)` hash table and the ``struct inode_data`` lifetimes: create-or-find with a reference, retain/release, the mount retained by every inode of it, the `inode_orphaned` callback that tells the filesystem when the last reference goes, and the lock order `inodes_lock` → the inode's own; 3 mounts, 11 references, 20 table entries and 9 orphan calls replayed against the C. The POSIX file locks of `fs/lock.c` and the `socket_id` writer of `fs/sock.c` wait on `struct fd` |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -61,7 +62,7 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --all-targets
-running 261 tests  (unit tests in src/)
+running 267 tests  (unit tests in src/)
 running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
 running 3 tests    (tests/errno_differential.rs)   ->   4,216 err_map inputs
 running 2 tests    (tests/mmap_differential.rs)    ->      51 mmap operations
@@ -88,7 +89,8 @@ running 2 tests    (tests/stat_differential.rs)    ->       9 struct layouts + 5
 running 1 test     (tests/dev_differential.rs)     ->      28 encodings + 56 host conversions, 42 host macro records in the unit test
 running 1 test     (tests/path_differential.rs)    ->      69 paths + 107 component steps
 running 1 test     (tests/mount_differential.rs)   ->       8 mounts, 17 lookups, 37 list entries, 11 callbacks
-test result: ok. 309 passed
+running 1 test     (tests/inode_differential.rs)  ->       3 mounts, 11 references, 20 table entries, 9 orphan calls
+test result: ok. 316 passed
 $ cargo clippy --all-targets -- -D warnings       # clean, no warnings
 ```
 
@@ -1187,6 +1189,78 @@ running 1 test
 test the_mount_table_matches_the_c ... ok
 ```
 
+### Inodes
+
+An *inode* in iSH is not a file and holds no data. It is the identity of one
+file **within one mounted filesystem**, plus the POSIX file-lock state that has
+to outlive every descriptor open on it. The filesystem supplies the number (a
+`struct statbuf`'s `inode`, or a host `st_ino`), and the kernel keeps a table
+that answers with one shared, refcounted object for every descriptor on that
+file — which is what makes `fcntl(F_SETLK)` in one process exclude another, and
+what tells a filesystem's `inode_orphaned` hook that nobody has the file open
+any more and its metadata can go.
+
+* **The key is `(mount, ino)`, and the mount is an address.** `inode.rs` keeps
+  C's `inodes_hash[1024]` and its `ino % 1024` bucket, and compares the mount the
+  way C compares pointers, so a second filesystem mounted over the same
+  directory is a different key space: its inode 1 is not the first mount's inode
+  1. The bucket is scanned in insertion order, and inode 1 and inode 1025 are
+  neighbours there.
+* **Two refcounts.** The inode counts references, and *the mount* is retained by
+  every inode of it: creating an inode retains the mount, and the release that
+  drops the last reference releases the mount. A filesystem therefore cannot be
+  unmounted from under an open file, and the differential test sees this in the
+  mount's own counter: `do_mount` leaves a mount at 0 references, and every
+  reference in the fixture was taken by an inode.
+* **The last release tells the filesystem.** `inode_release` takes the table
+  lock, takes the inode's lock, and when the count reaches zero it unlinks the
+  inode **before** calling `fs->inode_orphaned` (with the table lock still held),
+  then releases the mount and frees the inode. `fs/fake.c` uses exactly that
+  callback to drop the metadata row of a deleted file, so the order matters —
+  and it is observable, which is why the oracle's hook asks the table whether
+  the inode is still there and always records that it is not.
+* **The lock order is `inodes_lock` out, the inode's lock in**, and
+  `inode_get_unlocked` exists for one caller: `generic_open`, which must hold the
+  table lock from before the filesystem is asked to open a file until after the
+  new inode has a reference, so that nothing can destroy it in between. The
+  comment in `fs/inode.h` says as much; the port keeps `InodeTable::lock` for
+  that shape and gives every other caller the one-shot `get`.
+* **`inode_check_orphaned` calls the hook unconditionally**, while
+  `inode_release` checks for it first — so a filesystem without an
+  `inode_orphaned` crashes there in C. The port panics with a message instead,
+  and the difference between the two paths is a unit test rather than a fixture
+  record.
+* **References are `Rc`s, not counts in a freed object.** C hands out `struct
+  inode_data *` and frees the object when the count reaches zero while holding
+  `inodes_lock`; the port hands out one `Rc` per reference and drops the last one
+  at the same point in the same order, so a caller that forgot to release leaks
+  instead of touching freed memory. `inode_get_data`'s "is it still there?" is
+  available to hooks as `InodeTable::contains`, which takes no lock, exactly as
+  the C helper takes none.
+* **What is not here yet.** `posix_locks` and `posix_unlock` — the per-inode
+  lock list and the condition variable `fcntl(F_SETLKW)` waits on — are
+  `fs/lock.c`'s, whose `fcntl_getlk`/`fcntl_setlk`/`file_lock_remove_owned_by`
+  all need a `struct fd`. `socket_id` is stored with the 0 a fresh inode starts
+  at, so that `fs/sock.c` has somewhere to put the socket a path was bound to.
+
+The fixture is a *script* again: `tools/inode-dump.c` includes `fs/inode.c` —
+which is how its walk records can read the C's static `inodes_hash[]` — mounts
+three filesystems, gets inodes on them, takes and gives back references, writes
+socket ids, and asks about orphaned inodes, and `tests/inode_differential.rs`
+performs every one of those calls through the port and compares each record as
+it goes. The walk is canonicalized the one way it can be: C adds each new inode
+at the *head* of its bucket, and no lookup can observe that order, so both sides
+print a bucket sorted by `(number, mount point)`.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_inode_reference.sh
+replayed 10 table walks and 9 hook calls
+wrote tests/fixtures/inode_reference.txt: 83 lines, md5 a34f25e09ec464e9eb9a4706a495fd9c
+$ cargo test --test inode_differential
+running 1 test
+test the_inode_table_matches_the_c ... ok
+```
+
 ## Layout
 
 ```
@@ -1230,7 +1304,8 @@ ish-rs/
 │   ├── stat.rs                 # fs/stat.{h,c} guest stat layouts + newstat64 conversion
 │   ├── dev.rs                  # fs/dev.h + fs/devices.h device numbers and majors/minors
 │   ├── path.rs                 # fs/path.{h,c} path predicate + component walk
-│   └── mount.rs                # fs/mount.c mount table, struct mount and fs_ops
+│   ├── mount.rs                # fs/mount.c mount table, struct mount and fs_ops
+│   └── inode.rs                # fs/inode.{h,c} the (mount, ino) inode table
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
@@ -1258,6 +1333,7 @@ ish-rs/
 │   ├── dev_differential.rs     # C device encodings and host conversions replayed
 │   ├── path_differential.rs    # C path predicates and component walk replayed
 │   ├── mount_differential.rs   # C mount script replayed: table, refs and callbacks
+│   ├── inode_differential.rs   # C inode script replayed: table, refs and orphan calls
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -1284,7 +1360,8 @@ ish-rs/
 │       ├── stat_reference.txt  # 9 C struct layouts, 173 field values, 5 conversions
 │       ├── dev_reference.txt   # 28 encodings, 56 conversions, 42 host macro records
 │       ├── path_reference.txt  # 69 C paths + 107 component steps
-│       └── mount_reference.txt # the C's mount script: 137 records + callbacks
+│       ├── mount_reference.txt # the C's mount script: 137 records + callbacks
+│       └── inode_reference.txt # the C's inode script: 83 records + orphan calls
 ├── vendor/
 │   └── graphitesql/            # v0.1.7 pure-Rust SQLite-3-compatible library
 └── tools/
@@ -1314,6 +1391,7 @@ ish-rs/
     ├── dev-dump.c              # dev oracle (dev_make/decode plus the host makedev)
     ├── path-dump.c             # path oracle (includes fs/path.c, walks the corpus)
     ├── mount-dump.c            # mount oracle (includes fs/mount.c, mounts a fake fs)
+    ├── inode-dump.c            # inode oracle (includes fs/inode.c, walks the table)
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -1342,6 +1420,7 @@ ish-rs/
     ├── gen_dev_reference.sh
     ├── gen_path_reference.sh
     ├── gen_mount_reference.sh
+    ├── gen_inode_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh

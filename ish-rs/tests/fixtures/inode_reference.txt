@@ -1,0 +1,83 @@
+# inode reference, generated from unmodified fs/inode.c
+K INODES_HASH_SIZE=1024
+K F_RDLCK_=0
+K F_WRLCK_=1
+K F_UNLCK_=2
+M fs=fake source=2f6465762f6469736b point=- info=- flags=0 ret=0
+M fs=fake source=2f6465762f6d6e74 point=2f6d6e74 info=- flags=0 ret=0
+M fs=fake source=2f6465762f6f74686572 point=2f6f74686572 info=- flags=0 ret=0
+S point=2f6f74686572 refcount=0
+S point=2f6d6e74 refcount=0
+S point=- refcount=0
+Z count=3
+E count=0
+G point=- number=1 new=1 refcount=1 socket_id=0 mount_refcount=1
+G point=- number=1 new=0 refcount=2 socket_id=0 mount_refcount=1
+L 0 bucket=1 number=1 refcount=2 socket_id=0 point=-
+E count=1
+U point=- number=1 new=0 refcount=3 socket_id=0 mount_refcount=1
+T point=- number=1 refcount=4
+C point=- number=1 called=0
+L 0 bucket=1 number=1 refcount=4 socket_id=0 point=-
+E count=1
+R point=- number=1 refcount=4 gone=0 mount_refcount=1
+R point=- number=1 refcount=3 gone=0 mount_refcount=1
+R point=- number=1 refcount=2 gone=0 mount_refcount=1
+L 0 bucket=1 number=1 refcount=1 socket_id=0 point=-
+E count=1
+C point=- number=1 called=0
+R point=- number=1 refcount=1 gone=1 mount_refcount=0
+E count=0
+C point=- number=1 called=1
+G point=- number=1 new=1 refcount=1 socket_id=0 mount_refcount=1
+G point=2f6f74686572 number=1 new=1 refcount=1 socket_id=0 mount_refcount=1
+G point=- number=1025 new=1 refcount=1 socket_id=0 mount_refcount=2
+G point=- number=0 new=1 refcount=1 socket_id=0 mount_refcount=3
+G point=- number=18446744073709551615 new=1 refcount=1 socket_id=0 mount_refcount=4
+G point=- number=18446744073709551614 new=1 refcount=1 socket_id=0 mount_refcount=5
+G point=2f6d6e74 number=4294967301 new=1 refcount=1 socket_id=0 mount_refcount=1
+L 0 bucket=0 number=0 refcount=1 socket_id=0 point=-
+L 1 bucket=1 number=1 refcount=1 socket_id=0 point=-
+L 2 bucket=1 number=1 refcount=1 socket_id=0 point=2f6f74686572
+L 3 bucket=1 number=1025 refcount=1 socket_id=0 point=-
+L 4 bucket=5 number=4294967301 refcount=1 socket_id=0 point=2f6d6e74
+L 5 bucket=1022 number=18446744073709551614 refcount=1 socket_id=0 point=-
+L 6 bucket=1023 number=18446744073709551615 refcount=1 socket_id=0 point=-
+E count=7
+W point=- number=1 socket_id=4660
+W point=2f6f74686572 number=1 socket_id=4294967295
+L 0 bucket=0 number=0 refcount=1 socket_id=0 point=-
+L 1 bucket=1 number=1 refcount=1 socket_id=4660 point=-
+L 2 bucket=1 number=1 refcount=1 socket_id=4294967295 point=2f6f74686572
+L 3 bucket=1 number=1025 refcount=1 socket_id=0 point=-
+L 4 bucket=5 number=4294967301 refcount=1 socket_id=0 point=2f6d6e74
+L 5 bucket=1022 number=18446744073709551614 refcount=1 socket_id=0 point=-
+L 6 bucket=1023 number=18446744073709551615 refcount=1 socket_id=0 point=-
+E count=7
+R point=- number=0 refcount=1 gone=1 mount_refcount=4
+R point=- number=1025 refcount=1 gone=1 mount_refcount=3
+R point=- number=18446744073709551615 refcount=1 gone=1 mount_refcount=2
+R point=- number=18446744073709551614 refcount=1 gone=1 mount_refcount=1
+R point=2f6d6e74 number=4294967301 refcount=1 gone=1 mount_refcount=0
+L 0 bucket=1 number=1 refcount=1 socket_id=4660 point=-
+L 1 bucket=1 number=1 refcount=1 socket_id=4294967295 point=2f6f74686572
+E count=2
+R point=2f6f74686572 number=1 refcount=1 gone=1 mount_refcount=0
+L 0 bucket=1 number=1 refcount=1 socket_id=4660 point=-
+E count=1
+R point=- number=1 refcount=1 gone=1 mount_refcount=0
+E count=0
+S point=2f6f74686572 refcount=0
+S point=2f6d6e74 refcount=0
+S point=- refcount=0
+Z count=3
+F count=9
+F 0 orphaned point=- number=1 in_table=0
+F 1 orphaned point=- number=1 in_table=0
+F 2 orphaned point=- number=0 in_table=0
+F 3 orphaned point=- number=1025 in_table=0
+F 4 orphaned point=- number=18446744073709551615 in_table=0
+F 5 orphaned point=- number=18446744073709551614 in_table=0
+F 6 orphaned point=2f6d6e74 number=4294967301 in_table=0
+F 7 orphaned point=2f6f74686572 number=1 in_table=0
+F 8 orphaned point=- number=1 in_table=0

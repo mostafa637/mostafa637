@@ -40,6 +40,7 @@
 //! | [`stat`]        | `fs/stat.{h,c}`           | ported, the guest stat layouts and `stat_convert_newstat64` |
 //! | [`path`]        | `fs/path.{h,c}`           | ported, the normalization predicate and the component walk; the normalizers wait on mounts |
 //! | [`mount`]       | `fs/mount.c` + `kernel/fs.h` | ported, the mount table, `struct mount` and `struct fs_ops`; `sys_mount` waits on the path layer |
+//! | [`inode`]       | `fs/inode.{h,c}`          | ported, the `(mount, ino)` inode table, its refcounts and the orphan hook; the POSIX file locks wait on `fs/lock.c` |
 //! | [`mount`]       | `fs/mount.c` + `kernel/fs.h` | ported, the mount table, `struct mount` and `struct fs_ops` |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
@@ -63,6 +64,7 @@ pub mod float80;
 pub mod fpu;
 pub mod getset;
 pub mod group;
+pub mod inode;
 pub mod interrupt;
 pub mod ipc;
 pub mod log;
