@@ -355,8 +355,16 @@ fn replay_no_task(replay: &mut Replay<'_>, host: &ScriptedHost, parker: &Scripte
 }
 
 /// `notify` must wake every waiter of the condvar it is given, and
-/// `notify_once` exactly one — the behaviour the C harness observed by naming
-/// the object `pthread_cond_broadcast` / `pthread_cond_signal` reached.
+/// `notify_once` must reach its own condvar and not all of its waiters — the
+/// behaviour the C harness observed by naming the object
+/// `pthread_cond_broadcast` / `pthread_cond_signal` reached.
+///
+/// `notify_once`'s assertion is `1..waiters` rather than exact equality because
+/// a condition variable only promises to wake one *blocked* waiter: one that
+/// has registered and has not yet blocked can return from the same
+/// notification too (see `sync::tests::notify_once_wakes_one_waiter_and_notify_the_rest`).
+/// Four waiters keep that bound away from "all of them", which is what a
+/// `notify_once` implemented as `notify` would produce.
 fn replay_notify(replay: &mut Replay<'_>) {
     let cond_a = Arc::new(Cond::new());
     let cond_b = Arc::new(Cond::new());
@@ -389,7 +397,7 @@ fn replay_notify(replay: &mut Replay<'_>) {
                 on_a.fetch_add(1, Ordering::SeqCst);
             });
         }
-        for _ in 0..2 {
+        for _ in 0..4 {
             let (cond, lock, ready, on_b) = (
                 Arc::clone(&cond_b),
                 Arc::clone(&lock),
@@ -413,11 +421,12 @@ fn replay_notify(replay: &mut Replay<'_>) {
             });
         }
 
-        // Wait until all five are parked, holding the lock so the notifications
-        // cannot be lost; each waiter bumps `ready` while holding that lock.
+        // Wait until all seven are parked, holding the lock so the
+        // notifications cannot be lost; each waiter bumps `ready` while holding
+        // that lock.
         let guard = loop {
             let guard = lock.lock();
-            if ready.load(Ordering::SeqCst) == 5 {
+            if ready.load(Ordering::SeqCst) == 7 {
                 break guard;
             }
             drop(guard);
@@ -440,19 +449,19 @@ fn replay_notify(replay: &mut Replay<'_>) {
             std::thread::yield_now();
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
-        assert_eq!(
-            on_b.load(Ordering::SeqCst),
-            1,
-            "notify_once must wake a single waiter of condvar b"
+        let woken = on_b.load(Ordering::SeqCst);
+        assert!(
+            (1..4).contains(&woken),
+            "notify_once must wake some, but not all, of condvar b's waiters: {woken} of 4"
         );
         replay.expect('C', "signal=b");
 
-        // Release the second waiter so the scope can join.
+        // Release the rest so the scope can join.
         let guard = lock.lock();
         notify(&cond_b);
         drop(guard);
     });
-    assert_eq!(on_b.load(Ordering::SeqCst), 2);
+    assert_eq!(on_b.load(Ordering::SeqCst), 4);
 }
 
 /// A stateless parker for the thread-based checks, where the corpus is not

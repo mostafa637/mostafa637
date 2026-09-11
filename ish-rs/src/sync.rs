@@ -923,15 +923,31 @@ mod tests {
         assert_eq!(seen.lock().unwrap().len(), 3);
     }
 
+    /// `notify_once` must reach a waiter, and must not reach all of them;
+    /// `notify` must then release the rest.
+    ///
+    /// The upper bound is `waiters - 1` rather than exact equality on purpose.
+    /// Rust's `Condvar::notify_one` wakes one *blocked* waiter, but a waiter
+    /// that has already registered and has not yet reached the kernel wait can
+    /// return from the same notification too — measured at roughly 7% of runs
+    /// with two racing waiters, and at none in 1,500 runs when they were given
+    /// a settling pause first. C's `pthread_cond_signal` only promises "at
+    /// least one" as well, and every C caller re-checks its predicate in a
+    /// loop, so the port cannot depend on the stronger behaviour either. What
+    /// the test still catches is the mistake that matters: a `notify_once`
+    /// implemented as `notify` wakes all four waiters below before the
+    /// `notify` at the end.
     #[test]
-    fn notify_once_wakes_exactly_one_waiter() {
+    fn notify_once_wakes_one_waiter_and_notify_the_rest() {
+        const WAITERS: usize = 4;
+
         let cond = Arc::new(Cond::new());
         let lock = Arc::new(Lock::new());
         let ready = Arc::new(AtomicUsize::new(0));
         let counter = Arc::new(AtomicUsize::new(0));
 
         std::thread::scope(|scope| {
-            for _ in 0..2 {
+            for _ in 0..WAITERS {
                 let (cond, lock, ready, counter) = (
                     Arc::clone(&cond),
                     Arc::clone(&lock),
@@ -954,25 +970,26 @@ mod tests {
                     counter.fetch_add(1, Ordering::Relaxed);
                 });
             }
-            let guard = wait_until_parked(&lock, &ready, 2);
+            let guard = wait_until_parked(&lock, &ready, WAITERS);
             notify_once(&cond);
             drop(guard);
-            // Give the single woken waiter time to record itself, then release
-            // the other one.
+            // Give every waiter that is going to return from this one
+            // notification time to record itself, then check that the rest are
+            // still parked.
             while counter.load(Ordering::Relaxed) == 0 {
                 std::thread::yield_now();
             }
             std::thread::sleep(Duration::from_millis(50));
-            assert_eq!(
-                counter.load(Ordering::Relaxed),
-                1,
-                "notify_once must wake a single waiter"
+            let woken = counter.load(Ordering::Relaxed);
+            assert!(
+                (1..WAITERS).contains(&woken),
+                "notify_once must wake some, but not all, of the waiters: {woken} of {WAITERS}"
             );
             let guard = lock.lock();
             notify(&cond);
             drop(guard);
         });
-        assert_eq!(counter.load(Ordering::Relaxed), 2);
+        assert_eq!(counter.load(Ordering::Relaxed), WAITERS);
     }
 
     /// A millisecond-long wait: long enough to cross a scheduler tick, short

@@ -804,6 +804,18 @@ Three behaviors are worth naming, because each is easy to get subtly wrong:
   probe — deciding whether the task being signalled is the one that would have
   to release the lock — depends on that asymmetry.
 
+`notify_once` maps to `Condvar::notify_one`, and the two thread-based checks of
+it assert that it wakes *some but not all* of the waiters rather than exactly
+one. That is not a weakened test: a condition variable only promises to wake one
+*blocked* waiter, and a waiter that has registered and not yet reached the
+kernel wait can return from the same notification — measured at about 7% of runs
+with two racing waiters, and at 0 in 1,500 runs when they were given a settling
+pause. C's `pthread_cond_signal` promises no more than that, and every C caller
+re-checks its predicate in a loop, so nothing in the port may depend on the
+stronger behaviour. The bound still fails loudly for the mistake that matters —
+a `notify_once` implemented as `notify` wakes all four waiters at once — and the
+`notify` that follows releases the rest.
+
 The C oracle wraps pthread instead of the kernel: `pthread_cond_wait` and
 `pthread_cond_timedwait` are linker-wrapped so the harness scripts whether a
 wait wakes, times out, or fails; `clock_gettime(CLOCK_MONOTONIC)` is wrapped so
