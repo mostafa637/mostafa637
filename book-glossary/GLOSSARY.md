@@ -856,7 +856,7 @@ Shared Data                                 بيانات مشتركة
 Shared Data Structure                       هيكل بيانات مشترك
 Shared Queue                                طابور مشترك
 Linked List                                 قائمة مترابطة
-Mutex                                       ميوتكس (Mutex)
+Mutex                                       قفل الاستبعاد المتبادل
 pthread_mutex_t                             pthread_mutex_t
 lock()                                      lock()
 unlock()                                    unlock()
