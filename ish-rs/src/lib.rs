@@ -21,6 +21,7 @@
 //! | [`user`]        | `kernel/user.c`           | ported, the guest<->kernel byte copies, faults included |
 //! | [`errno`]       | `kernel/errno.{h,c}`      | ported, host to guest errno translation, table generated |
 //! | [`mmap`]        | `kernel/mmap.c` + `mm.h`  | ported, the address-space syscalls on top of `memory` |
+//! | [`resource`]    | `kernel/resource.{h,c}`   | ported, limits, rusage ABI, affinity, and scheduler compatibility calls |
 //! | [`task`]        | `kernel/task.{h,c}`       | ported state/PID-table foundation; host execution waits for the engine |
 //! | [`group`]       | `kernel/group.c`          | ported, sessions and process groups |
 //! | [`getset`]      | `kernel/getset.c`         | ported, identity and credential syscalls |
@@ -50,6 +51,7 @@ pub mod misc;
 pub mod mmap;
 pub mod mmu;
 pub mod modrm;
+pub mod resource;
 pub mod task;
 pub mod tlb;
 pub mod tls;

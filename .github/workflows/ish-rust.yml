@@ -32,6 +32,6 @@ jobs:
       # visit the generated output.
       - run: >-
           rustfmt --check --edition 2021
-          src/task.rs src/group.rs src/getset.rs src/tls.rs src/misc.rs
+          src/task.rs src/group.rs src/getset.rs src/tls.rs src/misc.rs src/resource.rs
       - run: cargo test --all-targets
       - run: cargo clippy --all-targets -- -D warnings

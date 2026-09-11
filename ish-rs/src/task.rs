@@ -32,6 +32,7 @@ use std::rc::Rc;
 
 use crate::cpu::CpuState;
 use crate::mmap::Mm;
+use crate::resource::{Rlimit, Rusage, RLIMIT_NLIMITS};
 use crate::user::{Fault, User};
 
 /// `pid_t_` from `misc.h`.
@@ -303,6 +304,12 @@ pub struct ThreadGroup {
     pub doing_group_exit: bool,
     /// `group_exit_code`
     pub group_exit_code: u32,
+    /// `rusage`, accumulated by the exit path as its threads leave.
+    pub rusage: Rusage,
+    /// `limits[RLIMIT_NLIMITS_]`.
+    pub limits: [Rlimit; RLIMIT_NLIMITS],
+    /// `children_rusage`, accumulated as child groups are reaped.
+    pub children_rusage: Rusage,
 }
 
 impl ThreadGroup {
@@ -320,6 +327,9 @@ impl ThreadGroup {
             stopped: false,
             doing_group_exit: false,
             group_exit_code: 0,
+            rusage: Rusage::default(),
+            limits: [Rlimit::default(); RLIMIT_NLIMITS],
+            children_rusage: Rusage::default(),
         }
     }
 }
@@ -422,7 +432,13 @@ impl TaskTable {
             let task = table.task_mut(init).unwrap();
             task.mm = Some(Rc::new(RefCell::new(Mm::new())));
         }
-        table.groups.get_mut(&init).unwrap().personality = ADDR_NO_RANDOMIZE;
+        {
+            let group = table.groups.get_mut(&init).unwrap();
+            group.personality = ADDR_NO_RANDOMIZE;
+            // init.c copies its static ABI-compatible rlimit table after the
+            // group has been zero-initialized.
+            group.limits = crate::resource::INITIAL_LIMITS;
+        }
         // The C group starts with sid/pgid zero and init.c calls task_setsid.
         assert_eq!(table.task_setsid(init), init);
         table.set_current(init).unwrap();
@@ -589,6 +605,9 @@ impl TaskTable {
         group.stopped = false;
         group.doing_group_exit = false;
         group.group_exit_code = 0;
+        // fork.c's tgroup_copy retains the group's own usage but gives a new
+        // process group no already-reaped children.
+        group.children_rusage = Rusage::default();
         self.groups.insert(child, group.clone());
         {
             let task = self.tasks.get_mut(&child).unwrap();

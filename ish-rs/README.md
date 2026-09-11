@@ -27,6 +27,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `mmap.rs`    | `kernel/mmap.c` + `mm.h` | 243   | **done** — `mmap2`, the old `mmap`, `munmap`, `mremap`, `mprotect`, `brk`, the no-op syscalls and `mm_copy`; 51 operations and the full page table after each verified against the C |
 | `errno.rs`   | `kernel/errno.{h,c}`  | 105     | **done** — host→guest errno translation; 4,216 `err_map` inputs and all 10 `errno_map` probes verified against the C, table generated from the host headers |
 | `user.rs`    | `kernel/user.c`       | 97      | **done** — the guest↔kernel byte copies (`user_read`/`user_write`/`user_write_task_ptrace`/`user_read_string`/`user_write_string`); 52 operations, 77 guest pages and 192,937 bytes verified against the C |
+| `resource.rs` | `kernel/resource.{h,c}` | 265   | **done** — `rlimit`/`rusage` guest ABIs, resource-limit rules, affinity bitmap, and scheduler/priority compatibility calls; host telemetry is an explicit adapter |
 | `task.rs`    | `kernel/task.{h,c}`   | 346     | **foundation ported** — PID table, parent/child links, task creation/destruction, mm attachment, task credentials/names, thread-group topology, zombie visibility and explicit current-task selection |
 | `group.rs`   | `kernel/group.c`      | 131     | **done** — `setpgid`/`getpgid`, `setsid`/`getsid`, session and process-group membership rules |
 | `getset.rs`  | `kernel/getset.c`     | 202     | **done** — PID/UID/GID getters and setters, supplementary groups, capability stubs and personality |
@@ -562,7 +563,7 @@ Closing the other four survivors took three new corpus cases — a non-page-alig
 `munmap` — plus a unit test that fills the whole `pt_find_hole` scan range to
 reach `do_mmap`'s `ENOMEM`.
 
-### task, groups, identity and TLS
+### task, groups, identity, TLS and resources
 
 The next layer is the task-owned state that turns the address-space primitives
 into a usable syscall context. `task.rs` owns an explicit `TaskTable` rather
@@ -593,11 +594,22 @@ more subtle partial overwrite of the fixed supplementary-groups array when
 descriptor's write-back fails. `PR_SET_NAME` uses C `strcpy` semantics, so bytes
 after the terminating NUL in `comm[16]` remain untouched.
 
-The host thread launcher in `task.c`, signal/tty/filesystem pointers in the rest
-of `struct task`, and resource accounting belong to later engine/kernel ports;
-they are intentionally not represented as fake implementations. The new
-`iSH Rust Core` workflow runs `fmt`, every unit/differential test, and clippy on
-every change under `ish-rs/`.
+`resource.rs` adds the exact 32- and 64-bit rlimit guest layouts (including
+C's surprising full-64-bit `setrlimit32` input), iSH's `INT_MAX` compatibility
+clamp, root/non-root maximum-limit rule, the old-before-new ordering of
+`prlimit64`, rusage wire layout and time-only
+accumulation, affinity bitset, and the intentionally narrow scheduler/priority
+stubs. `ResourceHost` makes the two host observations in the C source
+(per-thread CPU usage and online CPUs) explicit, so an iOS embedding can provide
+native telemetry rather than the core silently substituting wall-clock data.
+`ThreadGroup` now carries limits, own usage, and children usage; `exit.c` will
+connect its reaping transitions to that storage.
+
+The host thread launcher in `task.c` and signal/tty/filesystem pointers in the
+rest of `struct task` remain later engine/kernel ports; they are intentionally
+not represented as fake implementations. The new `iSH Rust Core` workflow runs
+a focused rustfmt check (without rewriting generated decoder output), every
+unit/differential test, and strict clippy on every change under `ish-rs/`.
 
 ## Layout
 
@@ -622,6 +634,7 @@ ish-rs/
 │   ├── mmap.rs                 # kernel/mmap.c + kernel/mm.h
 │   ├── errno.rs                # kernel/errno.{h,c}
 │   ├── errno_table.rs          # generated host->guest errno table (do not edit)
+│   ├── resource.rs             # kernel/resource.{h,c}
 │   ├── task.rs                 # kernel/task.{h,c} state and PID table
 │   ├── group.rs                # kernel/group.c
 │   ├── getset.rs               # kernel/getset.c
