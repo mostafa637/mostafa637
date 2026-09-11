@@ -1,0 +1,58 @@
+# timer reference, generated from unmodified iSH util/timer.{h,c}
+N fresh now=100.000000000 active=0 running=0 dead=0
+C 100.000000000
+T zero rc=0 old=NULL
+X zero start=100.000000000 end=100.000000000 interval=0.000000000 active=0 running=0 dead=0
+C 100.000000000
+T arm rc=0 old_value=0.000000000 old_interval=0.000000000
+C 100.000000000
+S#1 0.500000000
+X arm start=100.000000000 end=100.500000000 interval=0.250000000 active=1 running=1 dead=0
+C 100.500000000
+K 1 now=100.500000000 start=100.000000000 end=100.500000000 interval=0.250000000 active=1 running=1
+C 100.500000000
+S#2 0.250000000
+X fired1 start=100.500000000 end=100.750000000 interval=0.250000000 active=1 running=1 dead=0
+C 100.500000000
+T requeue rc=0 old_value=0.250000000 old_interval=0.250000000
+C 100.500000000
+S#3 2.000000000
+X requeue start=100.500000000 end=102.500000000 interval=0.000000000 active=1 running=1 dead=0
+C 102.500000000
+K 2 now=102.500000000 start=100.500000000 end=102.500000000 interval=0.000000000 active=1 running=1
+R running=0
+X done start=100.500000000 end=102.500000000 interval=0.000000000 active=1 running=0 dead=0
+F caller
+N second now=102.500000000 active=0 running=0 dead=0
+C 102.500000000
+T arm2 rc=0 old=NULL
+C 102.500000000
+S#4 0.500000000
+X arm2 start=102.500000000 end=103.000000000 interval=0.000000000 active=1 running=1 dead=0
+C 102.500000000
+T stop rc=0 old_value=0.500000000 old_interval=0.000000000
+C 102.500000000
+R running=0
+X stop start=102.500000000 end=102.500000000 interval=0.000000000 active=0 running=0 dead=0
+F caller
+N third now=102.500000000 active=0 running=0 dead=0
+C 102.500000000
+T arm3 rc=0 old=NULL
+C 102.500000000
+S#5 0.750000000
+X arm3 start=102.500000000 end=103.250000000 interval=0.000000000 active=1 running=1 dead=0
+D free_while_sleeping in_sleep=1
+C 102.500000000
+F thread
+N fourth now=102.500000000 active=0 running=0 dead=0
+C 102.500000000
+T carry rc=0 old=NULL
+C 102.500000000
+S#6 1.500000000
+X carry start=102.500000000 end=103.1000000000 interval=0.000000000 active=1 running=1 dead=0
+C 104.000000000
+K 3 now=104.000000000 start=102.500000000 end=103.1000000000 interval=0.000000000 active=1 running=1
+R running=0
+X carry_done start=102.500000000 end=103.1000000000 interval=0.000000000 active=1 running=0 dead=0
+F caller
+Z callbacks=3 sleeps=6 clock=104.000000000

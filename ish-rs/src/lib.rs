@@ -65,6 +65,7 @@ pub mod rebuild;
 pub mod resource;
 pub mod sync;
 pub mod task;
+pub mod timer;
 pub mod tlb;
 pub mod tls;
 pub mod uname;

@@ -41,6 +41,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `tls.rs`     | `kernel/tls.c`        | 42      | **done** — i386 `user_desc`, `set_thread_area` and `set_tid_address` |
 | `misc.rs`    | `kernel/misc.c`       | 59      | **done** — `prctl`, `arch_prctl` and the host-safe reboot policy |
 | `sync.rs`    | `util/sync.{h,c}`     | 307     | **done** — `lock_t`/`cond_t`/`wrlock_t`, `wait_for`'s two `EINTR` checks and timeout mapping, the published waiter, and the explicit unwind flag; 46 C records replayed, deadline arithmetic included |
+| `timer.rs`   | `util/timer.{h,c}`    | 163     | **done** — the timespec helpers (single-subtract carry included) and the interruptible timer thread with its reload and free-ownership rules; 58 C records replayed against a scripted clock |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -74,7 +75,8 @@ running 1 test     (tests/fake_db_differential.rs) ->      40 C/SQLite metadata 
 running 3 tests    (tests/fake_db_migrate_differential.rs) -> 3 migrations x 5 historical schema generations
 running 2 tests    (tests/fake_db_rebuild_differential.rs) -> scripted-host rebuild: 6 host ops + 2 rebuilt tables
 running 2 tests    (tests/sync_differential.rs)    ->      46 waiting/notify/lock records
-test result: ok. 253 passed
+running 2 tests    (tests/timer_differential.rs)   ->      58 timer records from a scripted clock
+test result: ok. 260 passed
 $ cargo clippy --all-targets -- -D warnings       # clean, no warnings
 ```
 
@@ -818,6 +820,46 @@ models the jump as an explicit transition instead — [`Unwind::Unwound`] report
 the `sigsetjmp`-returned-1 arm — and the rest of the contract, arming,
 disarming, and the no-request no-op, is replayed against the C.
 
+### Timer threads
+
+`util/timer.{h,c}` is the smallest file in this batch and the hardest to test:
+its behaviour lives in a detached thread that sleeps, wakes on a signal, and can
+free its own memory. Three details are load-bearing:
+
+* **`timespec_add` carries once.** A nanosecond count above one second is *not*
+  normalized, and `timespec_subtract` borrows only when the nanosecond field
+  demands it, so an unnormalized deadline can produce a "negative" remaining
+  time that ends the wait. The corpus contains that case (`1.5e9` nanoseconds,
+  `end=103.1000000000`) and the callback fires when that deadline is reached.
+* **A poke must interrupt the sleep.** C wakes a sleeping worker with
+  `pthread_kill(SIGUSR1)`, making `nanosleep` return `EINTR`. The port's
+  `TimerHost::sleep` is specified as interruptible for the same reason: with a
+  plain sleep, a timer re-armed from ten seconds to ten milliseconds would fire
+  ten seconds late.
+* **`timer_free` sometimes frees, and sometimes hands the free to the worker.**
+  When no worker is running the caller frees the timer; otherwise `dead` is set
+  and the worker frees it on its way out. The port gets that lifetime from the
+  timer's own reference count, and the differential test observes both cases
+  through a drop hook — the same trick the C oracle uses by wrapping `free`.
+
+The C oracle scripts the platform under a real `util/timer.c` worker: the clock
+only advances when a scripted sleep completes, sleeps are released or poked by
+the driver, and an interrupted worker stays parked until the driver
+acknowledges the poke, so the transcript order never depends on a race.
+
+```
+$ ISH_SRC=/path/to/ish ./tools/gen_timer_reference.sh
+wrote tests/fixtures/timer_reference.txt: 58 lines, 7 sets, 6 sleeps, 3 callbacks, 4 frees
+$ cargo test --test timer_differential
+… every clock read, sleep, callback, old spec, state snapshot and free matched the C
+```
+
+One class of values is deliberately absent from the corpus: the old spec of a
+*fresh* timer. C's `timer_new` leaves `start`, `end` and `interval`
+uninitialized, so the only spec a first `timer_set` can report is whatever
+happens to be in that allocation — the port zero-initializes them and the
+corpus passes `NULL` for those first sets, exactly as a caller must.
+
 ## Layout
 
 ```
@@ -854,7 +896,8 @@ ish-rs/
 │   ├── getset.rs               # kernel/getset.c
 │   ├── tls.rs                  # kernel/tls.c
 │   ├── misc.rs                 # kernel/misc.c
-│   └── sync.rs                 # util/sync.{h,c} locks, waits, unwind flag
+│   ├── sync.rs                 # util/sync.{h,c} locks, waits, unwind flag
+│   └── timer.rs                # util/timer.{h,c} timespec helpers + timer thread
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
@@ -875,6 +918,7 @@ ish-rs/
 │   ├── fake_db_migrate_differential.rs # C migration ladder replayed over 5 generations
 │   ├── fake_db_rebuild_differential.rs # C rebuild replayed against a scripted host
 │   ├── sync_differential.rs    # C wait/notify/lock corpus replayed
+│   ├── timer_differential.rs   # C timer corpus replayed on a scripted clock
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -894,7 +938,8 @@ ish-rs/
 │       ├── fake_db_reference.txt # 40 fake-db operations + table states from C
 │       ├── fake_db_migrate_reference.txt # 3 C migrations x 5 schema generations
 │       ├── fake_db_rebuild_reference.txt # scripted-host rebuild corpus + host ops
-│       └── sync_reference.txt  # 46 waiting/notify/unwind/lock records from the C
+│       ├── sync_reference.txt  # 46 waiting/notify/unwind/lock records from the C
+│       └── timer_reference.txt # 58 timer records, scripted clock and sleeps
 ├── vendor/
 │   └── graphitesql/            # v0.1.7 pure-Rust SQLite-3-compatible library
 └── tools/
@@ -917,6 +962,7 @@ ish-rs/
     ├── fake-db-migrate-dump.c  # migration-ladder oracle (includes fake-migrate.c)
     ├── fake-db-rebuild-dump.c  # rebuild oracle (wraps fstatat/unlinkat/linkat)
     ├── sync-dump.c             # wait/notify oracle (wraps pthread_cond_*)
+    ├── timer-dump.c            # timer oracle (scripted clock, sleeps and free)
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -938,6 +984,7 @@ ish-rs/
     ├── gen_fake_db_migrate_reference.sh
     ├── gen_fake_db_rebuild_reference.sh
     ├── gen_sync_reference.sh
+    ├── gen_timer_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
@@ -1034,6 +1081,12 @@ ish-rs/
   a sum of exactly one second reaches pthread unnormalized. The port computes
   the same value and its parker answers `EINVAL` for it, which is why the
   fixture contains a wait that both "failed" and "succeeded".
+* **An interruptible sleep is part of the timer's contract.** `TimerHost`,
+  the timer's platform seam, specifies `sleep` as "return early when poked",
+  because that is what `nanosleep` + `SIGUSR1` gives C. `ThreadHost` implements
+  it with a per-worker `Condvar`, so a re-armed timer stops waiting for its old
+  deadline; the differential corpus pins the same behaviour by scripting the
+  poke and checking that the worker sleeps for the *new* remaining time.
 * **Generated op tables, not hand-copied ones.** `emu/vec.h` declares 166
   functions in 30 signatures. Both the C driver's table and the Rust dispatch
   match come from `tools/gen_vec_ops.py`, so the two sides cannot drift and
