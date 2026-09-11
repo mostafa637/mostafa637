@@ -16,7 +16,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `float80.rs` | `emu/float80.{h,c}`   | 652     | **done** — 125,612 results verified bit-exact against the C reference |
 | `cpu.rs`     | `emu/cpu.h`           | 235     | **done** — register file, lazy EFLAGS, `fsw`/`fcw`, flag macros, `collapse_flags`/`expand_flags` |
 | `fpu.rs`     | `emu/fpu.{h,c}`       | 506     | **done** — all 78 x87 operations, whole `cpu_state` compared after each one |
-| `mmu.rs`     | `emu/mmu.h`, `tlb.{h,c}` | 154  | not started (4 GiB address space, TLB) |
+| `mmu.rs`     | `emu/mmu.h`, `tlb.{h,c}` | 184  | not started (4 GiB address space, TLB) |
 | `decode.rs`  | `emu/decode.h`, `modrm.h` | 1,522 | not started (x86 decoder + instruction semantics) |
 | `vec.rs`     | `emu/vec.{h,c}`       | 817     | not started (SSE) |
 | `mmx.rs`     | `emu/mmx.c`           | 180     | not started (MMX) |
