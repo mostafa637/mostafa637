@@ -1,0 +1,295 @@
+# mmap reference output, generated from unmodified iSH kernel/mmap.c
+# returns are raw addr_t in hex: an address, or a negated errno
+# radix: addresses, lengths and offsets are hex; flags are decimal
+O M2 0 1000 7 34 0
+R f7ffd000
+S main pgdir_used 1 changes 0 brk 1000000 start_brk 1000000 refcount 1
+P main f7ffd 47 0 0 1
+O M2 400000 2000 7 32 0
+R 400000
+S main pgdir_used 2 changes 0 brk 1000000 start_brk 1000000 refcount 1
+P main 400 47 0 0 2
+P main 401 47 1000 0 2
+P main f7ffd 47 0 1 1
+O M2 400000 1000 1 32 0
+R 400000
+S main pgdir_used 2 changes 1 brk 1000000 start_brk 1000000 refcount 1
+P main 400 41 0 0 1
+P main 401 47 1000 1 1
+P main f7ffd 47 0 2 1
+O M2 400000 1000 7 48 0
+R 400000
+S main pgdir_used 2 changes 2 brk 1000000 start_brk 1000000 refcount 1
+P main 400 47 0 0 1
+P main 401 47 1000 1 1
+P main f7ffd 47 0 2 1
+O M2 0 1000 7 33 0
+R f7ffc000
+S main pgdir_used 2 changes 2 brk 1000000 start_brk 1000000 refcount 1
+P main 400 47 0 0 1
+P main 401 47 1000 1 1
+P main f7ffc c7 0 2 1
+P main f7ffd 47 0 3 1
+O M2 0 1 7 32 0
+R f7ffb000
+S main pgdir_used 2 changes 2 brk 1000000 start_brk 1000000 refcount 1
+P main 400 47 0 0 1
+P main 401 47 1000 1 1
+P main f7ffb 47 0 2 1
+P main f7ffc c7 0 3 1
+P main f7ffd 47 0 4 1
+O M2 0 0 7 32 0
+R ffffffea
+O M2 400001 1000 7 32 0
+R ffffffea
+O M2 0 1000 107 32 0
+R ffffffea
+O M2 0 1000 7 35 0
+R ffffffea
+O M2 0 1000 1 2 0
+R fffffff7
+S main pgdir_used 2 changes 2 brk 1000000 start_brk 1000000 refcount 1
+P main 400 47 0 0 1
+P main 401 47 1000 1 1
+P main f7ffb 47 0 2 1
+P main f7ffc c7 0 3 1
+P main f7ffd 47 0 4 1
+O MN 100 1 7
+R 0
+O MM 100000 0 1000 7 34 0 0
+R f7ffa000
+S main pgdir_used 3 changes 2 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 400 47 0 1 1
+P main 401 47 1000 2 1
+P main f7ffa 47 0 3 1
+P main f7ffb 47 0 4 1
+P main f7ffc c7 0 5 1
+P main f7ffd 47 0 6 1
+O MM 900000 0 1000 7 34 0 0
+R fffffff2
+O MP 400000 1000 1
+R 0
+S main pgdir_used 3 changes 3 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 400 1 0 1 1
+P main 401 47 1000 2 1
+P main f7ffa 47 0 3 1
+P main f7ffb 47 0 4 1
+P main f7ffc c7 0 5 1
+P main f7ffd 47 0 6 1
+O MP 400000 1000 107
+R ffffffea
+O MP 400001 1000 7
+R ffffffea
+O MP 900000 1000 7
+R fffffff4
+S main pgdir_used 3 changes 3 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 400 1 0 1 1
+P main 401 47 1000 2 1
+P main f7ffa 47 0 3 1
+P main f7ffb 47 0 4 1
+P main f7ffc c7 0 5 1
+P main f7ffd 47 0 6 1
+O MR 400000 100 200 0
+R 400000
+S main pgdir_used 3 changes 4 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 400 1 0 1 1
+P main 401 47 1000 2 1
+P main f7ffa 47 0 3 1
+P main f7ffb 47 0 4 1
+P main f7ffc c7 0 5 1
+P main f7ffd 47 0 6 1
+O MR 400000 1000 3000 0
+R fffffff2
+S main pgdir_used 3 changes 4 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 400 1 0 1 1
+P main 401 47 1000 2 1
+P main f7ffa 47 0 3 1
+P main f7ffb 47 0 4 1
+P main f7ffc c7 0 5 1
+P main f7ffd 47 0 6 1
+O MR 400000 3000 1000 0
+R fffffff2
+S main pgdir_used 3 changes 4 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 400 1 0 1 1
+P main 401 47 1000 2 1
+P main f7ffa 47 0 3 1
+P main f7ffb 47 0 4 1
+P main f7ffc c7 0 5 1
+P main f7ffd 47 0 6 1
+O M2 401000 1000 7 48 0
+R 401000
+O MR 400000 1000 2000 0
+R fffffff2
+S main pgdir_used 3 changes 5 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 400 1 0 1 1
+P main 401 47 0 2 1
+P main f7ffa 47 0 3 1
+P main f7ffb 47 0 4 1
+P main f7ffc c7 0 5 1
+P main f7ffd 47 0 6 1
+O MR 400000 1000 2000 2
+R ffffffea
+O MR 400000 1000 2000 4
+R ffffffea
+O MR 400001 1000 2000 0
+R ffffffea
+O MR 900000 1000 2000 0
+R fffffff2
+O MR 400000 1000 1000 1
+R 400000
+O MU 401000 1000
+R 0
+S main pgdir_used 3 changes 7 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 400 1 0 1 1
+P main f7ffa 47 0 2 1
+P main f7ffb 47 0 3 1
+P main f7ffc c7 0 4 1
+P main f7ffd 47 0 5 1
+O MU 401000 1000
+R 0
+O MU 400001 1000
+R ffffffea
+O MU 400000 0
+R ffffffea
+O MU 400000 1001
+R 0
+S main pgdir_used 3 changes 9 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main f7ffa 47 0 1 1
+P main f7ffb 47 0 2 1
+P main f7ffc c7 0 3 1
+P main f7ffd 47 0 4 1
+O M2 700000 2000 7 48 0
+R 700000
+O MP 700000 1001 1
+R 0
+S main pgdir_used 3 changes 10 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 700 1 0 1 2
+P main 701 1 1000 1 2
+P main f7ffa 47 0 2 1
+P main f7ffb 47 0 3 1
+P main f7ffc c7 0 4 1
+P main f7ffd 47 0 5 1
+O M2 750000 3000 7 48 0
+R 750000
+O MR 750000 3000 1000 0
+R 750000
+S main pgdir_used 3 changes 11 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 700 1 0 1 2
+P main 701 1 1000 1 2
+P main 750 47 0 2 1
+P main f7ffa 47 0 3 1
+P main f7ffb 47 0 4 1
+P main f7ffc c7 0 5 1
+P main f7ffd 47 0 6 1
+O MR 750000 100 1000 0
+R fffffff4
+S main pgdir_used 3 changes 11 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 700 1 0 1 2
+P main 701 1 1000 1 2
+P main 750 47 0 2 1
+P main f7ffa 47 0 3 1
+P main f7ffb 47 0 4 1
+P main f7ffc c7 0 5 1
+P main f7ffd 47 0 6 1
+O M2 800000 2000 7 48 0
+R 800000
+O MU 800000 1001
+R 0
+S main pgdir_used 4 changes 12 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 700 1 0 1 2
+P main 701 1 1000 1 2
+P main 750 47 0 2 1
+P main f7ffa 47 0 3 1
+P main f7ffb 47 0 4 1
+P main f7ffc c7 0 5 1
+P main f7ffd 47 0 6 1
+O BR 1002000
+R 1002000
+S main pgdir_used 5 changes 12 brk 1002000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 700 1 0 1 2
+P main 701 1 1000 1 2
+P main 750 47 0 2 1
+P main 1000 42 0 3 2
+P main 1001 42 1000 3 2
+P main f7ffa 47 0 4 1
+P main f7ffb 47 0 5 1
+P main f7ffc c7 0 6 1
+P main f7ffd 47 0 7 1
+O BR 1002001
+R 1002001
+S main pgdir_used 5 changes 12 brk 1002001 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 700 1 0 1 2
+P main 701 1 1000 1 2
+P main 750 47 0 2 1
+P main 1000 42 0 3 2
+P main 1001 42 1000 3 2
+P main 1002 42 0 4 1
+P main f7ffa 47 0 5 1
+P main f7ffb 47 0 6 1
+P main f7ffc c7 0 7 1
+P main f7ffd 47 0 8 1
+O BR 1000000
+R 1000000
+S main pgdir_used 5 changes 13 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 700 1 0 1 2
+P main 701 1 1000 1 2
+P main 750 47 0 2 1
+P main 1002 42 0 3 1
+P main f7ffa 47 0 4 1
+P main f7ffb 47 0 5 1
+P main f7ffc c7 0 6 1
+P main f7ffd 47 0 7 1
+O BR ffffff
+R 1000000
+S main pgdir_used 5 changes 13 brk 1000000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 700 1 0 1 2
+P main 701 1 1000 1 2
+P main 750 47 0 2 1
+P main 1002 42 0 3 1
+P main f7ffa 47 0 4 1
+P main f7ffb 47 0 5 1
+P main f7ffc c7 0 6 1
+P main f7ffd 47 0 7 1
+O BR 1001000
+R 1001000
+O BR 1200000
+R 1001000
+S main pgdir_used 5 changes 13 brk 1001000 start_brk 1000000 refcount 1
+P main 100 47 0 0 1
+P main 700 1 0 1 2
+P main 701 1 1000 1 2
+P main 750 47 0 2 1
+P main 1000 42 0 3 1
+P main 1002 42 0 4 1
+P main f7ffa 47 0 5 1
+P main f7ffb 47 0 6 1
+P main f7ffc c7 0 7 1
+P main f7ffd 47 0 8 1
+O MA 400000 1000 4
+R 0
+O ML 0 0
+R 0
+O MS 0 0 0
+R 0
+O RT
+R 2
+O RL
+R 1
+# asbestos_invalidations 12 fd_closes 0 fd_lookups 1 signals_sent 0

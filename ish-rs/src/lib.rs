@@ -20,6 +20,7 @@
 //! | [`memory`]      | `kernel/memory.{h,c}`     | ported, the guest address space behind `mmu`/`tlb` |
 //! | [`user`]        | `kernel/user.c`           | ported, the guest<->kernel byte copies, faults included |
 //! | [`errno`]       | `kernel/errno.{h,c}`      | ported, host to guest errno translation, table generated |
+//! | [`mmap`]        | `kernel/mmap.c` + `mm.h`  | ported, the address-space syscalls on top of `memory` |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -38,6 +39,7 @@ pub mod float80;
 pub mod fpu;
 pub mod interrupt;
 pub mod memory;
+pub mod mmap;
 pub mod mmu;
 pub mod modrm;
 pub mod tlb;

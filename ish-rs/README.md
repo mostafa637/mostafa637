@@ -24,6 +24,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `interrupt.rs` | `emu/interrupt.h`   | 15      | **done** — the 13 `INT_*` vector numbers |
 | `decode.rs`  | `emu/decode.h`        | 1,416   | **dispatch ported** — 8 opcode maps × 2 operand sizes; 140,289 events over 37,891 decodings verified against the C. The opcode table is generated from the header |
 | `memory.rs`  | `kernel/memory.{h,c}` | 346     | **done** — the guest address space: two-level page table, `pt_map`/`pt_unmap`/`pt_set_flags`/`pt_copy_on_write`/`mem_ptr`/`pt_find_hole`; 428 operations and 395 page records verified against the C |
+| `mmap.rs`    | `kernel/mmap.c` + `mm.h` | 243   | **done** — `mmap2`, the old `mmap`, `munmap`, `mremap`, `mprotect`, `brk`, the no-op syscalls and `mm_copy`; 51 operations and the full page table after each verified against the C |
 | `errno.rs`   | `kernel/errno.{h,c}`  | 105     | **done** — host→guest errno translation; 4,216 `err_map` inputs and all 10 `errno_map` probes verified against the C, table generated from the host headers |
 | `user.rs`    | `kernel/user.c`       | 97      | **done** — the guest↔kernel byte copies (`user_read`/`user_write`/`user_write_task_ptrace`/`user_read_string`/`user_write_string`); 52 operations, 77 guest pages and 192,937 bytes verified against the C |
 
@@ -39,9 +40,10 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --tests
-running 129 tests  (unit tests in src/)
+running 148 tests  (unit tests in src/)
 running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
 running 3 tests    (tests/errno_differential.rs)   ->   4,216 err_map inputs
+running 2 tests    (tests/mmap_differential.rs)    ->      51 mmap operations
 running 2 tests    (tests/differential.rs)         -> 125,612 float80 results
 running 4 tests    (tests/fpu_differential.rs)     -> 502,552 cpu_state words
 running 2 tests    (tests/memory_differential.rs)  ->     428 page-table operations
@@ -49,7 +51,7 @@ running 1 test     (tests/user_differential.rs)    ->     192,937 guest+host byt
 running 3 tests    (tests/modrm_differential.rs)   ->  10,264 decode fields
 running 2 tests    (tests/tlb_differential.rs)     -> 172,312 tlb state words
 running 2 tests    (tests/vec_differential.rs)     ->   9,794 vec/mmx results
-test result: ok. 151 passed
+test result: ok. 172 passed
 $ cargo clippy --all-targets                   # clean, no warnings
 ```
 
@@ -506,6 +508,55 @@ have done.
 (a stale `HOST_EPIPE`, a wrong guest number, a dropped entry); **all 14 were
 caught**.
 
+### mmap
+
+`kernel/mmap.c` is where the guest asks for address space, and it sits directly
+on `memory.rs`. Returns are compared as raw 32-bit words because that is what
+these syscalls return: an address on success, a negated errno reinterpreted as
+`addr_t` on failure — `-EINVAL` comes back as `ffffffea`.
+
+Four pieces of upstream behaviour are pinned rather than tidied:
+
+* **A non-`MAP_FIXED` hint that is not free is used anyway.** When the hint
+  overlaps an existing mapping the C does `addr = 0;`, which reads as "go find a
+  hole instead" — but `page` was already assigned from the hint and is never
+  recomputed, and `addr` is not read again. The assignment is dead. The corpus
+  maps `0x400000` twice with no `MAP_FIXED` and compares the result.
+* **`mprotect` replaces the flags, so it clears `P_ANONYMOUS`** — and `mremap`
+  only grows anonymous mappings. The corpus mprotects a mapping and then fails to
+  grow it, which is the interaction a reader would not predict from either
+  function alone.
+* **`mremap` uses `PAGE(len)`, not `PAGE_ROUND_UP(len)`.** A sub-page length
+  rounds *down* to zero pages, so `mremap(a, 0x100, 0x1000)` takes the grow
+  branch, not the shrink branch, and fails because the page it would grow into is
+  the one it already owns.
+* **`brk`'s shrink leaves a page behind** when the old brk is not page-aligned:
+  it unmaps `PAGE(old_brk) - PAGE(new_brk)` pages. Shrinking from `0x1002001` to
+  `0x1000000` leaves page `0x1002` mapped, and that stray page is why a later
+  `brk` in the corpus is refused.
+
+One place departs from the letter of the original, and says so in the source:
+`mremap`'s grow path checks its pages with `entry == NULL && entry->flags !=
+pt_flags`, which dereferences `entry` in the branch that just established it is
+`NULL`. Any sparse range crashes the C instead of returning an error, so the
+reference generator cannot contain that case; the port implements the check that
+was plainly meant.
+
+Not ported, both documented at the point they would matter: file-backed mappings
+(no fd table, so every descriptor is invalid and `EBADF` is the C's own answer —
+the generator asserts `f_get` was reached exactly once, by the one file-backed
+attempt) and `struct mm`'s procfs fields.
+
+27 mutations were injected; **24 were caught**. The three survivors are not
+coverage gaps: `mmap_common`'s `len == 0` check is redundant with `do_mmap`'s
+`pages == 0`, since `page_round_up(0)` is 0; and `mmap2`'s page-to-byte offset
+conversion plus the old `mmap`'s choice of offset field over fd field are both
+unread, because nothing consumes the offset until a file-backed mapping exists.
+Closing the other four survivors took three new corpus cases — a non-page-aligned
+`mprotect`, a successful multi-page `mremap` shrink, and a non-page-aligned
+`munmap` — plus a unit test that fills the whole `pt_find_hole` scan range to
+reach `do_mmap`'s `ENOMEM`.
+
 ## Layout
 
 ```
@@ -526,6 +577,7 @@ ish-rs/
 │   ├── vec.rs                  # emu/vec.{h,c} + emu/mmx.c
 │   ├── memory.rs               # kernel/memory.{h,c}
 │   ├── user.rs                 # kernel/user.c
+│   ├── mmap.rs                 # kernel/mmap.c + kernel/mm.h
 │   ├── errno.rs                # kernel/errno.{h,c}
 │   └── errno_table.rs          # generated host->guest errno table (do not edit)
 ├── tests/
@@ -536,6 +588,7 @@ ish-rs/
 │   ├── modrm_differential.rs   # field-exact replay of the ModRM/SIB reference
 │   ├── user_differential.rs    # byte-exact replay of the user-memory reference
 │   ├── errno_differential.rs   # value-exact replay of the errno reference
+│   ├── mmap_differential.rs    # word-exact replay of the mmap reference
 │   ├── tlb_differential.rs     # word-exact replay of the tlb reference
 │   ├── vec_differential.rs     # word-exact replay of the vec/mmx reference
 │   └── fixtures/
@@ -546,6 +599,7 @@ ish-rs/
 │       ├── modrm_reference.txt # 1283 ModRM/SIB decodings from the C
 │       ├── user_reference.txt  # 52 user-memory ops, guest+host bytes from the C
 │       ├── errno_reference.txt # 4216 err_map inputs + host errno numbers
+│       ├── mmap_reference.txt  # 51 mmap ops + the whole page table after each
 │       ├── tlb_reference.txt   # 56 full struct tlb dumps from the C
 │       └── vec_reference.txt   # 9.8k vec/mmx results from the C
 └── tools/
@@ -558,6 +612,7 @@ ish-rs/
     ├── stub-include/sqlite3.h  # three opaque typedefs memory.c reaches via fd.h
     ├── user-dump.c             # user-memory reference generator (links user.c)
     ├── errno-dump.c            # errno reference generator (links errno.c)
+    ├── mmap-dump.c             # mmap reference generator (links mmap.c)
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -569,6 +624,7 @@ ish-rs/
     ├── gen_memory_reference.sh
     ├── gen_user_reference.sh
     ├── gen_errno_reference.sh
+    ├── gen_mmap_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
