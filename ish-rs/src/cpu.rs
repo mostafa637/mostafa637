@@ -69,6 +69,10 @@ pub enum Reg32 {
     Ebp = 5,
     Esi = 6,
     Edi = 7,
+    /// `reg_none = reg_count`. Not a register: `modrm_decode32` uses it to say
+    /// "no base register", and indexing `cpu->regs` with it is out of bounds in
+    /// the C too, so never pass it to [`CpuState::reg`].
+    None = 8,
 }
 
 pub const REG_COUNT: usize = 8;
@@ -84,6 +88,8 @@ pub fn reg32_name(reg: Reg32) -> &'static str {
         Reg32::Ebp => "ebp",
         Reg32::Esi => "esi",
         Reg32::Edi => "edi",
+        // the C's `default:` arm
+        Reg32::None => "?",
     }
 }
 

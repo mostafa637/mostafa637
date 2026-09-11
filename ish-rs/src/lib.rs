@@ -15,6 +15,9 @@
 //! | [`mmu`]         | `emu/mmu.h`               | ported, page arithmetic and the translate interface |
 //! | [`tlb`]         | `emu/tlb.h` + `.c`        | ported, cache behaviour compared against the C |
 //! | [`vec`]         | `emu/vec.{h,c}` + `mmx.c` | ported, all 166 operations compared against the C |
+//! | [`modrm`]       | `emu/modrm.h`             | ported, decode results compared against the C |
+//! | [`cpuid`]       | `emu/cpuid.h`             | ported |
+//! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
 //! # Provenance and license
 //!
@@ -22,9 +25,12 @@
 //! license: `GPL-2.0-or-later`. See `README.md`.
 
 pub mod cpu;
+pub mod cpuid;
 pub mod float80;
 pub mod fpu;
+pub mod interrupt;
 pub mod mmu;
+pub mod modrm;
 pub mod tlb;
 pub mod vec;
 

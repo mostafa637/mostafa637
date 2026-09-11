@@ -19,7 +19,10 @@ against the compiled C original**, not just against hand-written expectations.
 | `mmu.rs`     | `emu/mmu.h`           | 40      | **done** — page arithmetic, `MEM_*` types, the `mmu_ops` translate interface |
 | `tlb.rs`     | `emu/tlb.{h,c}`       | 144     | **done** — the 1024-entry software TLB; 172,312 state words verified against the C |
 | `vec.rs`     | `emu/vec.{h,c}` + `mmx.c` | 997  | **done** — all 166 SSE/MMX operations, 9,794 results verified against the C |
-| `decode.rs`  | `emu/decode.h`, `modrm.h` | 1,522 | not started (x86 decoder + instruction semantics) |
+| `modrm.rs`   | `emu/modrm.h`         | 106     | **done** — ModRM/SIB decoder; 1,283 decodings (10,264 fields) verified against the C |
+| `cpuid.rs`   | `emu/cpuid.h`         | 29      | **done** — `do_cpuid` leaves 0/1 and the `CPUID_EDX_*` bits |
+| `interrupt.rs` | `emu/interrupt.h`   | 15      | **done** — the 13 `INT_*` vector numbers |
+| `decode.rs`  | `emu/decode.h`        | 1,416   | not started (instruction semantics for the gadget assembler) |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -33,12 +36,13 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --tests
-running 64 tests   (unit tests in src/)
-running 2 tests    (tests/differential.rs)      -> 125,612 float80 results
-running 4 tests    (tests/fpu_differential.rs)  -> 502,552 cpu_state words
-running 2 tests    (tests/tlb_differential.rs)  -> 172,312 tlb state words
-running 2 tests    (tests/vec_differential.rs)  ->   9,794 vec/mmx results
-test result: ok. 74 passed
+running 79 tests   (unit tests in src/)
+running 2 tests    (tests/differential.rs)       -> 125,612 float80 results
+running 4 tests    (tests/fpu_differential.rs)   -> 502,552 cpu_state words
+running 3 tests    (tests/modrm_differential.rs) ->  10,264 decode fields
+running 2 tests    (tests/tlb_differential.rs)   -> 172,312 tlb state words
+running 2 tests    (tests/vec_differential.rs)   ->   9,794 vec/mmx results
+test result: ok. 92 passed
 $ cargo clippy --all-targets                   # clean, no warnings
 ```
 
@@ -163,6 +167,51 @@ a `cvtt` saturating the way Rust's `as` does instead of the way `CVTTSD2SI`
 does. One mutant is provably undetectable — `sb > 0xfe` in `paddusb` is
 equivalent to `sb > 0xff`, since both store `0xff` when `sb == 0xff`.
 
+### modrm
+
+`tests/modrm_differential.rs` compares 1,283 decodings field by field — eight
+fields each (result, final instruction pointer, operand type, `reg`, base,
+displacement, `index`, `shift`), 10,264 comparisons. The corpus is exhaustive
+where the encoding is: all 256 ModRM bytes, and all 256 SIB bytes under each of
+the four `mod` values, including `mod=11` where `rm=100` is an ordinary
+register rather than a SIB escape. Three more cases place the operand against an
+unmapped page, which pins two behaviours that are easy to get wrong: the decoder
+reports the fault by returning false, and the instruction pointer is still left
+past the bytes it consumed, because the C's `READ` macro advances `*ip` *before*
+it reads.
+
+The fixture describes its own memory image — the backing-store fill, the
+unmapped page, every byte the C driver wrote and each starting ip — so the Rust
+side rebuilds the same image instead of duplicating the generator's tables.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_modrm_reference.sh
+wrote tests/fixtures/modrm_reference.txt: 2568 lines, 1283 cases
+```
+
+Mutation-checked: 9 of 10 targeted breakages were caught, including a SIB scale
+of 8 folded back to 1, `[ebp]` with no displacement losing its disp32 meaning,
+a disp8 that stops being sign-extended, an index of `esp` treated as a real
+index register, and a `READ` that only advances the ip on success. The survivor
+is `mode != MODE_REG` in the SIB arm, which is unreachable-by-construction — the
+`mode == MODE_REG` arm above it already caught that case.
+
+The scale-8 case is worth spelling out, because the C gives no hint that it
+matters: `struct modrm`'s `shift` is `enum { times_1, times_2, times_4 }`, but
+`modrm->shift = MOD(sib_byte)` stores the raw two bits, so a scale of 8 arrives
+as the unnamed `3`. It is live: `asbestos/gen.c` selects an addressing gadget
+with `modrm->index * 4 + modrm->shift`, and that table is generated over
+`.irp times, 1,2,4,8`. Folding 3 to 0 would silently decode `[eax + ecx*8]` as
+`[eax + ecx]`.
+
+### cpuid and interrupt
+
+`emu/cpuid.h` and `emu/interrupt.h` are small enough that their unit tests are
+the check: leaf 0 returns `GenuineIntel` in the ebx/edx/ecx order Intel
+specifies, leaf 1 and the `default:` case both return
+`fpu | cmov | mmx | sse2` (bit 25, plain SSE, is deliberately absent), and the
+13 `INT_*` vectors are the constants `kernel/` raises.
+
 ### What the differential test caught
 
 Two genuine translation bugs, both caused by flattening the C union/bitfield
@@ -218,27 +267,34 @@ ish-rs/
 │   ├── float80.rs              # emu/float80.{h,c}
 │   ├── fpu.rs                  # emu/fpu.{h,c}
 │   ├── mmu.rs                  # emu/mmu.h
+│   ├── modrm.rs                # emu/modrm.h
+│   ├── cpuid.rs                # emu/cpuid.h
+│   ├── interrupt.rs            # emu/interrupt.h
 │   ├── tlb.rs                  # emu/tlb.{h,c}
 │   └── vec.rs                  # emu/vec.{h,c} + emu/mmx.c
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
+│   ├── modrm_differential.rs   # field-exact replay of the ModRM/SIB reference
 │   ├── tlb_differential.rs     # word-exact replay of the tlb reference
 │   ├── vec_differential.rs     # word-exact replay of the vec/mmx reference
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
+│       ├── modrm_reference.txt # 1283 ModRM/SIB decodings from the C
 │       ├── tlb_reference.txt   # 56 full struct tlb dumps from the C
 │       └── vec_reference.txt   # 9.8k vec/mmx results from the C
 └── tools/
     ├── f80-dump.c              # float80 reference generator (not part of iSH)
     ├── fpu-dump.c              # cpu/fpu reference generator
     ├── tlb-dump.c              # mmu/tlb reference generator
+    ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
     ├── gen_vec_ops.py          # derives both op tables from emu/vec.h
     ├── vec-ops.inc             # generated C op table (166 entries)
     ├── gen_f80_reference.sh
     ├── gen_fpu_reference.sh
+    ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
 ```
