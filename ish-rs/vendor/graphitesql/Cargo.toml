@@ -1,0 +1,24 @@
+# Vendored from https://github.com/KarpelesLab/graphitesql, v0.1.7.
+# See UPSTREAM.md for the precise source revision and pure-Rust profile.
+[package]
+name = "graphitesql"
+version = "0.1.7"
+edition = "2024"
+rust-version = "1.89"
+description = "Pure-Rust SQLite 3-compatible embedded database"
+license = "blessing"
+repository = "https://github.com/KarpelesLab/graphitesql"
+readme = "README.md"
+
+[features]
+# The iSH fakefs needs file persistence. This profile deliberately has no
+# registry or native dependencies.
+default = ["std"]
+std = []
+# Retained as a known cfg gate in upstream source but disabled by ish-emu.
+fts5 = []
+unicode = []
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"

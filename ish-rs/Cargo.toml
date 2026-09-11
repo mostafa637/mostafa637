@@ -1,0 +1,22 @@
+[package]
+name = "ish-emu"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "GPL-2.0-or-later"
+description = "Rust port of the iSH emulator and kernel core"
+repository = "https://github.com/ish-app/ish"
+readme = "README.md"
+
+[lib]
+name = "ish_emu"
+path = "src/lib.rs"
+
+[dependencies]
+# Pure-Rust SQLite 3 engine, vendored at v0.1.7 so Cargo does not need the
+# unavailable crates.io registry or any native SQLite/database library.
+graphitesql = { path = "vendor/graphitesql", default-features = false, features = ["std"] }
+
+[profile.release]
+opt-level = 3
+debug = true
