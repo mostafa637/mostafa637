@@ -1,0 +1,137 @@
+# mount reference, generated from unmodified fs/mount.c
+S 0 name=real
+S 1 name=proc
+S 2 name=devpts
+S 3 name=tmpfs
+K MAX_FILESYSTEMS=10
+K MS_READONLY=1
+K MS_NOSUID=2
+K MS_NODEV=4
+K MS_NOEXEC=8
+K MS_SILENT=32768
+K MS_SUPPORTED=32783
+K MS_FLAGS=15
+G name=fake0 slot=4
+G name=fake1 slot=5
+G name=fake2 slot=6
+G name=fake3 slot=7
+G name=fake4 slot=8
+G name=fake5 slot=9
+M fs=fake source=2f6465762f6469736b point=- info=- flags=0 ret=0
+L 0 point=- source=2f6465762f6469736b info=- flags=0 refcount=0 root_fd=7
+E count=1
+M fs=fake source=2f6465762f6d6e74 point=2f6d6e74 info=72772c6e6f73756964 flags=0 ret=0
+M fs=fake source=6462 point=2f7661722f64622f66616b656673 info=726f flags=1 ret=0
+M fs=fake source=646232 point=2f6d6e742f6462 info=- flags=0 ret=0
+M fs=fake source=766172 point=2f766172 info=- flags=0 ret=0
+M fs=fake source=6475702d6f6c64 point=2f647570 info=73697a653d36346b flags=0 ret=0
+M fs=fake source=6475702d6e6577 point=2f647570 info=73697a653d3132386b flags=0 ret=0
+L 0 point=2f7661722f64622f66616b656673 source=6462 info=726f flags=1 refcount=0 root_fd=7
+L 1 point=2f6d6e742f6462 source=646232 info=- flags=0 refcount=0 root_fd=7
+L 2 point=2f647570 source=6475702d6e6577 info=73697a653d3132386b flags=0 refcount=0 root_fd=7
+L 3 point=2f647570 source=6475702d6f6c64 info=73697a653d36346b flags=0 refcount=0 root_fd=7
+L 4 point=2f766172 source=766172 info=- flags=0 refcount=0 root_fd=7
+L 5 point=2f6d6e74 source=2f6465762f6d6e74 info=72772c6e6f73756964 flags=0 refcount=0 root_fd=7
+L 6 point=- source=2f6465762f6469736b info=- flags=0 refcount=0 root_fd=7
+E count=7
+M fs=fake source=62726f6b656e point=2f6661696c info=- flags=0 ret=-22
+L 0 point=2f7661722f64622f66616b656673 source=6462 info=726f flags=1 refcount=0 root_fd=7
+L 1 point=2f6d6e742f6462 source=646232 info=- flags=0 refcount=0 root_fd=7
+L 2 point=2f647570 source=6475702d6e6577 info=73697a653d3132386b flags=0 refcount=0 root_fd=7
+L 3 point=2f647570 source=6475702d6f6c64 info=73697a653d36346b flags=0 refcount=0 root_fd=7
+L 4 point=2f766172 source=766172 info=- flags=0 refcount=0 root_fd=7
+L 5 point=2f6d6e74 source=2f6465762f6d6e74 info=72772c6e6f73756964 flags=0 refcount=0 root_fd=7
+L 6 point=- source=2f6465762f6469736b info=- flags=0 refcount=0 root_fd=7
+E count=7
+Q path=2f point=- source=2f6465762f6469736b refcount=1
+R point=- refcount=0
+Q path=2f6d6e74 point=2f6d6e74 source=2f6465762f6d6e74 refcount=1
+R point=2f6d6e74 refcount=0
+Q path=2f6d6e742f78 point=2f6d6e74 source=2f6465762f6d6e74 refcount=1
+R point=2f6d6e74 refcount=0
+Q path=2f6d6e7432 point=- source=2f6465762f6469736b refcount=1
+R point=- refcount=0
+Q path=2f6d6e742f782f79 point=2f6d6e74 source=2f6465762f6d6e74 refcount=1
+R point=2f6d6e74 refcount=0
+Q path=2f6d6e742d64622f78 point=- source=2f6465762f6469736b refcount=1
+R point=- refcount=0
+Q path=2f766172 point=2f766172 source=766172 refcount=1
+R point=2f766172 refcount=0
+Q path=2f76617279 point=- source=2f6465762f6469736b refcount=1
+R point=- refcount=0
+Q path=2f7661722f6462 point=2f766172 source=766172 refcount=1
+R point=2f766172 refcount=0
+Q path=2f7661722f64622f66616b656673 point=2f7661722f64622f66616b656673 source=6462 refcount=1
+R point=2f7661722f64622f66616b656673 refcount=0
+Q path=2f7661722f64622f66616b6566732f78 point=2f7661722f64622f66616b656673 source=6462 refcount=1
+R point=2f7661722f64622f66616b656673 refcount=0
+Q path=2f6475702f79 point=2f647570 source=6475702d6e6577 refcount=1
+R point=2f647570 refcount=0
+Q path=- point=- source=2f6465762f6469736b refcount=1
+R point=- refcount=0
+Q path=2f656c73657768657265 point=- source=2f6465762f6469736b refcount=1
+R point=- refcount=0
+Q path=2f70726f632f73656c66 point=- source=2f6465762f6469736b refcount=1
+R point=- refcount=0
+L 0 point=2f7661722f64622f66616b656673 source=6462 info=726f flags=1 refcount=0 root_fd=7
+L 1 point=2f6d6e742f6462 source=646232 info=- flags=0 refcount=0 root_fd=7
+L 2 point=2f647570 source=6475702d6e6577 info=73697a653d3132386b flags=0 refcount=0 root_fd=7
+L 3 point=2f647570 source=6475702d6f6c64 info=73697a653d36346b flags=0 refcount=0 root_fd=7
+L 4 point=2f766172 source=766172 info=- flags=0 refcount=0 root_fd=7
+L 5 point=2f6d6e74 source=2f6465762f6d6e74 info=72772c6e6f73756964 flags=0 refcount=0 root_fd=7
+L 6 point=- source=2f6465762f6469736b info=- flags=0 refcount=0 root_fd=7
+E count=7
+Q path=2f7661722f64622f66616b6566732f78 point=2f7661722f64622f66616b656673 source=6462 refcount=1
+X point=2f7661722f64622f66616b656673 refcount=1 ret=-16
+U point=2f7661722f64622f66616b656673 ret=-16
+T point=2f7661722f64622f66616b656673 refcount=2
+R point=2f7661722f64622f66616b656673 refcount=1
+R point=2f7661722f64622f66616b656673 refcount=0
+X point=2f7661722f64622f66616b656673 refcount=0 ret=0
+L 0 point=2f6d6e742f6462 source=646232 info=- flags=0 refcount=0 root_fd=7
+L 1 point=2f647570 source=6475702d6e6577 info=73697a653d3132386b flags=0 refcount=0 root_fd=7
+L 2 point=2f647570 source=6475702d6f6c64 info=73697a653d36346b flags=0 refcount=0 root_fd=7
+L 3 point=2f766172 source=766172 info=- flags=0 refcount=0 root_fd=7
+L 4 point=2f6d6e74 source=2f6465762f6d6e74 info=72772c6e6f73756964 flags=0 refcount=0 root_fd=7
+L 5 point=- source=2f6465762f6469736b info=- flags=0 refcount=0 root_fd=7
+E count=6
+Q path=2f7661722f64622f66616b6566732f78 point=2f766172 source=766172 refcount=1
+R point=2f766172 refcount=0
+U point=2f647570 ret=0
+L 0 point=2f6d6e742f6462 source=646232 info=- flags=0 refcount=0 root_fd=7
+L 1 point=2f647570 source=6475702d6f6c64 info=73697a653d36346b flags=0 refcount=0 root_fd=7
+L 2 point=2f766172 source=766172 info=- flags=0 refcount=0 root_fd=7
+L 3 point=2f6d6e74 source=2f6465762f6d6e74 info=72772c6e6f73756964 flags=0 refcount=0 root_fd=7
+L 4 point=- source=2f6465762f6469736b info=- flags=0 refcount=0 root_fd=7
+E count=5
+U point=2f6e6f7065 ret=-22
+U point=2f6d6e74 ret=0
+L 0 point=2f6d6e742f6462 source=646232 info=- flags=0 refcount=0 root_fd=7
+L 1 point=2f647570 source=6475702d6f6c64 info=73697a653d36346b flags=0 refcount=0 root_fd=7
+L 2 point=2f766172 source=766172 info=- flags=0 refcount=0 root_fd=7
+L 3 point=- source=2f6465762f6469736b info=- flags=0 refcount=0 root_fd=7
+E count=4
+P info=726f2c6e6f73756964 flag=726f ret=1
+P info=726f2c6e6f73756964 flag=726f2c6e6f73756964 ret=1
+P info=726561646f6e6c79783d31 flag=726561646f6e6c79 ret=1
+P info=6e6f737569643d61 flag=6e6f73756964 ret=1
+P info=73697a653d36346b flag=73697a65 ret=1
+P info=73697a653d36346b flag=73697a653d36356b ret=0
+P info=- flag=726f ret=0
+P info=726f flag=- ret=1
+P info=- flag=- ret=0
+P info=757365723d313030302c67726f75703d31303030 flag=757365723d31303030 ret=1
+P info=612c62 flag=2c62 ret=1
+P info=726f2c flag=726f ret=1
+F count=11
+F 0 mount point=- source=2f6465762f6469736b info=- ret=0
+F 1 mount point=2f6d6e74 source=2f6465762f6d6e74 info=72772c6e6f73756964 ret=0
+F 2 mount point=2f7661722f64622f66616b656673 source=6462 info=726f ret=0
+F 3 mount point=2f6d6e742f6462 source=646232 info=- ret=0
+F 4 mount point=2f766172 source=766172 info=- ret=0
+F 5 mount point=2f647570 source=6475702d6f6c64 info=73697a653d36346b ret=0
+F 6 mount point=2f647570 source=6475702d6e6577 info=73697a653d3132386b ret=0
+F 7 mount point=2f6661696c source=62726f6b656e info=- ret=-22
+F 8 umount point=2f7661722f64622f66616b656673
+F 9 umount point=2f647570
+F 10 umount point=2f6d6e74

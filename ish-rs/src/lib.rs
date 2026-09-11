@@ -39,6 +39,8 @@
 //! | [`futex`]       | `kernel/futex.{h,c}`      | ported, refcounted wait queues with wake/requeue and the robust-list calls |
 //! | [`stat`]        | `fs/stat.{h,c}`           | ported, the guest stat layouts and `stat_convert_newstat64` |
 //! | [`path`]        | `fs/path.{h,c}`           | ported, the normalization predicate and the component walk; the normalizers wait on mounts |
+//! | [`mount`]       | `fs/mount.c` + `kernel/fs.h` | ported, the mount table, `struct mount` and `struct fs_ops`; `sys_mount` waits on the path layer |
+//! | [`mount`]       | `fs/mount.c` + `kernel/fs.h` | ported, the mount table, `struct mount` and `struct fs_ops` |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -66,6 +68,7 @@ pub mod ipc;
 pub mod log;
 pub mod memory;
 pub mod migrate;
+pub mod mount;
 pub mod misc;
 pub mod mmap;
 pub mod mmu;

@@ -47,6 +47,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `stat.rs`    | `fs/stat.{h,c}`       | 307     | **done** — the nine guest stat structures with their packings and padding, and `stat_convert_newstat64`; 9 C layouts, 173 field values and 5 converted `statbuf`s verified byte-for-byte || `stat.rs`    | `fs/stat.{h,c}`       | 307     | **done** — the nine guest stat structures with their packings and padding, and `stat_convert_newstat64`; 9 C layouts, 173 field values and 5 converted `statbuf`s verified byte-for-byte |
 | `dev.rs`     | `fs/dev.h` + `fs/devices.h` | 92  | **done** — the guest's 32-bit device-number encoding (`dev_make`/`dev_major`/`dev_minor`), its two host conversions, and the major/minor of every device iSH names; 28 encodings, 56 host conversions and 18 constants verified against the C |
 | `path.rs`    | `fs/path.{h,c}`       | 216     | **done** — the normalization predicate and the component walk with its `MAX_NAME` boundary; 69 paths, 107 component steps and 5 constants verified against the C. The two normalizers wait on mounts |
+| `mount.rs`   | `fs/mount.c` + part of `kernel/fs.h` | 194 | **done** — the mount table, `struct mount` and `struct fs_ops`: the list kept in descending order of mount-point length, the longest-prefix lookup at a component boundary, the reference counting that keeps a looked-up mount alive, `fs_register` and `mount_param_flag`; 8 mounts, 17 lookups, 20 references and 11 filesystem callbacks replayed against the C. `sys_mount`/`sys_umount2` wait on the path layer |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -60,7 +61,7 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --all-targets
-running 252 tests  (unit tests in src/)
+running 261 tests  (unit tests in src/)
 running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
 running 3 tests    (tests/errno_differential.rs)   ->   4,216 err_map inputs
 running 2 tests    (tests/mmap_differential.rs)    ->      51 mmap operations
@@ -86,7 +87,8 @@ running 2 tests    (tests/fchdir_differential.rs)  ->      12 fchdir records fro
 running 2 tests    (tests/stat_differential.rs)    ->       9 struct layouts + 5 converted statbufs
 running 1 test     (tests/dev_differential.rs)     ->      28 encodings + 56 host conversions, 42 host macro records in the unit test
 running 1 test     (tests/path_differential.rs)    ->      69 paths + 107 component steps
-test result: ok. 299 passed
+running 1 test     (tests/mount_differential.rs)   ->       8 mounts, 17 lookups, 37 list entries, 11 callbacks
+test result: ok. 309 passed
 $ cargo clippy --all-targets -- -D warnings       # clean, no warnings
 ```
 
@@ -1130,6 +1132,61 @@ $ cargo test --test path_differential
 … 69 predicates, 107 steps over 64 walks and 5 constants matched the C
 ```
 
+### Mounts
+
+iSH has no file tree of its own. It has a list of mount points on the host's,
+kept in **descending order of mount-point length**, and every path the guest
+hands the kernel is answered by the longest mount point that prefixes it: a mount
+of `/mnt` never claims `/mnt2/x`, because the byte after the point has to be a
+slash or the end of the path. `find_mount_and_trim_path` (`fs/generic.c`, still
+to come) strips that point off the front and hands the rest to the filesystem's
+own `open`/`stat`/`unlink`, so the list order *is* the lookup rule.
+
+`mount.rs` ports the whole of `fs/mount.c` except its two syscalls, whose bodies
+need `generic_statat`, `path_normalize` and `current->fs`:
+
+* **The table.** `fs_register` fills the first free slot of a ten-entry table and
+  asserts when there is none; `mount_find` walks the list in order and takes a
+  reference; `do_mount` calls the filesystem's `mount` op *before* the mount is
+  in the list and inserts it before the first entry that is no longer than it —
+  which is why two mounts of the same point leave the newer one first, and why
+  the root of the filesystem is mounted at the **empty** point by
+  `kernel/init.c`: `strncmp(path, "", 0)` matches anything, so that one entry
+  makes every lookup succeed and sorts last in every list.
+* **The references.** A looked-up mount cannot be removed: `mount_remove` returns
+  `_EBUSY` while its `refcount` is non-zero, which is what lets a caller keep
+  using its `struct mount *` after a lookup that raced with an unmount. The port
+  keeps the count and also hands out an `Rc` per reference, so a leak is a leak
+  and not a use after free.
+* **`mount_param_flag`**, the comma-separated option scanner, with one deviation
+  that is forced: C advances by `strcspn(info, ",")`, which is zero when `info`
+  is *at* a comma, so asking about any field but the first spins forever — the
+  `FIXME: this is shit` above the function is about precisely that. The port
+  skips the comma and keeps looking, which is what the loop meant to do; every
+  input C terminates on gets the same answer, and the ones it does not are unit
+  tests rather than a hang.
+* **`fs_ops` and `struct mount`** themselves, minus the six `fs_ops` members that
+  take a `struct fd *` — `open`, `close`, `fstat`, `fsetattr`, `getpath` and
+  `flock` arrive with `fs/fd.c`, which is the first file that can name one.
+
+The fixture is a *script*, not a corpus: `tools/mount-dump.c` mounts a fake
+filesystem at a series of points, looks paths up, takes and gives back
+references, removes mounts and then prints its own callback log, and
+`tests/mount_differential.rs` performs every one of those operations through the
+port and compares each answer as it goes — the returned mount, the counter after
+each reference, the position of each entry in the list, and the order and
+arguments of the `mount`/`umount` calls the filesystem saw. The C's callbacks log
+into the same shape, so the fake filesystem's log has to match entry for entry.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_mount_reference.sh
+replayed 7 list blocks and 11 callbacks
+wrote tests/fixtures/mount_reference.txt: 137 lines, md5 576bcd5ef76806b13fa68191dba2b587
+$ cargo test --test mount_differential
+running 1 test
+test the_mount_table_matches_the_c ... ok
+```
+
 ## Layout
 
 ```
@@ -1172,7 +1229,8 @@ ish-rs/
 │   ├── fchdir.rs               # util/fchdir.{h,c} the working-directory lock
 │   ├── stat.rs                 # fs/stat.{h,c} guest stat layouts + newstat64 conversion
 │   ├── dev.rs                  # fs/dev.h + fs/devices.h device numbers and majors/minors
-│   └── path.rs                 # fs/path.{h,c} path predicate + component walk
+│   ├── path.rs                 # fs/path.{h,c} path predicate + component walk
+│   └── mount.rs                # fs/mount.c mount table, struct mount and fs_ops
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
@@ -1199,6 +1257,7 @@ ish-rs/
 │   ├── stat_differential.rs    # C struct layouts, images and conversions replayed
 │   ├── dev_differential.rs     # C device encodings and host conversions replayed
 │   ├── path_differential.rs    # C path predicates and component walk replayed
+│   ├── mount_differential.rs   # C mount script replayed: table, refs and callbacks
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -1224,7 +1283,8 @@ ish-rs/
 │       ├── fchdir_reference.txt# 12 fchdir records, two workers and a wrapped call
 │       ├── stat_reference.txt  # 9 C struct layouts, 173 field values, 5 conversions
 │       ├── dev_reference.txt   # 28 encodings, 56 conversions, 42 host macro records
-│       └── path_reference.txt  # 69 C paths + 107 component steps
+│       ├── path_reference.txt  # 69 C paths + 107 component steps
+│       └── mount_reference.txt # the C's mount script: 137 records + callbacks
 ├── vendor/
 │   └── graphitesql/            # v0.1.7 pure-Rust SQLite-3-compatible library
 └── tools/
@@ -1253,6 +1313,7 @@ ish-rs/
     ├── stat-dump.c             # stat oracle (sizeof/offsetof plus the C conversion)
     ├── dev-dump.c              # dev oracle (dev_make/decode plus the host makedev)
     ├── path-dump.c             # path oracle (includes fs/path.c, walks the corpus)
+    ├── mount-dump.c            # mount oracle (includes fs/mount.c, mounts a fake fs)
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -1280,6 +1341,7 @@ ish-rs/
     ├── gen_stat_reference.sh
     ├── gen_dev_reference.sh
     ├── gen_path_reference.sh
+    ├── gen_mount_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
