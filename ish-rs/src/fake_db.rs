@@ -8,8 +8,9 @@
 //! `graphitesql` is a from-scratch, pure-Rust implementation of SQLite's SQL
 //! surface and version-3 database-file format. Its narrowed vendored profile
 //! has no native bindings, C/C++ source, unsafe code, or external Cargo
-//! dependencies. The local differential test compares this implementation with
-//! the unmodified iSH C implementation using C SQLite only as an oracle.
+//! dependencies. Local differential tests compare both metadata operations and
+//! legacy-schema migration with unmodified iSH C, using C SQLite only as an
+//! oracle.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -22,6 +23,26 @@ use graphitesql::{Connection, Value};
 
 type ConnectionSlot = Rc<RefCell<Option<Connection>>>;
 const SQLITE_SCHEMA_VERSION: u64 = 3;
+
+// Ordered exactly as the `migrations` array in upstream fs/fake-migrate.c.
+// These SQL statements run inside one transaction in `migrate_ish_schema`.
+const ISH_SCHEMA_MIGRATIONS: [&str; 3] = [
+    "CREATE INDEX inode_to_path ON paths (inode, path)",
+    "CREATE TABLE paths_new (path BLOB PRIMARY KEY, inode INTEGER REFERENCES stats(inode));\
+     INSERT INTO paths_new SELECT * FROM paths WHERE EXISTS (SELECT 1 FROM stats WHERE inode = paths.inode);\
+     DROP TABLE paths;\
+     ALTER TABLE paths_new RENAME TO paths;\
+     CREATE INDEX inode_to_path ON paths (inode, path);\
+     DELETE FROM stats WHERE NOT EXISTS (SELECT 1 FROM paths WHERE inode = stats.inode);\
+     CREATE TRIGGER delete_path AFTER DELETE ON paths \
+       WHEN NOT EXISTS (SELECT 1 FROM paths WHERE inode = OLD.inode) \
+       BEGIN \
+         DELETE FROM stats \
+         WHERE NOT EXISTS (SELECT 1 FROM paths WHERE inode = OLD.inode) \
+           AND inode = OLD.inode; \
+       END;",
+    "DROP TRIGGER delete_path",
+];
 
 /// An error from the pure-Rust SQLite metadata database.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,8 +61,8 @@ pub enum FakeDbError {
     },
     /// `path_link`, `path_unlink` or a required inode lookup was absent.
     MissingPath,
-    /// The opened SQLite metadata schema has a version this port does not yet
-    /// migrate. Current upstream iSH metadata uses version 3.
+    /// The opened SQLite metadata schema is older than the migrations this
+    /// port can complete. Current upstream iSH metadata uses version 3.
     UnsupportedSchemaVersion {
         /// SQLite `PRAGMA user_version` found in the database file.
         found: u64,
@@ -147,18 +168,17 @@ pub struct MetadataRow {
 
 /// Persistent, SQLite-3-file-compatible fake filesystem metadata storage.
 ///
-/// `create` writes a SQLite version-3 database using pure Rust. `open` accepts
-/// an existing version-3 iSH fakefs SQLite file whose current schema version is
-/// supported by this port. The old native-SQLite implementation's filesystem
-/// migration/rebuild callbacks remain integration work for the future fakefs
-/// layer.
+/// `create` writes a SQLite version-3 database using pure Rust. `open` also
+/// upgrades compatible historical iSH metadata schemas v0–v2 through the same
+/// durable v3 state as upstream `fakefs_migrate`. Host-filesystem rebuild and
+/// fakefs integration remain separate conversion work.
 pub struct FakeDb {
     connection: ConnectionSlot,
 }
 
 impl FakeDb {
-    /// Create a SQLite-backed metadata database at `path`, or open it if it
-    /// already exists and has the current iSH schema.
+    /// Create a SQLite-backed metadata database at `path`, or open and migrate
+    /// it when it already holds a compatible historical iSH schema.
     pub fn create(path: impl AsRef<Path>) -> Result<Self, FakeDbError> {
         let path = path.as_ref();
         let sqlite_path = database_path(path)?;
@@ -171,6 +191,7 @@ impl FakeDb {
         .map_err(FakeDbError::database)?;
         let db = Self::from_connection(connection);
         if exists {
+            db.migrate_schema()?;
             db.validate_schema()?;
         } else {
             db.initialize_schema()?;
@@ -184,6 +205,7 @@ impl FakeDb {
         let connection =
             Connection::open(database_path(path.as_ref())?).map_err(FakeDbError::database)?;
         let db = Self::from_connection(connection);
+        db.migrate_schema()?;
         db.validate_schema()?;
         db.clear_orphans()?;
         Ok(db)
@@ -227,16 +249,23 @@ impl FakeDb {
         })
     }
 
+    /// Port `fakefs_migrate`: upgrade an old iSH SQLite metadata schema before
+    /// preparing the fakefs operations.
+    fn migrate_schema(&self) -> Result<(), FakeDbError> {
+        self.with_connection(migrate_ish_schema)
+    }
+
     fn validate_schema(&self) -> Result<(), FakeDbError> {
         self.with_connection(|connection| {
             connection
                 .execute("PRAGMA foreign_keys=ON")
                 .map_err(FakeDbError::database)?;
-            let version = scalar_integer(connection, "PRAGMA user_version")?
-                .ok_or_else(|| FakeDbError::Database("SQLite user_version is absent".into()))?;
-            let found = version as u64;
-            if found != SQLITE_SCHEMA_VERSION {
-                return Err(FakeDbError::UnsupportedSchemaVersion { found });
+            let version = sqlite_schema_version(connection)?;
+            // Upstream leaves a newer user_version untouched. Resolve the
+            // required current tables so that a newer compatible schema keeps
+            // working, while a failed old-schema migration is never accepted.
+            if version < SQLITE_SCHEMA_VERSION {
+                return Err(FakeDbError::UnsupportedSchemaVersion { found: version });
             }
             // Ask the engine to resolve the columns rather than accepting an
             // arbitrary SQLite file that only happens to have the same PRAGMA.
@@ -721,6 +750,55 @@ impl Drop for FakeDbTransaction {
         let _ = connection.execute("ROLLBACK");
         let _ = put_connection(&self.slot, connection);
     }
+}
+
+/// Rust equivalent of upstream `fakefs_migrate` for schema versions 0–3.
+///
+/// The ordered C statement sequence is retained in [`ISH_SCHEMA_MIGRATIONS`],
+/// including the temporary v2 delete trigger and its immediate v3 removal.
+/// That keeps the transactional statement sequence aligned with upstream even
+/// though no regular fakefs operation can observe the trigger in between.
+fn migrate_ish_schema(connection: &mut Connection) -> Result<(), FakeDbError> {
+    connection
+        .execute("PRAGMA foreign_keys=ON")
+        .map_err(FakeDbError::database)?;
+    let version = sqlite_schema_version(connection)?;
+    if version >= SQLITE_SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    execute(connection, "BEGIN")?;
+    let result = (|| {
+        let first_migration = usize::try_from(version).map_err(|_| {
+            FakeDbError::Database(format!(
+                "SQLite user_version {version} cannot index migrations"
+            ))
+        })?;
+        for migration in &ISH_SCHEMA_MIGRATIONS[first_migration..] {
+            connection
+                .execute_batch(migration)
+                .map_err(FakeDbError::database)?;
+        }
+        execute(
+            connection,
+            &format!("PRAGMA user_version={SQLITE_SCHEMA_VERSION}"),
+        )?;
+        execute(connection, "COMMIT")
+    })();
+    if result.is_err() {
+        // C's `EXEC` aborts the process on a migration error. The Rust API
+        // returns it, but must leave the owned connection usable instead.
+        let _ = connection.execute("ROLLBACK");
+    }
+    result
+}
+
+fn sqlite_schema_version(connection: &Connection) -> Result<u64, FakeDbError> {
+    let version = scalar_integer(connection, "PRAGMA user_version")?
+        .ok_or_else(|| FakeDbError::Database("SQLite user_version is absent".into()))?;
+    u64::try_from(version).map_err(|_| {
+        FakeDbError::Database(format!("SQLite user_version {version} cannot be negative"))
+    })
 }
 
 fn database_path(path: &Path) -> Result<&str, FakeDbError> {

@@ -53,6 +53,7 @@ int sqlite3_finalize(sqlite3_stmt *stmt);
 int sqlite3_bind_blob(sqlite3_stmt *stmt, int index, const void *value, int n,
                       sqlite3_destructor_type destructor);
 int sqlite3_bind_int64(sqlite3_stmt *stmt, int index, int64_t value);
+int sqlite3_column_int(sqlite3_stmt *stmt, int column);
 int64_t sqlite3_column_int64(sqlite3_stmt *stmt, int column);
 const void *sqlite3_column_blob(sqlite3_stmt *stmt, int column);
 int sqlite3_column_bytes(sqlite3_stmt *stmt, int column);
@@ -64,6 +65,7 @@ const void *sqlite3_value_blob(sqlite3_value *value);
 int sqlite3_value_bytes(sqlite3_value *value);
 int64_t sqlite3_value_int64(sqlite3_value *value);
 void *sqlite3_malloc(int n);
+char *sqlite3_mprintf(const char *format, ...);
 void sqlite3_free(void *ptr);
 void sqlite3_result_blob(sqlite3_context *context, const void *value, int n,
                          sqlite3_destructor_type destructor);
