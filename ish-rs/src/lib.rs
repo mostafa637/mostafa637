@@ -22,7 +22,7 @@
 //! | [`errno`]       | `kernel/errno.{h,c}`      | ported, host to guest errno translation, table generated |
 //! | [`ipc`]         | `kernel/ipc.c`            | ported, legacy System V IPC multiplexor compatibility stub |
 //! | [`log`]         | `kernel/log.c` + `util/fifo.c` | ported, kernel log FIFO and old syslog ABI |
-//! | [`fake_db`]     | `fs/fake-db.c`                 | metadata primitives ported over vendored pure-Rust redb; migration/rebuild integration follows |
+//! | [`fake_db`]     | `fs/fake-db.c`                 | metadata primitives ported over vendored pure-Rust SQLite-3-compatible graphitesql; migration/rebuild integration follows |
 //! | [`mmap`]        | `kernel/mmap.c` + `mm.h`  | ported, the address-space syscalls on top of `memory` |
 //! | [`resource`]    | `kernel/resource.{h,c}`   | ported, limits, rusage ABI, affinity, and scheduler compatibility calls |
 //! | [`random`]      | `kernel/random.{h,c}`     | ported, bounded guest getrandom over an explicit platform entropy source |

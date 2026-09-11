@@ -1,36 +1,38 @@
-//! Pure-Rust fake-filesystem metadata database.
+//! Pure-Rust SQLite fake-filesystem metadata database.
 //!
 //! iSH's `fs/fake-db.c` stores guest-visible inode metadata separately from
-//! host filesystem metadata.  This module preserves that API's observable
-//! rules—BLOB-like byte paths, inode allocation, links, prefix renames,
-//! orphan cleanup and transactions—but uses the vendored [`redb`] embedded
-//! database library instead of linking SQLite.
+//! host filesystem metadata. This module preserves that API's observable
+//! rules—byte paths, inode allocation, links, prefix renames, orphan cleanup,
+//! and transactions—using the vendored [`graphitesql`] SQLite-3 implementation.
 //!
-//! `redb` is a pure-Rust ACID B-tree store.  Its source is vendored in
-//! `vendor/redb` at v3.1.2 so this crate builds without crates.io access and
-//! without a C/C++ database library.  The persistence format is consequently
-//! `redb`, not SQLite's on-disk format; the local differential test compares
-//! the guest-visible metadata behavior against unmodified iSH C/SQLite.
+//! `graphitesql` is a from-scratch, pure-Rust implementation of SQLite's SQL
+//! surface and version-3 database-file format. Its narrowed vendored profile
+//! has no native bindings, C/C++ source, unsafe code, or external Cargo
+//! dependencies. The local differential test compares this implementation with
+//! the unmodified iSH C implementation using C SQLite only as an oracle.
 
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
 use std::path::Path;
+use std::rc::Rc;
 
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition, WriteTransaction};
+use graphitesql::{Connection, Value};
 
-const FORMAT: TableDefinition<&str, u64> = TableDefinition::new("ish_fakefs_format");
-const STATS: TableDefinition<u64, &[u8]> = TableDefinition::new("ish_fakefs_stats");
-const PATHS: TableDefinition<&[u8], u64> = TableDefinition::new("ish_fakefs_paths");
-const FORMAT_VERSION: u64 = 1;
+type ConnectionSlot = Rc<RefCell<Option<Connection>>>;
+const SQLITE_SCHEMA_VERSION: u64 = 3;
 
-/// An error from the pure-Rust metadata database.
+/// An error from the pure-Rust SQLite metadata database.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FakeDbError {
-    /// The `redb` storage engine rejected an operation.
+    /// The pure-Rust SQLite engine rejected an operation.
     Database(String),
     /// A path had an interior NUL, which C's `strlen` interface cannot carry.
     InteriorNulPath,
+    /// A filesystem path could not be represented by the SQLite library's
+    /// UTF-8 file-VFS API.
+    NonUtf8DatabasePath,
     /// A metadata record was not the 16-byte `struct ish_stat` layout.
     InvalidStatBlob {
         /// Actual record length.
@@ -38,11 +40,17 @@ pub enum FakeDbError {
     },
     /// `path_link`, `path_unlink` or a required inode lookup was absent.
     MissingPath,
-    /// The database was opened with a newer incompatible metadata format.
-    UnsupportedFormat {
-        /// Version found in the database.
+    /// The opened SQLite metadata schema has a version this port does not yet
+    /// migrate. Current upstream iSH metadata uses version 3.
+    UnsupportedSchemaVersion {
+        /// SQLite `PRAGMA user_version` found in the database file.
         found: u64,
     },
+    /// A caller tried to use the database while an explicit transaction owns
+    /// its single SQLite connection.
+    TransactionActive,
+    /// A transaction was already committed, rolled back, or otherwise closed.
+    TransactionFinished,
     /// SQLite's positive implicit rowid range has been exhausted.
     InodeExhausted,
 }
@@ -56,8 +64,11 @@ impl FakeDbError {
 impl fmt::Display for FakeDbError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Database(message) => write!(formatter, "fakefs redb error: {message}"),
+            Self::Database(message) => write!(formatter, "fakefs SQLite error: {message}"),
             Self::InteriorNulPath => formatter.write_str("fakefs path contains an interior NUL"),
+            Self::NonUtf8DatabasePath => {
+                formatter.write_str("fakefs database path is not valid UTF-8")
+            }
             Self::InvalidStatBlob { len } => {
                 write!(
                     formatter,
@@ -65,11 +76,17 @@ impl fmt::Display for FakeDbError {
                 )
             }
             Self::MissingPath => formatter.write_str("fakefs metadata path does not exist"),
-            Self::UnsupportedFormat { found } => {
+            Self::UnsupportedSchemaVersion { found } => {
                 write!(
                     formatter,
-                    "unsupported fakefs metadata format version {found}"
+                    "unsupported fakefs SQLite schema version {found}"
                 )
+            }
+            Self::TransactionActive => {
+                formatter.write_str("fakefs database is owned by an active transaction")
+            }
+            Self::TransactionFinished => {
+                formatter.write_str("fakefs transaction has already finished")
             }
             Self::InodeExhausted => formatter.write_str("fakefs inode range is exhausted"),
         }
@@ -128,110 +145,145 @@ pub struct MetadataRow {
     pub stat: IshStat,
 }
 
-/// Persistent, pure-Rust fake filesystem metadata storage.
+/// Persistent, SQLite-3-file-compatible fake filesystem metadata storage.
 ///
-/// `create` and `open` use a redb file rather than an upstream `meta.db`
-/// SQLite file.  The metadata operations intentionally keep iSH's behavior;
-/// filesystem migration/import of old SQLite files belongs to the future fake
-/// filesystem layer.
+/// `create` writes a SQLite version-3 database using pure Rust. `open` accepts
+/// an existing version-3 iSH fakefs SQLite file whose current schema version is
+/// supported by this port. The old native-SQLite implementation's filesystem
+/// migration/rebuild callbacks remain integration work for the future fakefs
+/// layer.
 pub struct FakeDb {
-    database: Database,
+    connection: ConnectionSlot,
 }
 
 impl FakeDb {
-    /// Create a redb-backed metadata database at `path`, or open it if it is
-    /// already a valid redb file.  The iSH metadata tables are created once.
+    /// Create a SQLite-backed metadata database at `path`, or open it if it
+    /// already exists and has the current iSH schema.
     pub fn create(path: impl AsRef<Path>) -> Result<Self, FakeDbError> {
-        let database = Database::create(path).map_err(FakeDbError::database)?;
-        let db = Self { database };
-        db.initialize_or_validate()?;
+        let path = path.as_ref();
+        let sqlite_path = database_path(path)?;
+        let exists = path.exists();
+        let connection = if exists {
+            Connection::open(sqlite_path)
+        } else {
+            Connection::create(sqlite_path)
+        }
+        .map_err(FakeDbError::database)?;
+        let db = Self::from_connection(connection);
+        if exists {
+            db.validate_schema()?;
+        } else {
+            db.initialize_schema()?;
+        }
         db.clear_orphans()?;
         Ok(db)
     }
 
-    /// Open an existing redb-backed fakefs metadata database.
+    /// Open an existing SQLite-backed fakefs metadata database.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, FakeDbError> {
-        let database = Database::open(path).map_err(FakeDbError::database)?;
-        let db = Self { database };
-        db.validate_format()?;
+        let connection =
+            Connection::open(database_path(path.as_ref())?).map_err(FakeDbError::database)?;
+        let db = Self::from_connection(connection);
+        db.validate_schema()?;
         db.clear_orphans()?;
         Ok(db)
     }
 
-    /// Create an in-memory pure-Rust database for a caller or differential
-    /// test.  No native SQLite library is loaded by this method.
+    /// Create an in-memory pure-Rust SQLite database for a caller or
+    /// differential test. No native SQLite library is loaded by this method.
     pub fn open_in_memory() -> Result<Self, FakeDbError> {
-        let database = Database::builder()
-            .create_with_backend(redb::backends::InMemoryBackend::new())
-            .map_err(FakeDbError::database)?;
-        let db = Self { database };
-        db.initialize_or_validate()?;
+        let db = Self::from_connection(Connection::open_memory().map_err(FakeDbError::database)?);
+        db.initialize_schema()?;
         Ok(db)
     }
 
-    fn initialize_or_validate(&self) -> Result<(), FakeDbError> {
-        let transaction = self.database.begin_write().map_err(FakeDbError::database)?;
-        {
-            let mut format = transaction
-                .open_table(FORMAT)
-                .map_err(FakeDbError::database)?;
-            let version = {
-                let value = format.get("version").map_err(FakeDbError::database)?;
-                value.map(|value| value.value())
-            };
-            match version {
-                Some(FORMAT_VERSION) => {}
-                Some(found) => return Err(FakeDbError::UnsupportedFormat { found }),
-                None => {
-                    format
-                        .insert("version", &FORMAT_VERSION)
-                        .map_err(FakeDbError::database)?;
-                }
-            }
-        }
-        // Opening a table is the redb equivalent of creating the schema.  Keep
-        // the handles scoped separately: redb enforces one open handle per
-        // table in one transaction.
-        {
-            let _stats = transaction
-                .open_table(STATS)
-                .map_err(FakeDbError::database)?;
-        }
-        {
-            let _paths = transaction
-                .open_table(PATHS)
-                .map_err(FakeDbError::database)?;
-        }
-        transaction.commit().map_err(FakeDbError::database)
-    }
-
-    fn validate_format(&self) -> Result<(), FakeDbError> {
-        let transaction = self.database.begin_read().map_err(FakeDbError::database)?;
-        let format = transaction
-            .open_table(FORMAT)
-            .map_err(FakeDbError::database)?;
-        let version = format
-            .get("version")
-            .map_err(FakeDbError::database)?
-            .map(|value| value.value());
-        match version {
-            Some(FORMAT_VERSION) => Ok(()),
-            Some(found) => Err(FakeDbError::UnsupportedFormat { found }),
-            None => Err(FakeDbError::UnsupportedFormat { found: 0 }),
+    fn from_connection(connection: Connection) -> Self {
+        Self {
+            connection: Rc::new(RefCell::new(Some(connection))),
         }
     }
 
-    fn begin_compatible_transaction(&self) -> Result<FakeDbTransaction, FakeDbError> {
-        // C's `begin deferred` allows fakefs_setattr to read a stat and then
-        // promote the same transaction to a write. A redb WriteTransaction is
-        // used for both C begin modes so that observable sequence remains
-        // legal and atomic rather than rejecting that C-supported promotion.
-        Ok(FakeDbTransaction {
-            transaction: self.database.begin_write().map_err(FakeDbError::database)?,
+    fn initialize_schema(&self) -> Result<(), FakeDbError> {
+        self.with_connection(|connection| {
+            connection
+                .execute("PRAGMA foreign_keys=ON")
+                .map_err(FakeDbError::database)?;
+            // Keep the same schema and user-version baseline used by the
+            // current upstream fakefs migration path. Every value below is
+            // fixed source text; guest-controlled paths and blobs use hex
+            // literals in the individual metadata operations.
+            connection
+                .execute_batch(
+                    "BEGIN;\
+                     CREATE TABLE meta (id INTEGER UNIQUE DEFAULT 0, db_inode INTEGER);\
+                     INSERT INTO meta (db_inode) VALUES (0);\
+                     CREATE TABLE stats (inode INTEGER PRIMARY KEY, stat BLOB);\
+                     CREATE TABLE paths (path BLOB PRIMARY KEY, inode INTEGER REFERENCES stats(inode));\
+                     CREATE INDEX inode_to_path ON paths (inode, path);\
+                     PRAGMA user_version=3;\
+                     COMMIT;",
+                )
+                .map_err(FakeDbError::database)
         })
     }
 
+    fn validate_schema(&self) -> Result<(), FakeDbError> {
+        self.with_connection(|connection| {
+            connection
+                .execute("PRAGMA foreign_keys=ON")
+                .map_err(FakeDbError::database)?;
+            let version = scalar_integer(connection, "PRAGMA user_version")?
+                .ok_or_else(|| FakeDbError::Database("SQLite user_version is absent".into()))?;
+            let found = version as u64;
+            if found != SQLITE_SCHEMA_VERSION {
+                return Err(FakeDbError::UnsupportedSchemaVersion { found });
+            }
+            // Ask the engine to resolve the columns rather than accepting an
+            // arbitrary SQLite file that only happens to have the same PRAGMA.
+            query_rows(connection, "SELECT db_inode FROM meta LIMIT 1")?;
+            query_rows(connection, "SELECT inode, stat FROM stats LIMIT 1")?;
+            query_rows(connection, "SELECT path, inode FROM paths LIMIT 1")?;
+            Ok(())
+        })
+    }
+
+    fn take_connection(&self) -> Result<Connection, FakeDbError> {
+        take_connection(&self.connection)
+    }
+
+    fn put_connection(&self, connection: Connection) -> Result<(), FakeDbError> {
+        put_connection(&self.connection, connection)
+    }
+
+    fn with_connection<T>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> Result<T, FakeDbError>,
+    ) -> Result<T, FakeDbError> {
+        let mut connection = self.take_connection()?;
+        let result = operation(&mut connection);
+        self.put_connection(connection)?;
+        result
+    }
+
+    fn begin_compatible_transaction(&self) -> Result<FakeDbTransaction, FakeDbError> {
+        let mut connection = self.take_connection()?;
+        match connection.execute("BEGIN") {
+            Ok(_) => Ok(FakeDbTransaction {
+                slot: Rc::clone(&self.connection),
+                connection: RefCell::new(Some(connection)),
+            }),
+            Err(error) => {
+                let error = FakeDbError::database(error);
+                self.put_connection(connection)?;
+                Err(error)
+            }
+        }
+    }
+
     /// Start the C `db_begin_read` compatibility transaction.
+    ///
+    /// SQLite's deferred read transaction can later promote to a write, so the
+    /// same owned pure-Rust SQLite transaction backs both begin modes.
     pub fn begin_read(&self) -> Result<FakeDbTransaction, FakeDbError> {
         self.begin_compatible_transaction()
     }
@@ -252,7 +304,8 @@ impl FakeDb {
                 Ok(value)
             }
             Err(error) => {
-                // Dropping an unfinished redb WriteTransaction aborts it.
+                // Dropping an unfinished transaction rolls it back and returns
+                // its connection to the database pool.
                 drop(transaction);
                 Err(error)
             }
@@ -309,12 +362,12 @@ impl FakeDb {
         self.autocommit(|transaction| transaction.try_cleanup_inode(inode))
     }
 
-    /// Remove all stat records not referenced by any path, like `fake_db_init`.
+    /// Delete every stat record with no path mapping, as C initialization does.
     pub fn clear_orphans(&self) -> Result<(), FakeDbError> {
-        self.autocommit(|transaction| transaction.clear_orphans())
+        self.autocommit(FakeDbTransaction::clear_orphans)
     }
 
-    /// Hash logical metadata exactly as the local C reference harness does.
+    /// Hash the ordered logical stat and path tables like the local C harness.
     pub fn logical_hash(&self) -> Result<u64, FakeDbError> {
         self.autocommit(|transaction| transaction.logical_hash())
     }
@@ -322,11 +375,12 @@ impl FakeDb {
 
 /// A transaction over [`FakeDb`] metadata.
 ///
-/// It wraps redb's pure-Rust ACID write transaction. Both C `begin deferred`
-/// and `begin immediate` map here because the former can be promoted to a
-/// writer by iSH's own fake filesystem code.
+/// The transaction owns the one pure-Rust SQLite connection while it is active.
+/// This mirrors C's fakefs transaction ownership: operations through the parent
+/// [`FakeDb`] are rejected until this value is committed, rolled back, or dropped.
 pub struct FakeDbTransaction {
-    transaction: WriteTransaction,
+    slot: ConnectionSlot,
+    connection: RefCell<Option<Connection>>,
 }
 
 impl FakeDbTransaction {
@@ -338,109 +392,112 @@ impl FakeDbTransaction {
         }
     }
 
-    /// Finish a C `db_commit` equivalent.
+    fn with_connection<T>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> Result<T, FakeDbError>,
+    ) -> Result<T, FakeDbError> {
+        let mut connection = self.connection.borrow_mut();
+        let connection = connection
+            .as_mut()
+            .ok_or(FakeDbError::TransactionFinished)?;
+        operation(connection)
+    }
+
+    fn finish(mut self, statement: &str) -> Result<(), FakeDbError> {
+        let mut connection = self
+            .connection
+            .get_mut()
+            .take()
+            .ok_or(FakeDbError::TransactionFinished)?;
+        let result = connection.execute(statement).map_err(FakeDbError::database);
+        if result.is_err() {
+            // There is no live owner left after this consuming call. Keep the
+            // database usable even if the engine rejected the finishing SQL.
+            let _ = connection.execute("ROLLBACK");
+        }
+        put_connection(&self.slot, connection)?;
+        result.map(|_| ())
+    }
+
+    /// Commit the metadata transaction.
     pub fn commit(self) -> Result<(), FakeDbError> {
-        self.transaction.commit().map_err(FakeDbError::database)
+        self.finish("COMMIT")
     }
 
-    /// Finish a C `db_rollback` equivalent.
+    /// Roll back the metadata transaction.
     pub fn rollback(self) -> Result<(), FakeDbError> {
-        self.transaction.abort().map_err(FakeDbError::database)
+        self.finish("ROLLBACK")
     }
 
-    /// `path_get_inode`, including C's zero sentinel for a missing path.
+    /// `path_get_inode`.
     pub fn path_get_inode(&self, path: &[u8]) -> Result<u64, FakeDbError> {
         let path = Self::path(path)?;
-        let paths = self
-            .transaction
-            .open_table(PATHS)
-            .map_err(FakeDbError::database)?;
-        let inode = {
-            let value = paths.get(path).map_err(FakeDbError::database)?;
-            value.map(|inode| inode.value())
-        };
-        Ok(inode.unwrap_or(0))
+        self.with_connection(|connection| {
+            let rows = query_rows(
+                connection,
+                &format!("SELECT inode FROM paths WHERE path={}", blob_literal(path)),
+            )?;
+            let Some(inode) = first_integer(rows)? else {
+                return Ok(0);
+            };
+            Ok(inode as u64)
+        })
     }
 
     /// `path_read_stat`.
     pub fn path_read_stat(&self, path: &[u8]) -> Result<Option<MetadataRow>, FakeDbError> {
-        let path = Self::path(path)?;
-        let inode = {
-            let paths = self
-                .transaction
-                .open_table(PATHS)
-                .map_err(FakeDbError::database)?;
-            let value = paths.get(path).map_err(FakeDbError::database)?;
-            value.map(|value| value.value())
-        };
-        let Some(inode) = inode else {
+        let inode = self.path_get_inode(path)?;
+        if inode == 0 {
+            return Ok(None);
+        }
+        let Some(stat) = self.inode_read_stat_if_exist(inode)? else {
+            // The C natural join also hides a malformed dangling path mapping.
             return Ok(None);
         };
-        let stats = self
-            .transaction
-            .open_table(STATS)
-            .map_err(FakeDbError::database)?;
-        let Some(stat) = stats.get(&inode).map_err(FakeDbError::database)? else {
-            // C's NATURAL JOIN hides dangling path entries rather than yielding
-            // an inode with invalid stat data.
-            return Ok(None);
-        };
-        Ok(Some(MetadataRow {
-            inode,
-            stat: IshStat::from_le_bytes(stat.value())?,
-        }))
+        Ok(Some(MetadataRow { inode, stat }))
     }
 
-    /// `path_create`, including SQLite's positive implicit rowid allocation.
+    /// `path_create`.
     pub fn path_create(&self, path: &[u8], stat: IshStat) -> Result<u64, FakeDbError> {
         let path = Self::path(path)?;
-        let inode = {
-            let stats = self
-                .transaction
-                .open_table(STATS)
-                .map_err(FakeDbError::database)?;
-            let last = stats.last().map_err(FakeDbError::database)?;
-            match last {
-                Some((last, _)) => last
-                    .value()
-                    .checked_add(1)
-                    .ok_or(FakeDbError::InodeExhausted)?,
-                None => 1,
+        let stat = stat.to_le_bytes();
+        self.with_connection(|connection| {
+            execute(
+                connection,
+                &format!("INSERT INTO stats (stat) VALUES ({})", blob_literal(&stat)),
+            )?;
+            let inode = connection.last_insert_rowid();
+            if inode <= 0 {
+                return Err(FakeDbError::InodeExhausted);
             }
-        };
-        let bytes = stat.to_le_bytes();
-        {
-            let mut stats = self
-                .transaction
-                .open_table(STATS)
-                .map_err(FakeDbError::database)?;
-            stats
-                .insert(&inode, bytes.as_slice())
-                .map_err(FakeDbError::database)?;
-        }
-        {
-            let mut paths = self
-                .transaction
-                .open_table(PATHS)
-                .map_err(FakeDbError::database)?;
-            // `Table::insert` replaces the old path mapping, matching SQLite
-            // INSERT OR REPLACE while deliberately leaving an old stat orphan.
-            paths.insert(path, &inode).map_err(FakeDbError::database)?;
-        }
-        Ok(inode)
+            execute(
+                connection,
+                &format!(
+                    "INSERT OR REPLACE INTO paths (path, inode) VALUES ({}, {})",
+                    blob_literal(path),
+                    inode
+                ),
+            )?;
+            Ok(inode as u64)
+        })
     }
 
     /// `inode_read_stat_if_exist`.
     pub fn inode_read_stat_if_exist(&self, inode: u64) -> Result<Option<IshStat>, FakeDbError> {
-        let stats = self
-            .transaction
-            .open_table(STATS)
-            .map_err(FakeDbError::database)?;
-        let stat = stats.get(&inode).map_err(FakeDbError::database)?;
-        match stat {
-            Some(stat) => Ok(Some(IshStat::from_le_bytes(stat.value())?)),
-            None => Ok(None),
-        }
+        self.with_connection(|connection| {
+            let rows = query_rows(
+                connection,
+                &format!(
+                    "SELECT stat FROM stats WHERE inode={}",
+                    sqlite_integer(inode)
+                ),
+            )?;
+            let Some(row) = rows.into_iter().next() else {
+                return Ok(None);
+            };
+            let value = one_column(row)?;
+            Ok(Some(stat_from_value(&value)?))
+        })
     }
 
     /// Safe form of C's `inode_read_stat_or_die`.
@@ -451,23 +508,19 @@ impl FakeDbTransaction {
 
     /// `inode_write_stat`.
     pub fn inode_write_stat(&self, inode: u64, stat: IshStat) -> Result<(), FakeDbError> {
-        let bytes = stat.to_le_bytes();
-        let mut stats = self
-            .transaction
-            .open_table(STATS)
-            .map_err(FakeDbError::database)?;
-        let exists = {
-            let value = stats.get(&inode).map_err(FakeDbError::database)?;
-            value.is_some()
-        };
-        // C uses UPDATE ... WHERE inode = ?, so a stale inode is a no-op—not
-        // an implicit INSERT into stats.
-        if exists {
-            stats
-                .insert(&inode, bytes.as_slice())
-                .map_err(FakeDbError::database)?;
-        }
-        Ok(())
+        let stat = stat.to_le_bytes();
+        self.with_connection(|connection| {
+            // C uses UPDATE ... WHERE inode = ?, so a stale inode is a
+            // no-op—not an implicit INSERT into stats.
+            execute(
+                connection,
+                &format!(
+                    "UPDATE stats SET stat={} WHERE inode={}",
+                    blob_literal(&stat),
+                    sqlite_integer(inode)
+                ),
+            )
+        })
     }
 
     /// `path_link`.
@@ -478,12 +531,16 @@ impl FakeDbTransaction {
         if inode == 0 {
             return Err(FakeDbError::MissingPath);
         }
-        let mut paths = self
-            .transaction
-            .open_table(PATHS)
-            .map_err(FakeDbError::database)?;
-        paths.insert(dst, &inode).map_err(FakeDbError::database)?;
-        Ok(())
+        self.with_connection(|connection| {
+            execute(
+                connection,
+                &format!(
+                    "INSERT OR REPLACE INTO paths (path, inode) VALUES ({}, {})",
+                    blob_literal(dst),
+                    sqlite_integer(inode)
+                ),
+            )
+        })
     }
 
     /// `path_unlink`.
@@ -493,161 +550,273 @@ impl FakeDbTransaction {
         if inode == 0 {
             return Err(FakeDbError::MissingPath);
         }
-        let mut paths = self
-            .transaction
-            .open_table(PATHS)
-            .map_err(FakeDbError::database)?;
-        paths.remove(path).map_err(FakeDbError::database)?;
-        Ok(inode)
+        self.with_connection(|connection| {
+            execute(
+                connection,
+                &format!("DELETE FROM paths WHERE path={}", blob_literal(path)),
+            )?;
+            Ok(inode)
+        })
     }
 
     /// `path_rename` with C's exact path-component boundary rule.
     ///
     /// Upstream's SQLite condition selects `src` and descendants beginning
     /// `src/`; it does not rename a sibling such as `/apple` when `src` is
-    /// `/app`. `insert` replacement preserves `UPDATE OR REPLACE` behavior
-    /// for an existing destination while stat records remain orphaned until a
-    /// cleanup call, as in C.
+    /// `/app`. Replacing an existing destination leaves its old stat record
+    /// orphaned until a cleanup call, as in C.
     pub fn path_rename(&self, src: &[u8], dst: &[u8]) -> Result<(), FakeDbError> {
         let src = Self::path(src)?;
         let dst = Self::path(dst)?;
-        let moved = {
-            let paths = self
-                .transaction
-                .open_table(PATHS)
-                .map_err(FakeDbError::database)?;
-            let mut moved = Vec::new();
-            for row in paths.iter().map_err(FakeDbError::database)? {
-                let (old_path, inode) = row.map_err(FakeDbError::database)?;
-                let old_path = old_path.value();
-                if !rename_matches(old_path, src) {
-                    continue;
-                }
+        let mut moved = self
+            .all_paths()?
+            .into_iter()
+            .filter(|(old_path, _)| rename_matches(old_path, src))
+            .map(|(old_path, inode)| {
                 let mut new_path = dst.to_vec();
                 new_path.extend_from_slice(&old_path[src.len()..]);
-                moved.push((old_path.to_vec(), new_path, inode.value()));
+                (old_path, new_path, inode)
+            })
+            .collect::<Vec<_>>();
+        // SQLite's transformed source paths are injective. Sorting keeps the
+        // replacement result stable independently of the table scan plan.
+        moved.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        self.with_connection(|connection| {
+            for (old_path, _, _) in &moved {
+                execute(
+                    connection,
+                    &format!("DELETE FROM paths WHERE path={}", blob_literal(old_path)),
+                )?;
             }
-            moved
-        };
-        let mut paths = self
-            .transaction
-            .open_table(PATHS)
-            .map_err(FakeDbError::database)?;
-        // SQLite's transformed source paths are injective. Remove all source
-        // rows before replacing collisions at destinations, which gives the
-        // same result for the legal rename inputs fed by fake.c.
-        for (old_path, _, _) in &moved {
-            paths
-                .remove(old_path.as_slice())
-                .map_err(FakeDbError::database)?;
-        }
-        for (_, new_path, inode) in moved {
-            paths
-                .insert(new_path.as_slice(), &inode)
-                .map_err(FakeDbError::database)?;
-        }
-        Ok(())
+            for (_, new_path, inode) in moved {
+                execute(
+                    connection,
+                    &format!(
+                        "INSERT OR REPLACE INTO paths (path, inode) VALUES ({}, {})",
+                        blob_literal(&new_path),
+                        sqlite_integer(inode)
+                    ),
+                )?;
+            }
+            Ok(())
+        })
     }
 
     /// The `path_from_inode` query used by `fakefs_open_inode`.
     pub fn paths_for_inode(&self, inode: u64) -> Result<Vec<Vec<u8>>, FakeDbError> {
-        let paths = self
-            .transaction
-            .open_table(PATHS)
-            .map_err(FakeDbError::database)?;
-        let mut result = Vec::new();
-        for row in paths.iter().map_err(FakeDbError::database)? {
-            let (path, mapped_inode) = row.map_err(FakeDbError::database)?;
-            if mapped_inode.value() == inode {
-                result.push(path.value().to_vec());
-            }
-        }
-        Ok(result)
+        let mut paths = self
+            .all_paths()?
+            .into_iter()
+            .filter_map(|(path, mapped_inode)| (mapped_inode == inode).then_some(path))
+            .collect::<Vec<_>>();
+        // C's `inode_to_path` index returns this query in byte-path order.
+        paths.sort_unstable();
+        Ok(paths)
     }
 
     /// The cleanup query prepared by C `fake_db_init`.
     pub fn try_cleanup_inode(&self, inode: u64) -> Result<(), FakeDbError> {
         if self.paths_for_inode(inode)?.is_empty() {
-            let mut stats = self
-                .transaction
-                .open_table(STATS)
-                .map_err(FakeDbError::database)?;
-            stats.remove(&inode).map_err(FakeDbError::database)?;
+            self.with_connection(|connection| {
+                execute(
+                    connection,
+                    &format!("DELETE FROM stats WHERE inode={}", sqlite_integer(inode)),
+                )
+            })?;
         }
         Ok(())
     }
 
-    /// Delete every stat record with no path mapping, as C init does.
+    /// Delete every stat record with no path mapping, as C initialization does.
     pub fn clear_orphans(&self) -> Result<(), FakeDbError> {
-        let referenced = {
-            let paths = self
-                .transaction
-                .open_table(PATHS)
-                .map_err(FakeDbError::database)?;
-            let mut referenced = BTreeSet::new();
-            for row in paths.iter().map_err(FakeDbError::database)? {
-                let (_, inode) = row.map_err(FakeDbError::database)?;
-                referenced.insert(inode.value());
+        let referenced = self
+            .all_paths()?
+            .into_iter()
+            .map(|(_, inode)| inode)
+            .collect::<BTreeSet<_>>();
+        let stale = self
+            .all_stats()?
+            .into_iter()
+            .map(|(inode, _)| inode)
+            .filter(|inode| !referenced.contains(inode))
+            .collect::<Vec<_>>();
+        self.with_connection(|connection| {
+            for inode in stale {
+                execute(
+                    connection,
+                    &format!("DELETE FROM stats WHERE inode={}", sqlite_integer(inode)),
+                )?;
             }
-            referenced
-        };
-        let stale = {
-            let stats = self
-                .transaction
-                .open_table(STATS)
-                .map_err(FakeDbError::database)?;
-            let mut stale = Vec::new();
-            for row in stats.iter().map_err(FakeDbError::database)? {
-                let (inode, _) = row.map_err(FakeDbError::database)?;
-                if !referenced.contains(&inode.value()) {
-                    stale.push(inode.value());
-                }
-            }
-            stale
-        };
-        let mut stats = self
-            .transaction
-            .open_table(STATS)
-            .map_err(FakeDbError::database)?;
-        for inode in stale {
-            stats.remove(&inode).map_err(FakeDbError::database)?;
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Hash the ordered logical stat and path tables like the local C harness.
     pub fn logical_hash(&self) -> Result<u64, FakeDbError> {
         let mut hash = 0xcbf2_9ce4_8422_2325u64;
         hash_bytes(&mut hash, b"stats");
-        {
-            let stats = self
-                .transaction
-                .open_table(STATS)
-                .map_err(FakeDbError::database)?;
-            for row in stats.iter().map_err(FakeDbError::database)? {
-                let (inode, stat) = row.map_err(FakeDbError::database)?;
-                hash_u64(&mut hash, inode.value());
-                let stat = stat.value();
-                hash_u32(&mut hash, stat.len() as u32);
-                hash_bytes(&mut hash, stat);
-            }
+        for (inode, stat) in self.all_stats()? {
+            hash_u64(&mut hash, inode);
+            let stat = stat.to_le_bytes();
+            hash_u32(&mut hash, stat.len() as u32);
+            hash_bytes(&mut hash, &stat);
         }
         hash_bytes(&mut hash, b"paths");
-        {
-            let paths = self
-                .transaction
-                .open_table(PATHS)
-                .map_err(FakeDbError::database)?;
-            for row in paths.iter().map_err(FakeDbError::database)? {
-                let (path, inode) = row.map_err(FakeDbError::database)?;
-                let path = path.value();
-                hash_u32(&mut hash, path.len() as u32);
-                hash_bytes(&mut hash, path);
-                hash_u64(&mut hash, inode.value());
-            }
+        for (path, inode) in self.all_paths()? {
+            hash_u32(&mut hash, path.len() as u32);
+            hash_bytes(&mut hash, &path);
+            hash_u64(&mut hash, inode);
         }
         Ok(hash)
     }
+
+    fn all_stats(&self) -> Result<Vec<(u64, IshStat)>, FakeDbError> {
+        self.with_connection(|connection| {
+            let rows = query_rows(connection, "SELECT inode, stat FROM stats")?;
+            let mut stats = Vec::with_capacity(rows.len());
+            for row in rows {
+                if row.len() != 2 {
+                    return Err(FakeDbError::Database(
+                        "SQLite stats query returned the wrong column count".into(),
+                    ));
+                }
+                stats.push((
+                    integer_from_value(&row[0])? as u64,
+                    stat_from_value(&row[1])?,
+                ));
+            }
+            stats.sort_unstable_by_key(|(inode, _)| *inode);
+            Ok(stats)
+        })
+    }
+
+    fn all_paths(&self) -> Result<Vec<(Vec<u8>, u64)>, FakeDbError> {
+        self.with_connection(|connection| {
+            let rows = query_rows(connection, "SELECT path, inode FROM paths")?;
+            let mut paths = Vec::with_capacity(rows.len());
+            for row in rows {
+                if row.len() != 2 {
+                    return Err(FakeDbError::Database(
+                        "SQLite paths query returned the wrong column count".into(),
+                    ));
+                }
+                paths.push((
+                    blob_from_value(&row[0])?.to_vec(),
+                    integer_from_value(&row[1])? as u64,
+                ));
+            }
+            paths.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+            Ok(paths)
+        })
+    }
+}
+
+impl Drop for FakeDbTransaction {
+    fn drop(&mut self) {
+        let Some(mut connection) = self.connection.get_mut().take() else {
+            return;
+        };
+        // C callers must explicitly roll back, while Rust's RAII path must not
+        // accidentally commit a partially failed metadata operation.
+        let _ = connection.execute("ROLLBACK");
+        let _ = put_connection(&self.slot, connection);
+    }
+}
+
+fn database_path(path: &Path) -> Result<&str, FakeDbError> {
+    path.to_str().ok_or(FakeDbError::NonUtf8DatabasePath)
+}
+
+fn take_connection(slot: &ConnectionSlot) -> Result<Connection, FakeDbError> {
+    slot.borrow_mut()
+        .take()
+        .ok_or(FakeDbError::TransactionActive)
+}
+
+fn put_connection(slot: &ConnectionSlot, database: Connection) -> Result<(), FakeDbError> {
+    let mut connection = slot.borrow_mut();
+    if connection.is_some() {
+        return Err(FakeDbError::Database(
+            "attempted to return a second SQLite connection".into(),
+        ));
+    }
+    *connection = Some(database);
+    Ok(())
+}
+
+fn execute(connection: &mut Connection, sql: &str) -> Result<(), FakeDbError> {
+    connection
+        .execute(sql)
+        .map(|_| ())
+        .map_err(FakeDbError::database)
+}
+
+fn query_rows(connection: &Connection, sql: &str) -> Result<Vec<Vec<Value>>, FakeDbError> {
+    connection
+        .query(sql)
+        .map(|result| result.rows)
+        .map_err(FakeDbError::database)
+}
+
+fn scalar_integer(connection: &Connection, sql: &str) -> Result<Option<i64>, FakeDbError> {
+    first_integer(query_rows(connection, sql)?)
+}
+
+fn first_integer(rows: Vec<Vec<Value>>) -> Result<Option<i64>, FakeDbError> {
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+    integer_from_value(&one_column(row)?).map(Some)
+}
+
+fn one_column(row: Vec<Value>) -> Result<Value, FakeDbError> {
+    match row.len() {
+        1 => Ok(row.into_iter().next().unwrap()),
+        columns => Err(FakeDbError::Database(format!(
+            "SQLite query returned {columns} columns instead of one"
+        ))),
+    }
+}
+
+fn integer_from_value(value: &Value) -> Result<i64, FakeDbError> {
+    match value {
+        Value::Integer(value) => Ok(*value),
+        other => Err(FakeDbError::Database(format!(
+            "SQLite metadata integer had unexpected value {other:?}"
+        ))),
+    }
+}
+
+fn blob_from_value(value: &Value) -> Result<&[u8], FakeDbError> {
+    match value {
+        Value::Blob(value) => Ok(value),
+        other => Err(FakeDbError::Database(format!(
+            "SQLite metadata blob had unexpected value {other:?}"
+        ))),
+    }
+}
+
+fn stat_from_value(value: &Value) -> Result<IshStat, FakeDbError> {
+    IshStat::from_le_bytes(blob_from_value(value)?)
+}
+
+fn sqlite_integer(value: u64) -> i64 {
+    // `fake-db.c` passes inode_t through sqlite3_bind_int64. Preserve that C
+    // cast for out-of-range caller input even though normal implicit rowids are
+    // positive signed SQLite integers.
+    value as i64
+}
+
+fn blob_literal(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut literal = String::with_capacity(3 + bytes.len() * 2);
+    literal.push_str("X'");
+    for byte in bytes {
+        literal.push(HEX[usize::from(*byte >> 4)] as char);
+        literal.push(HEX[usize::from(*byte & 0x0f)] as char);
+    }
+    literal.push('\'');
+    literal
 }
 
 fn rename_matches(path: &[u8], src: &[u8]) -> bool {
@@ -675,7 +844,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
-    fn redb_metadata_round_trips_transactions_links_and_prefix_renames() {
+    fn sqlite_metadata_round_trips_transactions_links_and_prefix_renames() {
         let db = FakeDb::open_in_memory().unwrap();
         let first = IshStat {
             mode: 0o100644,
@@ -714,7 +883,7 @@ mod tests {
     }
 
     #[test]
-    fn stat_layout_orphan_cleanup_and_persistence_are_pure_rust() {
+    fn stat_layout_orphan_cleanup_persistence_and_sqlite_header_are_pure_rust() {
         let stat = IshStat {
             mode: 0x1122_3344,
             uid: 0x5566_7788,
@@ -745,18 +914,26 @@ mod tests {
                 Err(FakeDbError::InteriorNulPath)
             );
         }
+        assert_eq!(&std::fs::read(&path).unwrap()[..16], b"SQLite format 3\0");
         let reopened = FakeDb::open(&path).unwrap();
         assert_eq!(reopened.path_get_inode(b"/one").unwrap(), 0);
         drop(reopened);
-        std::fs::remove_file(path).unwrap();
+        remove_database_files(&path);
     }
 
     fn temporary_database_path() -> std::path::PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         std::env::temp_dir().join(format!(
-            "ish-rs-redb-{}-{}.redb",
+            "ish-rs-graphitesql-{}-{}.sqlite",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ))
+    }
+
+    fn remove_database_files(path: &Path) {
+        let path = path.to_str().unwrap();
+        for suffix in ["", "-journal", "-wal"] {
+            let _ = std::fs::remove_file(format!("{path}{suffix}"));
+        }
     }
 }

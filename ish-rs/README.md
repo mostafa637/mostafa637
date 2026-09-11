@@ -32,7 +32,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `uname.rs`   | `kernel/uname.c`      | 81      | **done** — guest `uname`/`sysinfo` layouts, C string/truncation behavior, and explicit hostname/uptime/memory host data; 10 deterministic C operations verified byte-for-byte |
 | `ipc.rs`     | `kernel/ipc.c`        | 6       | **done** — the complete legacy System V IPC multiplexor `_ENOSYS` compatibility stub; 5 raw C calls verified |
 | `log.rs`     | `kernel/log.c` + `util/fifo.c` | 250 | **done** — one-MiB printk FIFO, complete-line host sink, and old `sys_syslog` ABI; 31 C operations and all defined outputs verified |
-| `fake_db.rs` | `fs/fake-db.c` | 289 | **metadata API ported** — vendored pure-Rust `redb` storage; 40 C/SQLite operations and 41 snapshots verified; import/migration/rebuild integration follows |
+| `fake_db.rs` | `fs/fake-db.c` | 289 | **metadata API ported** — vendored pure-Rust SQLite-3-compatible `graphitesql`; 40 C/SQLite operations and 41 snapshots verified; migration/rebuild integration follows |
 | `task.rs`    | `kernel/task.{h,c}`   | 346     | **foundation ported** — PID table, parent/child links, task creation/destruction, mm attachment, task credentials/names, thread-group topology, zombie visibility and explicit current-task selection |
 | `group.rs`   | `kernel/group.c`      | 131     | **done** — `setpgid`/`getpgid`, `setsid`/`getsid`, session and process-group membership rules |
 | `getset.rs`  | `kernel/getset.c`     | 202     | **done** — PID/UID/GID getters and setters, supplementary groups, capability stubs and personality |
@@ -393,8 +393,9 @@ The reference generator links the real `kernel/memory.c`, so it needs
 `tools/stub-include/sqlite3.h`: `memory.c` → `fs/fd.h` → `fs/fake-db.h` →
 `<sqlite3.h>`. It uses only opaque pointer types; the same small compatibility
 header also lets the *C-only* fake-db oracle link unmodified `fake-db.c` where a
-host SQLite development header is absent. The Rust runtime itself uses pure-Rust
-`redb`, not this header or SQLite. It also links the real `kernel/errno.c` (whose `EPIPE` path pulls in `current` and
+host SQLite development header is absent. The Rust runtime itself uses the
+pure-Rust `graphitesql` SQLite implementation, not this header or native SQLite.
+It also links the real `kernel/errno.c` (whose `EPIPE` path pulls in `current` and
 `send_signal`, stubbed with counters) rather than faking the host→guest errno
 table. The generator refuses to emit a fixture unless both counters are still
 zero, i.e. unless every stub stayed off the path.
@@ -694,31 +695,35 @@ $ cargo test --test log_differential
 … 31 log/syslog operations and all C-derived output bytes matched exactly
 ```
 
-### Pure-Rust fake filesystem database
+### Pure-Rust SQLite fake filesystem database
 
 `fake_db.rs` ports the reusable metadata operations in `fs/fake-db.c` over
-[`redb`](vendor/redb/), a vendored pure-Rust ACID B-tree library (v3.1.2). It
-has no `rusqlite`, SQLite FFI, C/C++ database engine, registry download, or
-native database linker dependency: `cargo tree --offline` resolves only
-`ish-emu` and the local `redb` package. `FakeDb` persists stat records and byte paths in separate
-tables, while `FakeDbTransaction` maps iSH's deferred/immediate transaction
-sequence to an atomic redb transaction. The port preserves implicit positive
-inode allocation, `insert or replace` orphaning, component-aware rename, links,
-missing-path zero/error behavior, `path_from_inode`, rollback, and cleanup.
+[`graphitesql`](vendor/graphitesql/), a vendored, from-scratch pure-Rust SQLite
+3 engine (v0.1.7). Its narrowed profile has **zero external Cargo dependencies**
+and contains neither SQLite C source nor a native binding, `rusqlite`,
+`libsqlite3-sys`, `extern "C"`, nor an SQLite linker dependency. `cargo tree
+--offline` resolves only `ish-emu` and the local `graphitesql` package.
 
-The backing file is intentionally redb rather than upstream SQLite's `meta.db`:
-that is what makes the runtime database stack pure Rust. Importing/migrating an
-existing SQLite fakefs image and the host-directory rebuild logic remain a later
-filesystem-layer conversion, rather than being silently faked.
+Unlike the earlier generic key-value backing store, `graphitesql` reads and
+writes SQLite version-3 database files. `FakeDb` creates the current iSH
+`meta`/`stats`/`paths` schema, including its `user_version = 3`, and
+`FakeDbTransaction` maps iSH's deferred/immediate sequence to an owned
+pure-Rust SQLite transaction. The port preserves implicit positive inode
+allocation, `insert or replace` orphaning, component-aware rename, links,
+missing-path zero/error behavior, `path_from_inode`, rollback, and cleanup.
+Current-version iSH metadata files can be opened through this SQLite-compatible
+engine; migration of older schemas and host-directory rebuild remain explicit
+future filesystem-layer work.
 
 The C oracle still uses the original C SQLite implementation **only locally**
 to establish compatibility. `tools/fake-db-dump.c` compiles unmodified
 `fs/fake-db.c`, creates its current schema, and records 40 operations plus 41
-logical-table snapshots. The Rust replay uses redb, so it detects a behavior
-mismatch across different database engines instead of comparing two SQLite
-calls. It covers create/read/write, links, C's `UPDATE`-on-missing no-op,
-rename descendants without renaming `/apple`, replace collisions and orphan
-sweeps, path-from-inode lookup, both transaction modes, and rollback.
+logical-table snapshots. The Rust replay uses independently implemented
+pure-Rust SQLite, so it detects a behavioral mismatch instead of comparing two
+calls to native SQLite. It covers create/read/write, links, C's
+`UPDATE`-on-missing no-op, rename descendants without renaming `/apple`, replace
+collisions and orphan sweeps, path-from-inode lookup, both transaction modes,
+and rollback.
 
 ```console
 $ ISH_SRC=/path/to/ish ./tools/gen_fake_db_reference.sh
@@ -758,7 +763,7 @@ ish-rs/
 │   ├── errno_table.rs          # generated host->guest errno table (do not edit)
 │   ├── ipc.rs                  # kernel/ipc.c
 │   ├── log.rs                  # kernel/log.c + util/fifo.c
-│   ├── fake_db.rs              # fs/fake-db.c metadata over pure-Rust redb
+│   ├── fake_db.rs              # fs/fake-db.c metadata over pure-Rust SQLite
 │   ├── resource.rs             # kernel/resource.{h,c}
 │   ├── random.rs               # kernel/random.{h,c}
 │   ├── uname.rs                # kernel/uname.c
@@ -802,7 +807,7 @@ ish-rs/
 │       ├── log_reference.txt   # 31 log/syslog operations from the C
 │       └── fake_db_reference.txt # 40 fake-db operations + table states from C
 ├── vendor/
-│   └── redb/                   # v3.1.2 pure-Rust embedded database library
+│   └── graphitesql/            # v0.1.7 pure-Rust SQLite-3-compatible library
 └── tools/
     ├── f80-dump.c              # float80 reference generator (not part of iSH)
     ├── fpu-dump.c              # cpu/fpu reference generator

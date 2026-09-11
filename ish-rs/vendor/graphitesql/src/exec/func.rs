@@ -1,0 +1,2852 @@
+//! Built-in scalar functions.
+//!
+//! Aggregate functions (`count`, `sum`, …) are handled by the executor, which
+//! folds over rows; this module covers the per-row scalar functions. The set is
+//! a useful core and grows toward SQLite's full library (`func.c`, `date.c`).
+
+use super::eval::{self, EvalCtx};
+use crate::error::{Error, Result};
+use crate::sql::ast::{Expr, Literal};
+use crate::value::Value;
+use alloc::string::String;
+use alloc::vec::Vec;
+
+/// SQLite's default `SQLITE_MAX_LENGTH`: the largest string/blob a single value
+/// may hold. `zeroblob`/`randomblob` error with "string or blob too big" past it
+/// rather than attempting a multi-gigabyte allocation.
+const MAX_BLOB_LEN: usize = 1_000_000_000;
+
+/// Lower-case hexadecimal digits, for rendering the `sha1()` digest as text
+/// (sqlite's `sha1()` returns the hash as lower-case hex, like its extension).
+const HEX_DIGITS: [u8; 16] = *b"0123456789abcdef";
+
+/// Names that *can* be aggregates (used for catalog/name checks).
+pub fn is_aggregate(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "count"
+            | "sum"
+            | "total"
+            | "avg"
+            | "min"
+            | "max"
+            | "group_concat"
+            | "geopoly_group_bbox"
+            | "median"
+            | "percentile"
+            | "percentile_cont"
+            | "percentile_disc"
+            | "decimal_sum"
+    )
+}
+
+/// Whether a *specific call* is an aggregate. `min`/`max` are scalar with 2+
+/// arguments and aggregate with exactly one (or `*`), matching SQLite.
+pub fn is_aggregate_call(name: &str, nargs: usize, star: bool) -> bool {
+    match name.to_ascii_lowercase().as_str() {
+        "count" | "sum" | "total" | "avg" | "group_concat" | "string_agg" => true,
+        // The JSON group aggregates have no scalar counterpart, so they are
+        // aggregates at any argument count — a wrong count must reach the
+        // aggregate arity guard ("wrong number of arguments"), not fall through
+        // to scalar dispatch ("no such function").
+        "json_group_array" | "jsonb_group_array" | "json_group_object" | "jsonb_group_object" => {
+            true
+        }
+        // geopoly_group_bbox has no scalar counterpart, so it is an aggregate at
+        // any argument count (the arity guard reports a wrong count).
+        "geopoly_group_bbox" => true,
+        // The percentile family (`median`, `percentile`, `percentile_cont`,
+        // `percentile_disc`) has no scalar counterpart, so each is an aggregate
+        // at any argument count — a wrong count then reaches the aggregate arity
+        // guard rather than falling through to "no such function".
+        "median" | "percentile" | "percentile_cont" | "percentile_disc" => true,
+        // `decimal_sum` (SQLite's `decimal` extension) is aggregate-only, so it
+        // is an aggregate at any argument count — a wrong count reaches the
+        // aggregate arity guard rather than falling through to "no such function".
+        "decimal_sum" => true,
+        "min" | "max" => star || nargs == 1,
+        _ => false,
+    }
+}
+
+/// One SQL function graphite registers, as reported by `PRAGMA function_list`:
+/// `(name, kind, narg)`. `kind` is `'s'` scalar, `'a'` aggregate, `'w'` window;
+/// `narg` is the declared argument count or `-1` for a variadic/optional-arg
+/// function. graphite has no runtime `FuncDef` registry (functions are dispatched
+/// by a `match` in [`eval_scalar`] and folded by the executor), so this is the
+/// hand-maintained enumeration of that same set — the honest analogue of sqlite's
+/// `aBuiltinFunc[]`. Kept in step with the dispatch arms below.
+pub type FunctionListEntry = (&'static str, char, i32);
+
+/// The functions graphite actually implements, one entry per `(name, kind)`.
+/// Consumed by `PRAGMA function_list`. `min`/`max` appear twice (scalar with 2+
+/// args, aggregate with one), mirroring sqlite. Deliberately excludes trigger-only
+/// `RAISE()`. `narg` uses `-1` for any variadic/optional-arg function rather than
+/// reproducing sqlite's internal negative-arity quirks (`coalesce` is `-1`, not
+/// `-4`). Not sorted here — [`function_list`] sorts by name.
+const FUNCTION_LIST: &[FunctionListEntry] = &[
+    // --- scalar ---
+    // The JSON arrow operators and the `current_*` date/time keywords are
+    // handled specially by the parser/evaluator (not the scalar dispatch), but
+    // sqlite still reports them in `pragma_function_list`, so list them here for
+    // parity (the runtime sort places them correctly).
+    ("->", 's', 2),
+    ("->>", 's', 2),
+    ("current_date", 's', 0),
+    ("current_time", 's', 0),
+    ("current_timestamp", 's', 0),
+    ("abs", 's', 1),
+    ("acos", 's', 1),
+    ("acosh", 's', 1),
+    ("asin", 's', 1),
+    ("asinh", 's', 1),
+    ("atan", 's', 1),
+    ("atan2", 's', 2),
+    ("atanh", 's', 1),
+    ("base64", 's', 1),
+    ("base85", 's', 1),
+    ("ceil", 's', 1),
+    ("ceiling", 's', 1),
+    ("changes", 's', 0),
+    ("char", 's', -1),
+    ("coalesce", 's', -1),
+    ("concat", 's', -1),
+    ("concat_ws", 's', -1),
+    ("cos", 's', 1),
+    ("cosh", 's', 1),
+    ("date", 's', -1),
+    ("datetime", 's', -1),
+    ("decimal", 's', 1),
+    ("decimal_add", 's', 2),
+    ("decimal_cmp", 's', 2),
+    ("decimal_exp", 's', 1),
+    ("decimal_mul", 's', 2),
+    ("decimal_pow2", 's', 1),
+    ("decimal_sub", 's', 2),
+    ("decimal_sum", 'a', 1),
+    ("degrees", 's', 1),
+    ("exp", 's', 1),
+    ("floor", 's', 1),
+    ("format", 's', -1),
+    ("geopoly_area", 's', 1),
+    ("geopoly_bbox", 's', 1),
+    ("geopoly_blob", 's', 1),
+    ("geopoly_ccw", 's', 1),
+    ("geopoly_contains_point", 's', 3),
+    ("geopoly_json", 's', 1),
+    ("geopoly_overlap", 's', 2),
+    ("geopoly_regular", 's', 4),
+    ("geopoly_svg", 's', -1),
+    ("geopoly_within", 's', 2),
+    ("geopoly_xform", 's', 7),
+    ("glob", 's', 2),
+    ("hex", 's', 1),
+    // `ieee754` is registered at both arities (decompose vs recompose), like
+    // sqlite; the executor dispatches on `args.len()`.
+    ("ieee754", 's', 1),
+    ("ieee754", 's', 2),
+    ("ieee754_exponent", 's', 1),
+    ("ieee754_from_blob", 's', 1),
+    ("ieee754_inc", 's', 2),
+    ("ieee754_mantissa", 's', 1),
+    ("ieee754_to_blob", 's', 1),
+    ("if", 's', 3),
+    ("ifnull", 's', 2),
+    ("iif", 's', 3),
+    ("instr", 's', 2),
+    ("json", 's', 1),
+    ("json_array", 's', -1),
+    ("json_array_length", 's', -1),
+    ("json_error_position", 's', 1),
+    ("json_extract", 's', -1),
+    ("json_insert", 's', -1),
+    ("json_object", 's', -1),
+    ("json_patch", 's', 2),
+    ("json_pretty", 's', -1),
+    ("json_quote", 's', 1),
+    ("json_remove", 's', -1),
+    ("json_replace", 's', -1),
+    ("json_set", 's', -1),
+    ("json_type", 's', -1),
+    ("json_valid", 's', -1),
+    ("jsonb", 's', 1),
+    ("jsonb_array", 's', -1),
+    ("jsonb_extract", 's', -1),
+    ("jsonb_insert", 's', -1),
+    ("jsonb_object", 's', -1),
+    ("jsonb_patch", 's', 2),
+    ("jsonb_remove", 's', -1),
+    ("jsonb_replace", 's', -1),
+    ("jsonb_set", 's', -1),
+    ("julianday", 's', -1),
+    ("last_insert_rowid", 's', 0),
+    ("length", 's', 1),
+    ("like", 's', -1),
+    ("likelihood", 's', 2),
+    ("likely", 's', 1),
+    ("ln", 's', 1),
+    ("log", 's', -1),
+    ("log10", 's', 1),
+    ("log2", 's', 1),
+    ("lower", 's', 1),
+    ("ltrim", 's', -1),
+    ("max", 's', -1),
+    ("min", 's', -1),
+    ("mod", 's', 2),
+    ("nullif", 's', 2),
+    ("octet_length", 's', 1),
+    ("pi", 's', 0),
+    ("pow", 's', 2),
+    ("power", 's', 2),
+    ("printf", 's', -1),
+    ("quote", 's', 1),
+    ("radians", 's', 1),
+    ("random", 's', 0),
+    ("randomblob", 's', 1),
+    ("regexp", 's', 2),
+    ("replace", 's', 3),
+    ("round", 's', -1),
+    ("rtrim", 's', -1),
+    ("sha1", 's', 1),
+    // `sha3` is registered at both arities (X and X,size), like sqlite.
+    ("sha3", 's', 1),
+    ("sha3", 's', 2),
+    ("sign", 's', 1),
+    ("sin", 's', 1),
+    ("sinh", 's', 1),
+    ("soundex", 's', 1),
+    ("sqlite_compileoption_get", 's', 1),
+    ("sqlite_compileoption_used", 's', 1),
+    ("sqlite_source_id", 's', 0),
+    ("sqlite_version", 's', 0),
+    ("sqrt", 's', 1),
+    ("strftime", 's', -1),
+    ("substr", 's', -1),
+    ("substring", 's', -1),
+    ("subtype", 's', 1),
+    ("tan", 's', 1),
+    ("tanh", 's', 1),
+    ("time", 's', -1),
+    ("timediff", 's', 2),
+    ("total_changes", 's', 0),
+    ("trim", 's', -1),
+    ("trunc", 's', 1),
+    ("typeof", 's', 1),
+    ("unhex", 's', -1),
+    ("unicode", 's', 1),
+    ("unistr", 's', 1),
+    ("unistr_quote", 's', 1),
+    ("unixepoch", 's', -1),
+    ("unlikely", 's', 1),
+    ("upper", 's', 1),
+    ("zeroblob", 's', 1),
+    // --- aggregate ---
+    ("avg", 'a', 1),
+    ("count", 'a', -1),
+    ("geopoly_group_bbox", 'a', 1),
+    ("group_concat", 'a', -1),
+    ("json_group_array", 'a', 1),
+    ("json_group_object", 'a', 2),
+    ("jsonb_group_array", 'a', 1),
+    ("jsonb_group_object", 'a', 2),
+    ("max", 'a', 1),
+    ("median", 'a', 1),
+    ("min", 'a', 1),
+    ("percentile", 'a', 2),
+    ("percentile_cont", 'a', 2),
+    ("percentile_disc", 'a', 2),
+    ("string_agg", 'a', 2),
+    ("sum", 'a', 1),
+    ("total", 'a', 1),
+    // --- window ---
+    ("cume_dist", 'w', 0),
+    ("dense_rank", 'w', 0),
+    ("first_value", 'w', 1),
+    ("lag", 'w', -1),
+    ("last_value", 'w', 1),
+    ("lead", 'w', -1),
+    ("nth_value", 'w', 2),
+    ("ntile", 'w', 1),
+    ("percent_rank", 'w', 0),
+    ("rank", 'w', 0),
+    ("row_number", 'w', 0),
+];
+
+/// The FTS5 auxiliary/query functions, registered only when the `fts5` feature is
+/// built in. Split out so the base list stays feature-independent.
+#[cfg(feature = "fts5")]
+const FTS5_FUNCTION_LIST: &[FunctionListEntry] = &[
+    ("bm25", 's', -1),
+    ("highlight", 's', 4),
+    ("match", 's', 2),
+    ("snippet", 's', 6),
+];
+
+/// The full set of SQL functions this build registers, sorted by name (then by
+/// kind for a stable order among same-named entries like `min`/`max`), matching
+/// sqlite's `PRAGMA function_list` ordering. Feature-gated functions (FTS5) are
+/// included only when their feature is active.
+pub fn function_list() -> Vec<FunctionListEntry> {
+    let mut out: Vec<FunctionListEntry> = FUNCTION_LIST.to_vec();
+    #[cfg(feature = "fts5")]
+    out.extend_from_slice(FTS5_FUNCTION_LIST);
+    out.sort_by(|a, b| a.0.cmp(b.0).then(a.1.cmp(&b.1)));
+    out
+}
+
+/// The searchable `(column name, text)` pairs an FTS5 `MATCH` operand refers to,
+/// or `None` if the operand is not a column or table-name reference (so `MATCH`
+/// is not a full-text query in this context). A reference to an indexed column
+/// yields just that column; an unqualified reference to the table's own name
+/// yields every column (SQLite's table-wide `MATCH`, where `col:token` filters
+/// pick out individual columns).
+#[cfg(feature = "fts5")]
+fn fts5_match_columns(
+    operand: &Expr,
+    ctx: &EvalCtx,
+) -> Option<(Vec<(String, String)>, crate::vtab::Fts5Tok)> {
+    let (table, column) = match operand {
+        Expr::Column { table, column, .. } => (table.as_deref(), column.as_str()),
+        Expr::Paren(e) => return fts5_match_columns(e, ctx),
+        _ => return None,
+    };
+    // The table's tokenizer config (Porter stemming + `remove_diacritics` level),
+    // so the query folds exactly like the indexed documents.
+    let tok = |t: &str| {
+        ctx.subqueries
+            .map_or_else(crate::vtab::Fts5Tok::default, |s| s.fts5_tok(t))
+    };
+    // A reference to a specific indexed column searches only that column. An
+    // `UNINDEXED` column matches nothing (it carries no full-text index).
+    if let Some(i) = ctx.columns.iter().position(|c| {
+        c.name.eq_ignore_ascii_case(column) && table.is_none_or(|t| c.table.eq_ignore_ascii_case(t))
+    }) {
+        let c = &ctx.columns[i];
+        let unindexed = ctx
+            .subqueries
+            .and_then(|s| s.fts5_indexed_columns(&c.table))
+            .is_some_and(|cols| !cols.iter().any(|n| n.eq_ignore_ascii_case(&c.name)));
+        if unindexed {
+            return Some((Vec::new(), crate::vtab::Fts5Tok::default()));
+        }
+        return Some((
+            alloc::vec![(c.name.clone(), eval::to_text(&ctx.row[i]))],
+            tok(&c.table),
+        ));
+    }
+    // An unqualified reference to the table itself searches across every indexed
+    // column (`UNINDEXED` columns are stored but excluded from the full-text index).
+    if table.is_none() {
+        let indexed = ctx.subqueries.and_then(|s| s.fts5_indexed_columns(column));
+        let cols: Vec<(String, String)> = ctx
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.table.eq_ignore_ascii_case(column))
+            .filter(|(_, c)| {
+                indexed
+                    .as_ref()
+                    .is_none_or(|cols| cols.iter().any(|n| n.eq_ignore_ascii_case(&c.name)))
+            })
+            .map(|(i, c)| (c.name.clone(), eval::to_text(&ctx.row[i])))
+            .collect();
+        if !cols.is_empty() {
+            return Some((cols, tok(column)));
+        }
+    }
+    None
+}
+
+/// The fts5 table a `MATCH` operand refers to: the operand `t` in `t MATCH q` (a
+/// bare table reference) or the owning table of `t.col MATCH q`. Resolves the name
+/// through the current row's column set (so an alias maps to the real table name),
+/// falling back to the operand's own identifier. `None` when the operand is not a
+/// column/table reference.
+#[cfg(feature = "fts5")]
+fn fts5_match_operand_table(operand: &Expr, ctx: &EvalCtx) -> Option<alloc::string::String> {
+    let (table, column) = match operand {
+        Expr::Column { table, column, .. } => (table.as_deref(), column.as_str()),
+        Expr::Paren(e) => return fts5_match_operand_table(e, ctx),
+        _ => return None,
+    };
+    // `t.col` → the table owning that column; bare `t` → the table named `t` in the
+    // row's column set (its `table` field holds the resolved base-table name).
+    if let Some(t) = table {
+        return Some(alloc::string::String::from(t));
+    }
+    ctx.columns
+        .iter()
+        .find(|c| c.table.eq_ignore_ascii_case(column))
+        .map(|c| c.table.clone())
+        .or_else(|| Some(alloc::string::String::from(column)))
+}
+
+/// Whether a `highlight`/`snippet` first argument names a contentless fts5 table.
+#[cfg(feature = "fts5")]
+fn fts5_operand_is_contentless(operand: &Expr, ctx: &EvalCtx) -> bool {
+    fts5_match_operand_table(operand, ctx)
+        .zip(ctx.subqueries)
+        .is_some_and(|(t, s)| s.fts5_is_contentless_table(&t))
+}
+
+/// Evaluate a scalar function call.
+pub fn eval_scalar(name: &str, args: &[Expr], star: bool, ctx: &EvalCtx) -> Result<Value> {
+    let lname = name.to_ascii_lowercase();
+    if is_aggregate_call(&lname, args.len(), star) {
+        // Reaching the scalar evaluator means this aggregate sits in a position
+        // that forbids one — most commonly nested inside another aggregate's
+        // argument or FILTER (`sum(count(a))`), where the inner call is evaluated
+        // per row as a scalar. SQLite reports this as `misuse of aggregate
+        // function NAME()`, naming the inner call. (Row-filtering positions —
+        // WHERE, join ON, ORDER BY of a non-aggregate query, UPDATE/DELETE
+        // expressions — are intercepted earlier at prepare time so they error even
+        // over an empty table; see `reject_misused_aggregate`.)
+        return Err(Error::Error(alloc::format!(
+            "misuse of aggregate function {name}()"
+        )));
+    }
+    if star {
+        return Err(Error::Error(alloc::format!(
+            "{name}(*) is not a scalar call"
+        )));
+    }
+
+    // Connection-state functions: read counters off the subquery handler.
+    match lname.as_str() {
+        "last_insert_rowid" | "changes" | "total_changes" => {
+            arity(&lname, args, 0)?;
+            let n = ctx.subqueries.map_or(0, |s| match lname.as_str() {
+                "last_insert_rowid" => s.last_insert_rowid(),
+                "changes" => s.changes(),
+                _ => s.total_changes(),
+            });
+            return Ok(Value::Integer(n));
+        }
+        "random" => {
+            arity(&lname, args, 0)?;
+            return Ok(Value::Integer(
+                ctx.subqueries.map_or(0, |s| s.next_random()),
+            ));
+        }
+        "randomblob" => {
+            arity(&lname, args, 1)?;
+            // SQLite coerces the argument to an integer (NULL/non-numeric text
+            // become 0, reals truncate) and clamps N < 1 to a single byte — so
+            // randomblob(NULL) is a 1-byte blob, not NULL.
+            let n = eval::to_int_value(&eval::eval(&args[0], ctx)?);
+            let len = if n < 1 { 1 } else { n as usize };
+            if len > MAX_BLOB_LEN {
+                return Err(Error::Error("string or blob too big".into()));
+            }
+            let mut bytes = Vec::new();
+            if let Some(s) = ctx.subqueries {
+                while bytes.len() < len {
+                    bytes.extend_from_slice(&s.next_random().to_le_bytes());
+                }
+                bytes.truncate(len);
+            } else {
+                bytes.resize(len, 0);
+            }
+            return Ok(Value::Blob(bytes));
+        }
+        // FTS5 `MATCH`: `x MATCH 'query'` parsed to `match('query', x)`. When the
+        // operand `x` references an indexed column (or the table itself), run the
+        // full-text query against that document. When it is not a column/table
+        // reference (e.g. a literal), fall through so a user-registered `match`
+        // function — or the "no such function" error — applies, matching SQLite,
+        // where a bare `MATCH` outside a virtual-table context is an error.
+        #[cfg(feature = "fts5")]
+        "match" if args.len() == 2 => {
+            if let Some((cols, tok)) = fts5_match_columns(&args[1], ctx) {
+                let pattern = eval::eval(&args[0], ctx)?;
+                return Ok(match pattern {
+                    Value::Null => Value::Null,
+                    p => {
+                        let q = eval::to_text(&p);
+                        // A contentless table keeps no column text, so `MATCH` can't
+                        // be re-checked from the (NULL) row — consult the index by
+                        // rowid instead. `fts5_match_operand_table` names the table
+                        // the operand refers to; the connection resolves whether it
+                        // is contentless and, if so, evaluates against the index.
+                        if let (Some(table), Some(rowid)) =
+                            (fts5_match_operand_table(&args[1], ctx), ctx.rowid)
+                            && let Some(m) = ctx
+                                .subqueries
+                                .and_then(|s| s.fts5_contentless_match(&table, &q, rowid))
+                        {
+                            return Ok(Value::Integer(m as i64));
+                        }
+                        Value::Integer(crate::vtab::fts5_query_matches(&q, &cols, tok) as i64)
+                    }
+                });
+            }
+        }
+        // FTS5 `bm25(<table>[, w1, w2, …])`: the relevance score of the current row
+        // (optionally with per-column weights), computed by `run_core` for a `MATCH`
+        // query over an `fts5` table. Falls through when no such score is in scope
+        // (so `bm25()` elsewhere is the usual unknown name).
+        #[cfg(feature = "fts5")]
+        "bm25" if !args.is_empty() && ctx.rowid.is_some() => {
+            let weights: Vec<f64> = args[1..]
+                .iter()
+                .map(|a| Ok(eval::to_f64(&eval::eval(a, ctx)?)))
+                .collect::<Result<_>>()?;
+            if let Some(score) = ctx
+                .rowid
+                .and_then(|r| ctx.subqueries?.fts5_bm25(r, &weights))
+            {
+                return Ok(Value::Real(score));
+            }
+        }
+        // FTS5 `highlight(<table>, col, open, close)`: column `col`'s text with the
+        // matched tokens wrapped, in scope for a `MATCH` query over an `fts5` table.
+        #[cfg(feature = "fts5")]
+        "highlight" if args.len() == 4 => {
+            // A contentless table stores no text, so there is nothing to render:
+            // `highlight`/`snippet` return NULL (matching SQLite).
+            if fts5_operand_is_contentless(&args[0], ctx) {
+                return Ok(Value::Null);
+            }
+            let col = eval::to_int_value(&eval::eval(&args[1], ctx)?);
+            let open = eval::to_text(&eval::eval(&args[2], ctx)?);
+            let close = eval::to_text(&eval::eval(&args[3], ctx)?);
+            // The column text is the current row's value for that column.
+            if let Ok(col) = usize::try_from(col) {
+                let text = ctx.row.get(col).map(eval::to_text).unwrap_or_default();
+                if let Some(s) = ctx
+                    .subqueries
+                    .and_then(|s| s.fts5_highlight(col, &text, &open, &close))
+                {
+                    return Ok(Value::Text(s.into()));
+                }
+            }
+        }
+        // FTS5 `snippet(<table>, col, open, close, ellipsis, n)`: a window of up
+        // to `n` tokens from column `col`, matched tokens wrapped, ellipsis at any
+        // trimmed end. In scope for a `MATCH` query over an `fts5` table.
+        #[cfg(feature = "fts5")]
+        "snippet" if args.len() == 6 => {
+            if fts5_operand_is_contentless(&args[0], ctx) {
+                return Ok(Value::Null);
+            }
+            let col = eval::to_int_value(&eval::eval(&args[1], ctx)?);
+            let open = eval::to_text(&eval::eval(&args[2], ctx)?);
+            let close = eval::to_text(&eval::eval(&args[3], ctx)?);
+            let ellipsis = eval::to_text(&eval::eval(&args[4], ctx)?);
+            let ntokens = eval::to_int_value(&eval::eval(&args[5], ctx)?);
+            // A negative `col` auto-selects the best column, so pass every column's
+            // text; the module bounds the slice by the table's declared columns.
+            if let Ok(ntokens) = usize::try_from(ntokens) {
+                let cols: Vec<alloc::string::String> = ctx.row.iter().map(eval::to_text).collect();
+                if let Some(s) = ctx
+                    .subqueries
+                    .and_then(|s| s.fts5_snippet(col, &cols, &open, &close, &ellipsis, ntokens))
+                {
+                    return Ok(Value::Text(s.into()));
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Functions whose NULL-handling is special are done before arg evaluation.
+    match lname.as_str() {
+        "coalesce" => {
+            // SQLite requires at least two arguments.
+            if args.len() < 2 {
+                return Err(wrong_arg_count("coalesce"));
+            }
+            for a in args {
+                let v = eval::eval(a, ctx)?;
+                if !matches!(v, Value::Null) {
+                    return Ok(v);
+                }
+            }
+            return Ok(Value::Null);
+        }
+        "ifnull" => {
+            arity(&lname, args, 2)?;
+            let a = eval::eval(&args[0], ctx)?;
+            return if matches!(a, Value::Null) {
+                eval::eval(&args[1], ctx)
+            } else {
+                Ok(a)
+            };
+        }
+        // `json_quote(X)` returns a JSON-subtyped argument as-is (it is already
+        // JSON text), and only quotes a value that is *not* JSON. graphite has no
+        // value subtypes, so it decides the subtype from the source expression: a
+        // JSON-producing call (`json`, `json_array`, …) or a single-path
+        // `json_extract` that yields a container (`carries_json_subtype`, runtime).
+        // Anything else falls through to the quoting arm below.
+        "json_quote" if args.len() == 1 && carries_json_subtype(&args[0], ctx) => {
+            let val = eval::eval(&args[0], ctx)?;
+            // A JSONB blob (e.g. `json_quote(jsonb('[1,2]'))`) renders as its JSON
+            // text; any other blob is rejected.
+            if let Value::Blob(b) = &val {
+                let j = super::json::Json::from_jsonb(b)
+                    .ok_or_else(|| Error::Error("JSON cannot hold BLOB values".into()))?;
+                return Ok(Value::Text(j.quote().into()));
+            }
+            return Ok(val);
+        }
+        _ => {}
+    }
+
+    let v: Vec<Value> = args
+        .iter()
+        .map(|a| eval::eval(a, ctx))
+        .collect::<Result<_>>()?;
+
+    Ok(match lname.as_str() {
+        "abs" => {
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                Value::Null => Value::Null,
+                // `abs(-9223372036854775808)` has no i64 result — SQLite errors.
+                Value::Integer(i) => match i.checked_abs() {
+                    Some(a) => Value::Integer(a),
+                    None => return Err(Error::Error("integer overflow".into())),
+                },
+                // `+ 0.0` normalises a negative-zero result to `0.0`, matching
+                // SQLite (`abs(-0.0)` is `0.0`, not `-0.0`).
+                Value::Real(r) => Value::Real(crate::util::float::abs(*r) + 0.0),
+                // A text/blob argument is coerced to a real (SQLite gives
+                // `abs('5')` = 5.0, not 5).
+                other => Value::Real(crate::util::float::abs(eval::to_f64(other)) + 0.0),
+            }
+        }
+        "length" => {
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                Value::Null => Value::Null,
+                Value::Blob(b) => Value::Integer(b.len() as i64),
+                // Faithful port of SQLite's `lengthFunc` for TEXT: count the bytes
+                // that are not UTF-8 continuation bytes (`(0xc0 & b) != 0x80`),
+                // stopping at the first NUL (C-string semantics) — so
+                // `length('A'||char(0)||'B')` is 1. Reading the raw bytes (not a
+                // lossy UTF-8 decode) makes a non-UTF-8 text count leniently like
+                // SQLite (`length(x'ff'||x'fe')` is 2) instead of collapsing to 0.
+                Value::Text(s) => {
+                    let mut n = 0i64;
+                    for &b in s.as_bytes() {
+                        if b == 0 {
+                            break;
+                        }
+                        if (b & 0xc0) != 0x80 {
+                            n += 1;
+                        }
+                    }
+                    Value::Integer(n)
+                }
+                // Numbers stringify without NULs or continuation bytes.
+                other => Value::Integer(eval::to_text(other).chars().count() as i64),
+            }
+        }
+        "octet_length" => {
+            arity(&lname, args, 1)?;
+            // Number of bytes in the value's encoding (SQLite's `sqlite3_value_bytes`
+            // — the full stored length, *not* NUL-truncated): blobs as-is, a
+            // byte-backed text by its raw byte length (so a non-UTF-8 text counts
+            // its bytes rather than collapsing through a lossy decode), everything
+            // else as the UTF-8 length of its text representation.
+            match &v[0] {
+                Value::Null => Value::Null,
+                Value::Blob(b) => Value::Integer(b.len() as i64),
+                Value::Text(s) => Value::Integer(s.byte_len() as i64),
+                other => Value::Integer(eval::to_text(other).len() as i64),
+            }
+        }
+        "glob" => {
+            // glob(pattern, text) is the function form of `text GLOB pattern`.
+            arity(&lname, args, 2)?;
+            if v.iter().take(2).any(|x| matches!(x, Value::Null)) {
+                Value::Null
+            } else {
+                let m = eval::glob_match_bytes(&eval::text_bytes(&v[0]), &eval::text_bytes(&v[1]));
+                Value::Integer(m as i64)
+            }
+        }
+        "regexp" => {
+            // regexp(pattern, subject) is the function form of `subject REGEXP
+            // pattern` (the parser desugars `X REGEXP Y` to `regexp(Y, X)`, so the
+            // pattern is the FIRST argument). Uses SQLite's own regex engine; an
+            // invalid pattern raises the same error text sqlite reports.
+            arity(&lname, args, 2)?;
+            if v.iter().take(2).any(|x| matches!(x, Value::Null)) {
+                Value::Null
+            } else {
+                let matched = crate::util::regex::regexp_match(
+                    &eval::text_bytes(&v[0]),
+                    &eval::text_bytes(&v[1]),
+                )
+                .map_err(|e| Error::Error(String::from(e)))?;
+                Value::Integer(matched as i64)
+            }
+        }
+        "lower" => {
+            arity(&lname, args, 1)?;
+            // Stock sqlite3's lower()/upper() fold ASCII A–Z/a–z only; the optional
+            // `unicode` feature switches to full Unicode case-folding
+            // (`CAFÉ` → `café`), like a sqlite3 built with the ICU extension.
+            // `str::to_lowercase` provides it in core+alloc, so no dependency is
+            // needed. Default (feature off) stays byte-for-byte stock-sqlite3.
+            // A *non-UTF-8* text always folds byte-wise ASCII (its invalid bytes
+            // preserved) — Unicode case-folding is undefined over invalid bytes, so
+            // both feature modes match stock sqlite's byte-wise `tolower` there.
+            if let Value::Text(s) = &v[0]
+                && core::str::from_utf8(s.as_bytes()).is_err()
+            {
+                return Ok(byte_map_text(&v[0], u8::to_ascii_lowercase));
+            }
+            #[cfg(feature = "unicode")]
+            {
+                str_map(&v[0], |s| s.to_lowercase())
+            }
+            #[cfg(not(feature = "unicode"))]
+            {
+                str_map(&v[0], |s| s.to_ascii_lowercase())
+            }
+        }
+        "upper" => {
+            arity(&lname, args, 1)?;
+            if let Value::Text(s) = &v[0]
+                && core::str::from_utf8(s.as_bytes()).is_err()
+            {
+                return Ok(byte_map_text(&v[0], u8::to_ascii_uppercase));
+            }
+            #[cfg(feature = "unicode")]
+            {
+                str_map(&v[0], |s| s.to_uppercase())
+            }
+            #[cfg(not(feature = "unicode"))]
+            {
+                str_map(&v[0], |s| s.to_ascii_uppercase())
+            }
+        }
+        "trim" | "ltrim" | "rtrim" => {
+            // SQLite's trim family takes 1 (string) or 2 (string, chars) arguments.
+            if args.is_empty() || args.len() > 2 {
+                return Err(wrong_arg_count(&lname));
+            }
+            let (left, right) = match lname.as_str() {
+                "ltrim" => (true, false),
+                "rtrim" => (false, true),
+                _ => (true, true),
+            };
+            trim_fn(&v, left, right)
+        }
+        "soundex" => {
+            arity(&lname, args, 1)?;
+            // NULL/non-alpha input yields "?000" (SQLite does not propagate NULL).
+            Value::Text(soundex(&c_text(&v[0])).into())
+        }
+        "typeof" => {
+            arity(&lname, args, 1)?;
+            Value::Text(String::from(type_name(&v[0])).into())
+        }
+        "nullif" => {
+            arity(&lname, args, 2)?;
+            // The comparison follows the standard binary-comparison collation
+            // rule: an explicit `COLLATE` on either operand wins (left-preferred),
+            // else a column's declared collation, else BINARY — so
+            // `NULLIF('a','A' COLLATE NOCASE)` is NULL.
+            let coll = eval::resolve_collation(&args[0], &args[1], ctx);
+            if crate::value::cmp_values_coll(&v[0], &v[1], coll) == core::cmp::Ordering::Equal {
+                Value::Null
+            } else {
+                v[0].clone()
+            }
+        }
+        "n/a" => unreachable!(),
+        "substr" | "substring" => substr(&v)?,
+        "instr" => instr(&v)?,
+        "replace" => replace(&v)?,
+        "round" => round(&v)?,
+        "min" => scalar_min_max(&v, true)?,
+        "max" => scalar_min_max(&v, false)?,
+        "hex" => {
+            arity(&lname, args, 1)?;
+            Value::Text(hex_encode(&v[0]).into())
+        }
+        // The `base64` extension: a BLOB is encoded to base64 text, TEXT is
+        // decoded back to a BLOB; any other type (incl. NULL) is an error —
+        // matching `ext/misc/base64.c`.
+        "base64" => {
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                Value::Blob(b) => Value::Text(crate::util::base64::encode(b).into()),
+                Value::Text(t) => Value::Blob(crate::util::base64::decode(t.as_bytes())),
+                _ => {
+                    return Err(Error::Error(String::from(
+                        "base64 accepts only blob or text",
+                    )));
+                }
+            }
+        }
+        // The `base85` extension: BLOB → base85 text, TEXT → decoded BLOB; any
+        // other type (incl. NULL) errors. The message ends with a period, unlike
+        // base64 — matching `ext/misc/base85.c` verbatim.
+        "base85" => {
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                Value::Blob(b) => Value::Text(crate::util::base85::encode(b).into()),
+                Value::Text(t) => Value::Blob(crate::util::base85::decode(t.as_bytes())),
+                _ => {
+                    return Err(Error::Error(String::from(
+                        "base85 accepts only blob or text.",
+                    )));
+                }
+            }
+        }
+        // The `ieee754` extension: decompose/recompose a double into an exact
+        // `mantissa · 2^exponent`, and convert doubles to/from their 8-byte blob.
+        // An 8-byte BLOB argument to the 1-arg forms is reinterpreted as the
+        // double; other/NULL arguments coerce via value_double/int64 (NULL → 0),
+        // matching sqlite (so `ieee754(NULL)` is `'ieee754(0,-1075)'`).
+        "ieee754" => match args.len() {
+            1 => {
+                let (m, e) = crate::util::ieee754::parts(ieee754_double_arg(&v[0]));
+                Value::Text(alloc::format!("ieee754({m},{e})").into())
+            }
+            2 => match crate::util::ieee754::compose(
+                eval::to_int_value(&v[0]),
+                eval::to_int_value(&v[1]),
+            ) {
+                Some(r) => Value::Real(r),
+                None => Value::Null,
+            },
+            _ => return Err(wrong_arg_count(&lname)),
+        },
+        "ieee754_mantissa" => {
+            arity(&lname, args, 1)?;
+            Value::Integer(crate::util::ieee754::parts(ieee754_double_arg(&v[0])).0)
+        }
+        "ieee754_exponent" => {
+            arity(&lname, args, 1)?;
+            Value::Integer(crate::util::ieee754::parts(ieee754_double_arg(&v[0])).1 as i64)
+        }
+        "ieee754_to_blob" => {
+            arity(&lname, args, 1)?;
+            Value::Blob(crate::util::ieee754::to_blob(real_arg(&v[0]).unwrap_or(0.0)).to_vec())
+        }
+        "ieee754_inc" => {
+            arity(&lname, args, 2)?;
+            Value::Real(crate::util::ieee754::inc(
+                real_arg(&v[0]).unwrap_or(0.0),
+                eval::to_int_value(&v[1]),
+            ))
+        }
+        "ieee754_from_blob" => {
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                Value::Blob(b) => match crate::util::ieee754::from_blob(b) {
+                    Some(r) => Value::Real(r),
+                    None => Value::Null,
+                },
+                _ => Value::Null,
+            }
+        }
+        // sha1(X): SHA-1 of X's bytes, rendered as a 40-byte BLOB of lower-case
+        // hex (matching `ext/misc/sha1.c` `sha1Func`, which passes the hex text to
+        // `sqlite3_result_blob` — the binary-digest variant is the separate
+        // `sha1b`). A BLOB hashes as-is; any other non-NULL type hashes its UTF-8
+        // text rendering (sqlite's `value_text`); NULL yields NULL.
+        "sha1" => {
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                Value::Null => Value::Null,
+                other => {
+                    let digest = crate::util::sha::sha1(&eval::text_bytes(other));
+                    let mut hex = Vec::with_capacity(40);
+                    for byte in digest {
+                        hex.push(HEX_DIGITS[(byte >> 4) as usize]);
+                        hex.push(HEX_DIGITS[(byte & 0x0f) as usize]);
+                    }
+                    Value::Blob(hex)
+                }
+            }
+        }
+        // sha3(X[, size]): SHA3/Keccak digest of X's bytes, `size` in bits
+        // (224/256/384/512, default 256). Byte handling matches sha1. Port of
+        // `ext/misc/shathree.c` `sha3Func` — the size is validated before the
+        // NULL short-circuit, so `sha3(NULL, 999)` still errors.
+        "sha3" => {
+            if args.len() != 1 && args.len() != 2 {
+                return Err(wrong_arg_count("sha3"));
+            }
+            let bits: u16 = if args.len() == 2 {
+                match eval::to_int_value(&v[1]) {
+                    224 => 224,
+                    256 => 256,
+                    384 => 384,
+                    512 => 512,
+                    _ => {
+                        return Err(Error::Error(
+                            "SHA3 size should be one of: 224 256 384 512".into(),
+                        ));
+                    }
+                }
+            } else {
+                256
+            };
+            match &v[0] {
+                Value::Null => Value::Null,
+                other => Value::Blob(crate::util::sha::sha3(&eval::text_bytes(other), bits)),
+            }
+        }
+        "char" => char_fn(&v),
+        "unicode" => {
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                Value::Null => Value::Null,
+                // A byte-backed text may not be valid UTF-8; decode its first
+                // character with SQLite's own lenient reader rather than a lossy
+                // `to_text` (which would drop the whole string and wrongly return
+                // NULL). A leading NUL still truncates the C string to empty → NULL.
+                Value::Text(s) => {
+                    let bytes = s.as_bytes();
+                    match bytes.first() {
+                        None | Some(0) => Value::Null,
+                        Some(_) => Value::Integer(i64::from(utf8_read_first(bytes))),
+                    }
+                }
+                other => {
+                    // SQLite reads the argument as a NUL-terminated C string
+                    // (`sqlite3_value_text`), so an embedded NUL truncates it —
+                    // `unicode(char(0))` / `unicode(char(0)||'A')` see an empty
+                    // string and return NULL, not codepoint 0.
+                    let text = eval::to_text(other);
+                    text.split('\0')
+                        .next()
+                        .unwrap_or("")
+                        .chars()
+                        .next()
+                        .map(|c| Value::Integer(c as i64))
+                        .unwrap_or(Value::Null)
+                }
+            }
+        }
+        // `if` is SQLite's alias for `iif`. The parser desugars the scalar form
+        // (>= 2 args) into a CASE expression so it short-circuits, so this arm is
+        // normally reached only for the <2-arg arity error; it still evaluates the
+        // CASE-form semantics (`(when, then)` pairs with an optional trailing
+        // ELSE) for any non-desugared call, for robustness.
+        "iif" | "if" => {
+            if args.len() < 2 {
+                return Err(wrong_arg_count(&lname));
+            }
+            let n = v.len();
+            let mut out = if n % 2 == 1 {
+                v[n - 1].clone()
+            } else {
+                Value::Null
+            };
+            let mut i = 0;
+            while i + 1 < n {
+                if eval::truth(&v[i]) == Some(true) {
+                    out = v[i + 1].clone();
+                    break;
+                }
+                i += 2;
+            }
+            out
+        }
+        // The SQLite release graphitesql tracks and writes into new file headers
+        // (`SQLITE_VERSION_NUMBER` 3_053_002 = 3.53.2).
+        "sqlite_version" => {
+            arity(&lname, args, 0)?;
+            Value::Text(crate::TARGET_SQLITE_VERSION.into())
+        }
+        // Independent reimplementation: this is graphitesql's own identifier in
+        // SQLite's `YYYY-MM-DD HH:MM:SS <hash>` shape, not a C build's id.
+        "sqlite_source_id" => {
+            arity(&lname, args, 0)?;
+            Value::Text(crate::TARGET_SQLITE_SOURCE_ID.into())
+        }
+        // `sqlite_compileoption_used(X)` — 1 if X names one of graphite's
+        // compile-time options, else 0. Faithful port of `compileoptionusedFunc`
+        // / `sqlite3_compileoption_used`: the `SQLITE_` prefix on X is optional,
+        // the match is case-insensitive, and X must span a whole option (the
+        // char after the match must not be an identifier char, so `X=value`
+        // suffixes still match on `X`). A NULL argument yields NULL (sqlite's
+        // wrapper leaves the result unset — a NULL — when `sqlite3_value_text`
+        // returns 0).
+        "sqlite_compileoption_used" => {
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                Value::Null => Value::Null,
+                other => {
+                    let name = eval::to_text(other);
+                    Value::Integer(compileoption_used(&name) as i64)
+                }
+            }
+        }
+        // `sqlite_compileoption_get(N)` — the Nth compile-time option string
+        // (0-indexed, in graphite's own order) or NULL when N is out of range.
+        // Port of `compileoptiongetFunc` / `sqlite3_compileoption_get`; N is read
+        // as an integer (NULL → 0).
+        "sqlite_compileoption_get" => {
+            arity(&lname, args, 1)?;
+            let n = eval::to_int_value(&v[0]);
+            let opts = super::compile_option_names();
+            if n >= 0 && (n as usize) < opts.len() {
+                Value::Text(opts[n as usize].into())
+            } else {
+                Value::Null
+            }
+        }
+        "zeroblob" => {
+            arity(&lname, args, 1)?;
+            // SQLite reads the length via `sqlite3_value_int64`, which maps NULL to
+            // 0 — so `zeroblob(NULL)` is an empty blob, not NULL.
+            let n = eval::to_int_value(&v[0]).max(0) as usize;
+            if n > MAX_BLOB_LEN {
+                return Err(Error::Error("string or blob too big".into()));
+            }
+            Value::Blob(alloc::vec![0u8; n])
+        }
+        "quote" => {
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                // A byte-backed text may not be valid UTF-8; render the literal
+                // over its raw bytes so `quote(x'ff'||x'fe')` round-trips exactly
+                // rather than passing through a lossy `String`. Matches SQLite: the
+                // text is read as a NUL-terminated C string (an embedded NUL
+                // truncates the literal) and embedded single quotes are doubled.
+                Value::Text(s) => {
+                    let bytes = s.as_bytes();
+                    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+                    let mut out = alloc::vec::Vec::with_capacity(end + 2);
+                    out.push(b'\'');
+                    for &b in &bytes[..end] {
+                        if b == b'\'' {
+                            out.push(b'\'');
+                        }
+                        out.push(b);
+                    }
+                    out.push(b'\'');
+                    Value::Text(crate::value::Text::from_bytes(out))
+                }
+                other => Value::Text(quote_value(other).into()),
+            }
+        }
+        "unistr" => {
+            // Decode `\uXXXX` / `\UXXXXXXXX` / `\\` escapes in the argument's
+            // text. NULL passes through; any other escape errors, as in SQLite.
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                Value::Null => Value::Null,
+                other => Value::Text(unistr_decode(&eval::to_text(other))?.into()),
+            }
+        }
+        "unistr_quote" => {
+            // Like quote(), except a text value containing a control character
+            // (< U+0020) is rendered as `unistr('…')` with those characters
+            // escaped `\uXXXX`. Non-text values match quote() exactly.
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                Value::Text(s) if s.chars().any(|c| (c as u32) < 0x20) => {
+                    Value::Text(unistr_quote_text(s).into())
+                }
+                other => Value::Text(quote_value(other).into()),
+            }
+        }
+        "subtype" => {
+            // The value's subtype. graphite has no runtime subtype field, but the
+            // only subtype SQLite exposes here is the JSON subtype (74), which we
+            // decide from the argument's source expression (`carries_json_subtype`,
+            // the same rule the JSON constructors use). Ordinary values → 0.
+            arity(&lname, args, 1)?;
+            let is_json = args.first().is_some_and(|e| carries_json_subtype(e, ctx));
+            Value::Integer(if is_json { 74 } else { 0 })
+        }
+        "sign" => {
+            arity(&lname, args, 1)?;
+            // Numeric (or losslessly-numeric text) only; otherwise NULL.
+            let num = match &v[0] {
+                Value::Integer(i) => Some(*i as f64),
+                Value::Real(r) => Some(*r),
+                Value::Text(s) => eval::parse_decimal_f64(s.trim()),
+                _ => None,
+            };
+            match num {
+                Some(r) if r > 0.0 => Value::Integer(1),
+                Some(r) if r < 0.0 => Value::Integer(-1),
+                Some(_) => Value::Integer(0),
+                None => Value::Null,
+            }
+        }
+        "concat" => {
+            // SQLite 3.44+: concatenate all args, treating NULL as empty.
+            // At least one argument is required. Concatenate the raw text bytes
+            // (like the `||` operator) so a non-UTF-8 argument is preserved.
+            if v.is_empty() {
+                return Err(wrong_arg_count("concat"));
+            }
+            let mut out: Vec<u8> = Vec::new();
+            for x in &v {
+                if !matches!(x, Value::Null) {
+                    out.extend_from_slice(&eval::text_bytes(x));
+                }
+            }
+            Value::Text(crate::value::Text::from_bytes(out))
+        }
+        "concat_ws" => {
+            // A separator plus at least one value argument are required. Join the
+            // non-NULL arguments' raw text bytes with the separator's bytes, so a
+            // non-UTF-8 separator or value is preserved.
+            if v.len() < 2 {
+                return Err(wrong_arg_count("concat_ws"));
+            }
+            if matches!(v[0], Value::Null) {
+                Value::Null
+            } else {
+                let sep = eval::text_bytes(&v[0]);
+                let mut out: Vec<u8> = Vec::new();
+                let mut first = true;
+                for x in &v[1..] {
+                    if matches!(x, Value::Null) {
+                        continue;
+                    }
+                    if !first {
+                        out.extend_from_slice(&sep);
+                    }
+                    out.extend_from_slice(&eval::text_bytes(x));
+                    first = false;
+                }
+                Value::Text(crate::value::Text::from_bytes(out))
+            }
+        }
+        "like" => {
+            // like(pattern, text[, escape]) — the function form of `text LIKE
+            // pattern`. NULL operand → NULL.
+            if v.len() < 2 || v.len() > 3 {
+                return Err(wrong_arg_count("like"));
+            }
+            // A NULL escape, like a NULL pattern/text, yields NULL.
+            if v.iter().any(|x| matches!(x, Value::Null)) {
+                Value::Null
+            } else {
+                // An explicit ESCAPE must be exactly one character (SQLite
+                // raises "ESCAPE expression must be a single character" for
+                // empty or multi-character escapes).
+                let escape = match v.get(2) {
+                    Some(e) => {
+                        let s = eval::to_text(e);
+                        let mut it = s.chars();
+                        match (it.next(), it.next()) {
+                            (Some(c), None) => Some(c),
+                            _ => {
+                                return Err(Error::Error(
+                                    "ESCAPE expression must be a single character".into(),
+                                ));
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                let m = eval::like_match_escape_bytes(
+                    &eval::text_bytes(&v[0]),
+                    &eval::text_bytes(&v[1]),
+                    escape,
+                    ctx.subqueries.is_some_and(|s| s.case_sensitive_like()),
+                );
+                Value::Integer(m as i64)
+            }
+        }
+        // Optimizer hints that are no-ops at the value level (return the operand).
+        "likely" | "unlikely" => {
+            arity(&lname, args, 1)?;
+            v[0].clone()
+        }
+        "likelihood" => {
+            arity(&lname, args, 2)?;
+            // SQLite requires the second argument to be a floating-point *literal*
+            // in the range 0.0..=1.0, checked against the parsed AST rather than
+            // the runtime value: an integer literal (`0`, `1`, `2`), a negative,
+            // a string, an expression (`0.5+0.1`), or a column reference are all
+            // rejected, while `0.5`, `.5`, `1e0` and a parenthesized `(0.5)` are
+            // accepted (`exprProbability` in SQLite's `expr.c`).
+            if !likelihood_prob_is_valid(&args[1]) {
+                return Err(Error::Error(
+                    "second argument to likelihood() must be a constant between 0.0 and 1.0".into(),
+                ));
+            }
+            v[0].clone()
+        }
+        "unhex" => {
+            if v.is_empty() || v.len() > 2 {
+                return Err(wrong_arg_count("unhex"));
+            }
+            // A NULL hex string or NULL ignore-set both yield NULL.
+            let ignore = match v.get(1) {
+                Some(Value::Null) => return Ok(Value::Null),
+                // The ignore set is itself coerced as a C string (NUL-terminated).
+                Some(set) => Some(c_text(set)),
+                None => None,
+            };
+            match &v[0] {
+                Value::Null => Value::Null,
+                // The hex input is read as a NUL-terminated C string, matching
+                // SQLite's `unhexFunc` (`sqlite3_value_text`).
+                other => match unhex(&c_text(other), ignore.as_deref()) {
+                    Some(b) => Value::Blob(b),
+                    None => Value::Null,
+                },
+            }
+        }
+        // Math functions (SQLite's `-DSQLITE_ENABLE_MATH_FUNCTIONS` set; the CLI
+        // ships with these enabled). Each coerces its argument(s) to a real and
+        // returns NULL when an argument is NULL or the result is not finite,
+        // matching SQLite.
+        "pi" => {
+            arity(&lname, args, 0)?;
+            Value::Real(crate::util::float::PI)
+        }
+        "ceil" | "ceiling" => math_round_to_int(&lname, &v, crate::util::float::ceil)?,
+        "floor" => math_round_to_int(&lname, &v, crate::util::float::floor)?,
+        "trunc" => math_round_to_int(&lname, &v, crate::util::float::trunc)?,
+        "sqrt" => math1(&lname, &v, crate::util::float::sqrt)?,
+        "exp" => math1(&lname, &v, crate::util::float::exp)?,
+        "ln" => math1(&lname, &v, crate::util::float::ln)?,
+        "log2" => math1(&lname, &v, crate::util::float::log2)?,
+        "sin" => math1(&lname, &v, crate::util::float::sin)?,
+        "cos" => math1(&lname, &v, crate::util::float::cos)?,
+        "tan" => math1(&lname, &v, crate::util::float::tan)?,
+        "asin" => math1(&lname, &v, crate::util::float::asin)?,
+        "acos" => math1(&lname, &v, crate::util::float::acos)?,
+        "atan" => math1(&lname, &v, crate::util::float::atan)?,
+        "sinh" => math1(&lname, &v, crate::util::float::sinh)?,
+        "cosh" => math1(&lname, &v, crate::util::float::cosh)?,
+        "tanh" => math1(&lname, &v, crate::util::float::tanh)?,
+        "asinh" => math1(&lname, &v, crate::util::float::asinh)?,
+        "acosh" => math1(&lname, &v, crate::util::float::acosh)?,
+        "atanh" => math1(&lname, &v, crate::util::float::atanh)?,
+        "degrees" => math1(&lname, &v, crate::util::float::degrees)?,
+        "radians" => math1(&lname, &v, crate::util::float::radians)?,
+        // `log(X)` is base-10; `log(B, X)` is base B. `log10` is base-10.
+        "log10" => math1(&lname, &v, crate::util::float::log10)?,
+        "log" => {
+            if v.len() == 1 {
+                math_finite(real_arg(&v[0]).map(crate::util::float::log10))
+            } else {
+                arity(&lname, args, 2)?;
+                match (real_arg(&v[0]), real_arg(&v[1])) {
+                    // `log(B, X)` is NULL unless `B > 0`, `B != 1`, and `X > 0`
+                    // (SQLite). A base of 1 makes `ln(B) == 0`, which the bare
+                    // division would turn into ±Inf instead of NULL, so guard it.
+                    (Some(1.0), Some(_)) => Value::Null,
+                    (Some(b), Some(x)) => {
+                        math_finite(Some(crate::util::float::ln(x) / crate::util::float::ln(b)))
+                    }
+                    _ => Value::Null,
+                }
+            }
+        }
+        "pow" | "power" => {
+            arity(&lname, args, 2)?;
+            match (real_arg(&v[0]), real_arg(&v[1])) {
+                (Some(b), Some(e)) => math_finite(Some(crate::util::float::pow(b, e))),
+                _ => Value::Null,
+            }
+        }
+        "atan2" => {
+            arity(&lname, args, 2)?;
+            match (real_arg(&v[0]), real_arg(&v[1])) {
+                (Some(y), Some(x)) => math_finite(Some(crate::util::float::atan2(y, x))),
+                _ => Value::Null,
+            }
+        }
+        "mod" => {
+            arity(&lname, args, 2)?;
+            match (real_arg(&v[0]), real_arg(&v[1])) {
+                (Some(x), Some(y)) => math_finite(Some(crate::util::float::fmod(x, y))),
+                _ => Value::Null,
+            }
+        }
+        // JSON functions (see `super::json`).
+        "json" => {
+            arity(&lname, args, 1)?;
+            match json_root(&v[0])? {
+                None => Value::Null,
+                Some(j) => Value::Text(j.serialize().into()),
+            }
+        }
+        // `jsonb(X)` — the JSONB (binary) form of `json(X)`: parse the JSON/JSON5
+        // text (or pass a JSONB blob through) and return its JSONB encoding.
+        "jsonb" => {
+            arity(&lname, args, 1)?;
+            match json_root(&v[0])? {
+                None => Value::Null,
+                Some(j) => Value::Blob(j.to_jsonb()),
+            }
+        }
+        "json_valid" => {
+            if v.is_empty() || v.len() > 2 {
+                return Err(Error::Error(
+                    "wrong number of arguments to function json_valid()".into(),
+                ));
+            }
+            // The optional flags select which well-formedness checks count, and
+            // must be 1..=15 (sqlite errors otherwise): 0x01 = strict RFC-8259
+            // JSON text, 0x02 = JSON5 text, 0x04 = a BLOB that looks like JSONB,
+            // 0x08 = a BLOB that is fully-valid JSONB. The 1-argument form is 0x01
+            // (strict JSON only) — JSON5 acceptance needs the explicit flag.
+            let flags = match v.get(1) {
+                None => 1,
+                Some(f) => {
+                    let n = eval::to_int_value(f);
+                    if !(1..=15).contains(&n) {
+                        return Err(Error::Error(
+                            "FLAGS parameter to json_valid() must be between 1 and 15".into(),
+                        ));
+                    }
+                    n
+                }
+            };
+            match &v[0] {
+                Value::Null => Value::Null,
+                // A BLOB is only ever judged against the JSONB flag bits; text bits
+                // do not apply (and vice versa for a text value).
+                Value::Blob(b) => {
+                    let ok = flags & 0x0c != 0 && super::json::Json::from_jsonb(b).is_some();
+                    Value::Integer(ok as i64)
+                }
+                other => {
+                    let text = eval::to_text(other);
+                    let ok = (flags & 0x01 != 0 && super::json::is_strict_json(&text))
+                        || (flags & 0x02 != 0 && super::json::parse(&text).is_some());
+                    Value::Integer(ok as i64)
+                }
+            }
+        }
+        // `json_error_position(X)` — the 1-based byte position of the first JSON
+        // syntax error in X, or 0 when X is well-formed JSON. NULL yields NULL,
+        // matching sqlite3.
+        "json_error_position" => {
+            arity(&lname, args, 1)?;
+            match &v[0] {
+                Value::Null => Value::Null,
+                other => {
+                    let pos = match super::json::parse_with_error_position(&eval::to_text(other)) {
+                        Ok(_) => 0,
+                        Err(off) => off as i64 + 1,
+                    };
+                    Value::Integer(pos)
+                }
+            }
+        }
+        // `json_pretty(X [, indent])` — reformat with indentation (default 4
+        // spaces). Empty arrays/objects and scalars stay compact, like SQLite.
+        "json_pretty" => {
+            if v.is_empty() || v.len() > 2 {
+                return Err(wrong_arg_count("json_pretty"));
+            }
+            match &v[0] {
+                Value::Null => Value::Null,
+                other => {
+                    let indent = match v.get(1) {
+                        Some(Value::Null) | None => alloc::string::String::from("    "),
+                        Some(iv) => eval::to_text(iv),
+                    };
+                    let _ = other;
+                    match json_root(&v[0])? {
+                        None => Value::Null,
+                        Some(j) => Value::Text(j.pretty(&indent).into()),
+                    }
+                }
+            }
+        }
+        "json_quote" => {
+            arity(&lname, args, 1)?;
+            // A BLOB that decodes as JSONB renders as its JSON text (so
+            // `json_quote(x'01')` → `true`, `json_quote(jsonb('[1,2]'))` →
+            // `[1,2]`); any other BLOB is rejected. graphite has no value
+            // subtypes, so it falls back to "does it parse as JSONB", matching
+            // sqlite.
+            let j = match &v[0] {
+                Value::Blob(b) => super::json::Json::from_jsonb(b)
+                    .ok_or_else(|| Error::Error("JSON cannot hold BLOB values".into()))?,
+                other => super::json::value_to_json(other),
+            };
+            Value::Text(j.quote().into())
+        }
+        "json_type" => {
+            if v.is_empty() || v.len() > 2 {
+                return Err(wrong_arg_count("json_type"));
+            }
+            match json_root(&v[0])? {
+                None => Value::Null,
+                Some(root) => {
+                    let target = if v.len() == 2 {
+                        check_path(&v[1])?;
+                        super::json::navigate(&root, &eval::to_text(&v[1]))
+                    } else {
+                        Some(&root)
+                    };
+                    match target {
+                        Some(j) => Value::Text(String::from(j.type_name()).into()),
+                        None => Value::Null,
+                    }
+                }
+            }
+        }
+        "json_array_length" => {
+            if v.is_empty() || v.len() > 2 {
+                return Err(wrong_arg_count("json_array_length"));
+            }
+            match json_root(&v[0])? {
+                None => Value::Null,
+                Some(root) => {
+                    let target = if v.len() == 2 {
+                        check_path(&v[1])?;
+                        super::json::navigate(&root, &eval::to_text(&v[1]))
+                    } else {
+                        Some(&root)
+                    };
+                    match target {
+                        Some(super::json::Json::Array(items)) => Value::Integer(items.len() as i64),
+                        Some(_) => Value::Integer(0),
+                        None => Value::Null,
+                    }
+                }
+            }
+        }
+        "json_extract" | "jsonb_extract" => {
+            // SQLite's json_extract is variadic: with fewer than two arguments
+            // it returns NULL without even parsing the document (so an invalid
+            // or absent first argument is NOT an error here).
+            if v.len() < 2 {
+                return Ok(Value::Null);
+            }
+            match json_root(&v[0])? {
+                None => Value::Null,
+                Some(root) => json_extract(&root, &v[1..], lname.starts_with("jsonb"))?,
+            }
+        }
+        "json_array" | "jsonb_array" => {
+            let mut items = Vec::with_capacity(v.len());
+            for (i, val) in v.iter().enumerate() {
+                items.push(json_value_arg(val, args.get(i), ctx)?);
+            }
+            json_doc_result(&lname, &super::json::Json::Array(items))
+        }
+        "json_object" | "jsonb_object" => {
+            if !v.len().is_multiple_of(2) {
+                return Err(Error::Error(
+                    "json_object() requires an even number of arguments".into(),
+                ));
+            }
+            let mut members = Vec::with_capacity(v.len() / 2);
+            for pair in v.chunks(2).enumerate() {
+                let (i, kv) = pair;
+                // SQLite requires object labels to be TEXT (a NULL, numeric, or
+                // BLOB key is an error), and rejects BLOB values.
+                let Value::Text(key) = &kv[0] else {
+                    return Err(Error::Error("json_object() labels must be TEXT".into()));
+                };
+                let val = json_value_arg(&kv[1], args.get(2 * i + 1), ctx)?;
+                // A key built from a SQL TEXT arg carries no escape provenance.
+                members.push((String::from(key.as_str()), None, val));
+            }
+            json_doc_result(&lname, &super::json::Json::Object(members))
+        }
+        "json_set" | "json_insert" | "json_replace" | "jsonb_set" | "jsonb_insert"
+        | "jsonb_replace" => {
+            // sqlite: zero args → NULL; an even arg count is a hard error (the
+            // message always names the text-output `json_*` form, even for the
+            // `jsonb_*` blob variants); an odd count is the document followed by
+            // zero or more (path, value) pairs (a bare document is a no-op).
+            if v.is_empty() {
+                return Ok(Value::Null);
+            }
+            if v.len().is_multiple_of(2) {
+                let report = lname
+                    .strip_prefix("jsonb_")
+                    .map_or_else(|| lname.clone(), |rest| alloc::format!("json_{rest}"));
+                return Err(Error::Error(alloc::format!(
+                    "{report}() needs an odd number of arguments"
+                )));
+            }
+            let mode = if lname.ends_with("set") {
+                super::json::SetMode::Set
+            } else if lname.ends_with("insert") {
+                super::json::SetMode::Insert
+            } else {
+                super::json::SetMode::Replace
+            };
+            match json_root(&v[0])? {
+                None => Value::Null,
+                Some(mut root) => {
+                    let mut i = 1;
+                    while i + 1 < v.len() {
+                        check_path(&v[i])?;
+                        let path = eval::to_text(&v[i]);
+                        let val = json_edit_value_arg(&v[i + 1], args.get(i + 1), ctx)?;
+                        super::json::set_path(&mut root, &path, val, mode);
+                        i += 2;
+                    }
+                    json_doc_result(&lname, &root)
+                }
+            }
+        }
+        "json_remove" | "jsonb_remove" => {
+            if v.is_empty() {
+                return Err(Error::Error("json_remove() requires a document".into()));
+            }
+            match json_root(&v[0])? {
+                None => Value::Null,
+                Some(mut root) => {
+                    let mut removed = Value::Text(String::new().into());
+                    for p in &v[1..] {
+                        // A NULL path collapses the whole call to NULL (scanning
+                        // left to right, so a malformed path *before* it still
+                        // errors via check_path first), discarding any removals
+                        // already applied — matching sqlite's json_remove.
+                        if matches!(p, Value::Null) {
+                            removed = Value::Null;
+                            break;
+                        }
+                        check_path(p)?;
+                        // Removing the whole document (`$`) yields SQL NULL.
+                        if matches!(p, Value::Text(s) if s == "$") {
+                            removed = Value::Null;
+                            continue;
+                        }
+                        super::json::remove_path(&mut root, &eval::to_text(p));
+                    }
+                    if matches!(removed, Value::Null) {
+                        Value::Null
+                    } else {
+                        json_doc_result(&lname, &root)
+                    }
+                }
+            }
+        }
+        "json_patch" | "jsonb_patch" => {
+            arity(&lname, args, 2)?;
+            match (json_root(&v[0])?, json_root(&v[1])?) {
+                (Some(mut root), Some(patch)) => {
+                    super::json::merge_patch(&mut root, &patch);
+                    json_doc_result(&lname, &root)
+                }
+                _ => Value::Null,
+            }
+        }
+        // Arbitrary-precision decimal arithmetic (SQLite's `decimal` extension).
+        "decimal" => {
+            arity(&lname, args, 1)?;
+            match decimal_from_value(&v[0]) {
+                Some(d) => Value::Text(d.to_decimal_string().into()),
+                None => Value::Null,
+            }
+        }
+        "decimal_exp" => {
+            arity(&lname, args, 1)?;
+            // Same value as `decimal(X)` (the `bTextOnly=0` interpretation), but
+            // rendered in scientific notation (`decimal_result_sci`).
+            match decimal_from_value(&v[0]) {
+                Some(d) => Value::Text(d.to_sci_string().into()),
+                None => Value::Null,
+            }
+        }
+        "decimal_pow2" => {
+            arity(&lname, args, 1)?;
+            // `decimal_pow2(N)` acts only on an INTEGER argument; any other
+            // storage class (text/real/blob/NULL) leaves the result unset → NULL.
+            // SQLite reads the argument with `sqlite3_value_int` (a 32-bit
+            // truncation) before its `|N|>20000` guard, and an out-of-range N
+            // makes `decimal_result_sci` see a NULL Decimal and raise the same
+            // out-of-memory error as `decimal_add`'s NULL path (not SQL NULL).
+            match &v[0] {
+                Value::Integer(n) => {
+                    match crate::util::decimal::Decimal::pow2((*n as i32) as i64) {
+                        Some(d) => Value::Text(d.to_sci_string().into()),
+                        None => return Err(Error::Error("out of memory".into())),
+                    }
+                }
+                _ => Value::Null,
+            }
+        }
+        "decimal_add" | "decimal_sub" => {
+            arity(&lname, args, 2)?;
+            // `decimal_new(_, bTextOnly=1)`: every input is interpreted as text,
+            // so `NULL` yields no Decimal object at all. SQLite's add/sub then
+            // hit `decimal_result(NULL)`, which reports an out-of-memory error
+            // rather than propagating NULL — replicate that exactly.
+            match (decimal_text(&v[0]), decimal_text(&v[1])) {
+                (Some(mut a), Some(b)) => {
+                    if lname == "decimal_sub" {
+                        a.sub(b);
+                    } else {
+                        a.add(b);
+                    }
+                    Value::Text(a.to_decimal_string().into())
+                }
+                _ => return Err(Error::Error("out of memory".into())),
+            }
+        }
+        "decimal_mul" => {
+            arity(&lname, args, 2)?;
+            match (decimal_text(&v[0]), decimal_text(&v[1])) {
+                (Some(mut a), Some(b)) => {
+                    a.mul(&b);
+                    Value::Text(a.to_decimal_string().into())
+                }
+                _ => Value::Null,
+            }
+        }
+        "decimal_cmp" => {
+            arity(&lname, args, 2)?;
+            match (decimal_text(&v[0]), decimal_text(&v[1])) {
+                (Some(a), Some(b)) => Value::Integer(a.compare(&b) as i64),
+                _ => Value::Null,
+            }
+        }
+        // Date/time functions (see `super::datetime`).
+        "date" => super::datetime::date(&v),
+        "time" => super::datetime::time(&v),
+        "datetime" => super::datetime::datetime(&v),
+        "julianday" => super::datetime::julianday(&v),
+        "unixepoch" => super::datetime::unixepoch(&v),
+        "strftime" => super::datetime::strftime(&v),
+        "timediff" => {
+            arity(&lname, args, 2)?;
+            super::datetime::timediff(&v[0], &v[1])
+        }
+        "geopoly_json" => {
+            arity(&lname, args, 1)?;
+            match crate::geopoly::parse_value(&v[0]) {
+                Some(p) => Value::Text(p.to_json().into()),
+                None => Value::Null,
+            }
+        }
+        "geopoly_blob" => {
+            arity(&lname, args, 1)?;
+            match crate::geopoly::parse_value(&v[0]) {
+                Some(p) => Value::Blob(p.to_blob()),
+                None => Value::Null,
+            }
+        }
+        "geopoly_area" => {
+            arity(&lname, args, 1)?;
+            match crate::geopoly::parse_value(&v[0]) {
+                Some(p) => Value::Real(p.area()),
+                None => Value::Null,
+            }
+        }
+        "geopoly_bbox" => {
+            arity(&lname, args, 1)?;
+            match crate::geopoly::parse_value(&v[0]) {
+                Some(p) => Value::Blob(p.bbox().to_blob()),
+                None => Value::Null,
+            }
+        }
+        "geopoly_ccw" => {
+            arity(&lname, args, 1)?;
+            match crate::geopoly::parse_value(&v[0]) {
+                Some(p) => Value::Blob(p.ccw().to_blob()),
+                None => Value::Null,
+            }
+        }
+        "geopoly_regular" => {
+            arity(&lname, args, 4)?;
+            // A NULL argument yields NULL (SQLite's `sqlite3_value_double`/`int`
+            // treat NULL as 0, but n<3 or r<=0 then returns NULL anyway; an
+            // explicit NULL check keeps the common cases NULL-clean).
+            if v.iter().any(|x| matches!(x, Value::Null)) {
+                Value::Null
+            } else {
+                let cx = eval::to_f64(&v[0]);
+                let cy = eval::to_f64(&v[1]);
+                let r = eval::to_f64(&v[2]);
+                let n = eval::to_int_value(&v[3]);
+                match crate::geopoly::regular(cx, cy, r, n) {
+                    Some(p) => Value::Blob(p.to_blob()),
+                    None => Value::Null,
+                }
+            }
+        }
+        "geopoly_contains_point" => {
+            arity(&lname, args, 3)?;
+            match crate::geopoly::parse_value(&v[0]) {
+                Some(p) => {
+                    Value::Integer(p.contains_point(eval::to_f64(&v[1]), eval::to_f64(&v[2])))
+                }
+                None => Value::Null,
+            }
+        }
+        "geopoly_overlap" => {
+            arity(&lname, args, 2)?;
+            match (
+                crate::geopoly::parse_value(&v[0]),
+                crate::geopoly::parse_value(&v[1]),
+            ) {
+                (Some(p1), Some(p2)) => Value::Integer(crate::geopoly::overlap(&p1, &p2)),
+                _ => Value::Null,
+            }
+        }
+        "geopoly_within" => {
+            arity(&lname, args, 2)?;
+            match (
+                crate::geopoly::parse_value(&v[0]),
+                crate::geopoly::parse_value(&v[1]),
+            ) {
+                (Some(p1), Some(p2)) => Value::Integer(crate::geopoly::within(&p1, &p2)),
+                _ => Value::Null,
+            }
+        }
+        "geopoly_svg" => {
+            // geopoly_svg(X, ...) is variadic. With no arguments SQLite's
+            // implementation simply returns NULL (`if(argc<1) return;`) rather
+            // than raising an arity error.
+            if args.is_empty() {
+                return Ok(Value::Null);
+            }
+            match crate::geopoly::parse_value(&v[0]) {
+                Some(p) => {
+                    let extra: Vec<Option<String>> = v[1..]
+                        .iter()
+                        .map(|x| match x {
+                            Value::Null => None,
+                            other => Some(eval::to_text(other)),
+                        })
+                        .collect();
+                    Value::Text(p.to_svg(&extra).into())
+                }
+                None => Value::Null,
+            }
+        }
+        "geopoly_xform" => {
+            arity(&lname, args, 7)?;
+            match crate::geopoly::parse_value(&v[0]) {
+                Some(p) => Value::Blob(
+                    p.xform(
+                        eval::to_f64(&v[1]),
+                        eval::to_f64(&v[2]),
+                        eval::to_f64(&v[3]),
+                        eval::to_f64(&v[4]),
+                        eval::to_f64(&v[5]),
+                        eval::to_f64(&v[6]),
+                    )
+                    .to_blob(),
+                ),
+                None => Value::Null,
+            }
+        }
+        "printf" | "format" => super::datetime::printf(&v),
+        _ => {
+            // A user-defined function registered via `register_function`. Builtins
+            // above take precedence; this fires only for an otherwise-unknown name.
+            if let Some(result) = ctx.subqueries.and_then(|s| s.call_udf(&lname, &v)) {
+                return result;
+            }
+            // A built-in window/ranking function used outside an `OVER` clause is
+            // "misuse of window function NAME()" in SQLite, not "no such function".
+            if is_window_function_name(&lname) {
+                return Err(Error::Error(alloc::format!(
+                    "misuse of window function {lname}()"
+                )));
+            }
+            // `RAISE(...)` parses into a canonical `raise(...)` call. A real
+            // trigger program intercepts it before evaluation (see `fire_raise`);
+            // reaching scalar dispatch means it was used outside a trigger, which
+            // SQLite rejects with this dedicated message rather than "no such
+            // function".
+            if lname == "raise" {
+                return Err(Error::Error(alloc::string::String::from(
+                    "RAISE() may only be used within a trigger-program",
+                )));
+            }
+            return Err(Error::Error(alloc::format!("no such function: {name}")));
+        }
+    })
+}
+
+/// Render a value as a SQL literal, like SQLite's `quote()`.
+fn quote_value(v: &Value) -> String {
+    match v {
+        Value::Null => String::from("NULL"),
+        Value::Integer(i) => alloc::format!("{i}"),
+        // `quote()` renders an infinity as `±9.0e+999` (unlike plain text output,
+        // which prints `Inf`).
+        Value::Real(r) if !r.is_finite() => {
+            String::from(if *r < 0.0 { "-9.0e+999" } else { "9.0e+999" })
+        }
+        // `quote()` renders a finite real at round-trip precision (`%!0.15g`,
+        // falling back to `%!0.20e`), unlike the 15-significant-digit column
+        // rendering `format_real` produces — so a dumped real reparses exactly.
+        Value::Real(r) => crate::util::fpdecode::quote_real(*r),
+        Value::Text(s) => {
+            // SQLite's `quote()` reads the text through `sqlite3_value_text`, a
+            // NUL-terminated C string, so an embedded NUL truncates the rendered
+            // literal (the stored value keeps its full bytes). Match that.
+            let s = s.split('\0').next().unwrap_or("");
+            alloc::format!("'{}'", s.replace('\'', "''"))
+        }
+        Value::Blob(b) => {
+            // SQLite renders blob literals as `X'ABCD'` — uppercase `X` and
+            // uppercase hex digits.
+            let mut s = String::from("X'");
+            for byte in b {
+                s.push_str(&alloc::format!("{byte:02X}"));
+            }
+            s.push('\'');
+            s
+        }
+    }
+}
+
+/// Decode SQLite `unistr()` escapes: `\uXXXX` (4 hex), `\UXXXXXXXX` (8 hex), and
+/// `\\` (a literal backslash). Any other backslash sequence — including a `\u`/
+/// `\U` with too few hex digits or a trailing `\` — is an error, matching
+/// SQLite's "invalid Unicode escape". A code point Rust cannot represent (a lone
+/// surrogate or one past U+10FFFF) becomes the replacement char `U+FFFD`; SQLite
+/// emits raw WTF-8 there, an extreme edge graphite cannot store in a `String`.
+fn unistr_decode(s: &str) -> Result<String> {
+    let cs: alloc::vec::Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let invalid = || Error::Error(String::from("invalid Unicode escape"));
+    let hex_char = |cs: &[char], at: usize, n: usize| -> Option<u32> {
+        let slice = cs.get(at..at + n)?;
+        if !slice.iter().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        let s: String = slice.iter().collect();
+        u32::from_str_radix(&s, 16).ok()
+    };
+    let mut i = 0;
+    while i < cs.len() {
+        if cs[i] != '\\' {
+            out.push(cs[i]);
+            i += 1;
+            continue;
+        }
+        match cs.get(i + 1) {
+            Some('\\') => {
+                out.push('\\');
+                i += 2;
+            }
+            Some('u') => {
+                let cp = hex_char(&cs, i + 2, 4).ok_or_else(invalid)?;
+                out.push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                i += 6;
+            }
+            Some('U') => {
+                let cp = hex_char(&cs, i + 2, 8).ok_or_else(invalid)?;
+                out.push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                i += 10;
+            }
+            _ => return Err(invalid()),
+        }
+    }
+    Ok(out)
+}
+
+/// Render a control-character-bearing text value as SQLite's `unistr('…')`: each
+/// character below U+0020 becomes `\uXXXX`, a backslash doubles, a single quote
+/// doubles, everything else (including non-ASCII) is kept literal.
+fn unistr_quote_text(s: &str) -> String {
+    let mut out = String::from("unistr('");
+    for c in s.chars() {
+        let cp = c as u32;
+        if cp < 0x20 {
+            out.push_str(&alloc::format!("\\u{cp:04x}"));
+        } else if c == '\\' {
+            out.push_str("\\\\");
+        } else if c == '\'' {
+            out.push_str("''");
+        } else {
+            out.push(c);
+        }
+    }
+    out.push_str("')");
+    out
+}
+
+/// Decode a hex string to bytes, returning `None` on malformed input. A faithful
+/// port of SQLite's `unhexFunc`:
+///
+/// - with no ignore set (`ignore` is `None`), the input must be an even number of
+///   hex digits and nothing else;
+/// - with an ignore set (the 2-argument form), characters from `ignore` may
+///   appear *before*, *between*, and *after* complete byte pairs, but never
+///   *within* a pair — so `unhex('AB CD', ' ')` is `X'ABCD'` while
+///   `unhex('A BCD', ' ')` is `NULL`. Any character that is neither a hex digit
+///   nor in the ignore set fails the whole decode.
+fn unhex(s: &str, ignore: Option<&str>) -> Option<alloc::vec::Vec<u8>> {
+    let hexval = |c: char| -> Option<u8> {
+        match c {
+            '0'..='9' => Some(c as u8 - b'0'),
+            'a'..='f' => Some(c as u8 - b'a' + 10),
+            'A'..='F' => Some(c as u8 - b'A' + 10),
+            _ => None,
+        }
+    };
+    let ignored = |c: char| -> bool { ignore.is_some_and(|set| set.contains(c)) };
+    let mut out = alloc::vec::Vec::new();
+    let mut it = s.chars();
+    loop {
+        // Skip any leading/inter-pair ignore characters. A non-ignored,
+        // non-hex-digit character (or running out of input) ends this phase.
+        let hi = loop {
+            match it.next() {
+                None => return Some(out),
+                Some(c) if hexval(c).is_some() => break c,
+                Some(c) if ignored(c) => continue,
+                Some(_) => return None,
+            }
+        };
+        // The second nibble must immediately follow the first.
+        let lo = it.next()?;
+        out.push((hexval(hi)? << 4) | hexval(lo)?);
+    }
+}
+
+/// Whether an identifier character terminates a compile-option name, per
+/// sqlite's `sqlite3IsIdChar` (`[A-Za-z0-9_$]`). Used to require that
+/// `sqlite_compileoption_used(X)` matches a whole option word.
+fn is_id_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
+}
+
+/// Port of `sqlite3_compileoption_used`: strip an optional leading `SQLITE_`
+/// prefix (case-insensitive) from `name`, then return true if it matches the
+/// start of one of graphite's compile options such that the option ends there
+/// (the following char, if any, is not an identifier char — so `THREADSAFE=1`
+/// would still match `THREADSAFE`). graphite's options carry no `SQLITE_`
+/// prefix and no `=value` suffix, so in practice this is a case-insensitive
+/// whole-word equality, but the boundary rule is ported verbatim.
+fn compileoption_used(name: &str) -> bool {
+    let stripped = name
+        .get(..7)
+        .filter(|p| p.eq_ignore_ascii_case("SQLITE_"))
+        .map(|_| &name[7..])
+        .unwrap_or(name);
+    let n = stripped.len();
+    let needle = stripped.as_bytes();
+    super::compile_option_names().iter().any(|opt| {
+        let ob = opt.as_bytes();
+        ob.len() >= n
+            && ob[..n].eq_ignore_ascii_case(needle)
+            && ob.get(n).map(|&b| !is_id_char(b)).unwrap_or(true)
+    })
+}
+
+/// Whether `e` is an acceptable `likelihood()` probability: a floating-point
+/// literal in `0.0..=1.0`, after peeling any redundant parentheses. SQLite's
+/// `exprProbability` only accepts a bare `TK_FLOAT` token in range, so an
+/// integer literal, a negated float, or any compound expression is rejected.
+pub(crate) fn likelihood_prob_is_valid(e: &Expr) -> bool {
+    match e {
+        Expr::Paren(inner) => likelihood_prob_is_valid(inner),
+        Expr::Literal(Literal::Real(r)) => (0.0..=1.0).contains(r),
+        _ => false,
+    }
+}
+
+fn arity(name: &str, args: &[Expr], n: usize) -> Result<()> {
+    if args.len() == n {
+        Ok(())
+    } else {
+        Err(wrong_arg_count(name))
+    }
+}
+
+/// SQLite's universal arity-error message: `wrong number of arguments to
+/// function NAME()` — no "(want N, got M)" suffix, for every built-in.
+fn wrong_arg_count(name: &str) -> Error {
+    Error::Error(alloc::format!(
+        "wrong number of arguments to function {name}()"
+    ))
+}
+
+/// The built-in ranking/value window functions, which are only valid inside an
+/// `OVER` clause. Called as a plain scalar, SQLite reports "misuse of window
+/// function NAME()". `name` must already be lowercased.
+fn is_window_function_name(name: &str) -> bool {
+    matches!(
+        name,
+        "row_number"
+            | "rank"
+            | "dense_rank"
+            | "percent_rank"
+            | "cume_dist"
+            | "ntile"
+            | "first_value"
+            | "last_value"
+            | "nth_value"
+            | "lag"
+            | "lead"
+    )
+}
+
+/// SQLite's `soundex(X)`: the phonetic code of the first word in `X` — the first
+/// letter followed by up to three digits, padded with `0`. Input with no letters
+/// (including NULL, which `to_text` maps to "") yields `"?000"`. Faithful port of
+/// `soundexFunc`: each letter maps to a digit; a digit is emitted only when it is
+/// nonzero and differs from the previous letter's code; a zero-code character
+/// (vowel, `H`/`W`/`Y`, or non-letter) resets the running code.
+fn soundex(s: &str) -> String {
+    // Code for a-z (index `c.to_ascii_lowercase() - b'a'`); 0 = not coded.
+    const CODE: [u8; 26] = [
+        0, 1, 2, 3, 0, 1, 2, 0, 0, 2, 2, 4, 5, 5, 0, 1, 2, 6, 2, 3, 0, 1, 0, 2, 0, 2,
+    ];
+    let code_of = |c: u8| -> u8 {
+        if c.is_ascii_alphabetic() {
+            CODE[(c.to_ascii_lowercase() - b'a') as usize]
+        } else {
+            0
+        }
+    };
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() && !b[i].is_ascii_alphabetic() {
+        i += 1;
+    }
+    if i >= b.len() {
+        return String::from("?000");
+    }
+    let mut out = String::with_capacity(4);
+    out.push(b[i].to_ascii_uppercase() as char);
+    let mut prev = code_of(b[i]);
+    let mut j = 1;
+    while j < 4 && i < b.len() {
+        let code = code_of(b[i]);
+        if code > 0 {
+            if code != prev {
+                prev = code;
+                out.push((b'0' + code) as char);
+                j += 1;
+            }
+        } else {
+            prev = 0;
+        }
+        i += 1;
+    }
+    while j < 4 {
+        out.push('0');
+        j += 1;
+    }
+    out
+}
+
+/// Coerce a value to text for the string functions (`trim`/`upper`/`lower`/
+/// `replace`/`substr`/`soundex`).
+///
+/// When the value is a BLOB, SQLite reads it as a NUL-terminated C string
+/// (`sqlite3_value_text`), so an embedded `NUL` byte truncates the coerced
+/// text: `trim(X'00200041…')` is `''`, not `'   A   '`. We reproduce that for
+/// the blob path. A genuine TEXT value keeps its embedded NULs: this engine's
+/// TEXT model is NUL-preserving (e.g. the JSON5 `\0` escape stores a real NUL
+/// character — see `tests/json5.rs`), and `length`/`unicode` count through it,
+/// so truncating TEXT here would be inconsistent with the rest of the engine.
+/// Build a `Decimal` from a value the way SQLite's `decimal_new(_, bTextOnly=1)`
+/// does: every non-NULL input is parsed as decimal text (integers/reals via
+/// their text rendering, blobs as their raw bytes). NULL yields `None`, which
+/// the caller maps to SQLite's per-function NULL behavior.
+fn decimal_text(v: &Value) -> Option<crate::util::decimal::Decimal> {
+    match v {
+        Value::Null => None,
+        Value::Text(t) => Some(crate::util::decimal::Decimal::from_bytes(t.as_bytes())),
+        Value::Blob(b) => Some(crate::util::decimal::Decimal::from_bytes(b)),
+        other => Some(crate::util::decimal::Decimal::from_bytes(
+            eval::to_text(other).as_bytes(),
+        )),
+    }
+}
+
+/// Build a `Decimal` from a value the way SQLite's `decimal_new(_, bTextOnly=0)`
+/// does (used by `decimal(X)`): text/integer parse as decimal text, a real is
+/// expanded to its exact binary value, an 8-byte blob is read big-endian as an
+/// IEEE-754 double and likewise expanded, and any other blob length (or NULL, or
+/// a non-finite float) yields `None`.
+fn decimal_from_value(v: &Value) -> Option<crate::util::decimal::Decimal> {
+    use crate::util::decimal::Decimal;
+    match v {
+        Value::Null => None,
+        Value::Text(t) => Some(Decimal::from_bytes(t.as_bytes())),
+        Value::Integer(_) => Some(Decimal::from_bytes(eval::to_text(v).as_bytes())),
+        Value::Real(r) => Decimal::from_double(*r),
+        Value::Blob(b) => {
+            if b.len() == 8 {
+                let bits = u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
+                Decimal::from_double(f64::from_bits(bits))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn c_text(v: &Value) -> String {
+    match v {
+        Value::Blob(b) => {
+            let end = b.iter().position(|&x| x == 0).unwrap_or(b.len());
+            String::from_utf8_lossy(&b[..end]).into_owned()
+        }
+        other => eval::to_text(other),
+    }
+}
+
+fn str_map(v: &Value, f: impl Fn(&str) -> String) -> Value {
+    match v {
+        Value::Null => Value::Null,
+        other => Value::Text(f(&c_text(other)).into()),
+    }
+}
+
+/// Map a non-UTF-8 text value byte-by-byte (used by `upper`/`lower` for the
+/// invalid-UTF-8 case, which SQLite folds with a byte-wise `toupper`/`tolower`).
+/// The raw bytes are transformed in place so the invalid bytes are preserved and
+/// only ASCII letters fold, instead of collapsing through a lossy decode.
+fn byte_map_text(v: &Value, f: impl Fn(&u8) -> u8) -> Value {
+    match v {
+        Value::Text(s) => Value::Text(crate::value::Text::from_bytes(
+            s.as_bytes().iter().map(f).collect(),
+        )),
+        _ => v.clone(),
+    }
+}
+
+/// A numeric argument to a math function: `None` for SQL `NULL`, else the value
+/// coerced to `f64` (SQLite applies REAL affinity to math-function arguments).
+/// Coerce a math-function argument to `f64` using SQLite's
+/// `sqlite3_value_numeric_type` rule: an INTEGER / REAL — or a text that is wholly
+/// numeric (`'4'`, `'  9  '`, `'2e2'`) — yields its numeric value, while a
+/// non-numeric text, a blob, or NULL yields `None` (so the caller returns SQL
+/// NULL). This is *not* the lax `to_f64`, which would turn `'abc'` or a blob into
+/// `0.0` and silently feed it to `sqrt`/`log`/`pow`/…
+fn real_arg(v: &Value) -> Option<f64> {
+    eval::to_number_strict(v).map(|n| eval::to_f64(&n))
+}
+
+/// The double a 1-argument `ieee754`/`ieee754_mantissa`/`ieee754_exponent` reads:
+/// an exactly-8-byte BLOB is reinterpreted (big-endian) as the raw bits of a
+/// double; anything else coerces via `sqlite3_value_double` (NULL / non-numeric
+/// → `0.0`). Mirrors the blob branch of `ieee754func`.
+fn ieee754_double_arg(v: &Value) -> f64 {
+    match v {
+        Value::Blob(b) if b.len() == 8 => crate::util::ieee754::from_blob(b).unwrap_or(0.0),
+        other => real_arg(other).unwrap_or(0.0),
+    }
+}
+
+/// Wrap a computed math result, matching SQLite's split between a *domain error*
+/// and an *overflow*:
+///
+/// - a missing argument or a `NaN` result (`sqrt(-1)`, `ln(0)`, `acos(2)`, …)
+///   becomes SQL `NULL`;
+/// - a `±∞` result is kept as a `REAL` — both genuine overflow (`exp(710)`,
+///   `pow(2,2000)`) and poles (`pow(0,-1)`, `atanh(1)`) render as `Inf`/`-Inf`,
+///   exactly as SQLite reports them.
+///
+/// Each underlying `float` routine is responsible for returning `NaN` (not `±∞`)
+/// on a domain error, so that the NULL-vs-Inf decision is made consistently here.
+fn math_finite(r: Option<f64>) -> Value {
+    match r {
+        Some(x) if x.is_nan() => Value::Null,
+        Some(x) => Value::Real(x),
+        None => Value::Null,
+    }
+}
+
+/// A one-argument math function: arity-check, coerce, apply, finiteness-guard.
+fn math1(name: &str, v: &[Value], f: impl Fn(f64) -> f64) -> Result<Value> {
+    if v.len() != 1 {
+        return Err(Error::Error(alloc::format!(
+            "wrong number of arguments to function {name}()"
+        )));
+    }
+    Ok(math_finite(real_arg(&v[0]).map(f)))
+}
+
+/// `ceil`/`ceiling`/`floor`/`trunc`: SQLite dispatches on `sqlite3_value_numeric_type`
+/// — an INTEGER argument is returned UNCHANGED (so its exact value, incl. i64
+/// extremes, survives), a REAL is rounded to a REAL, and a non-numeric text / blob
+/// / NULL argument yields NULL. This differs from the other `math1` functions,
+/// which always coerce to a real (and read a blob's bytes as a number).
+fn math_round_to_int(name: &str, v: &[Value], f: impl Fn(f64) -> f64) -> Result<Value> {
+    if v.len() != 1 {
+        return Err(Error::Error(alloc::format!(
+            "wrong number of arguments to function {name}()"
+        )));
+    }
+    Ok(match eval::to_number_strict(&v[0]) {
+        Some(Value::Integer(i)) => Value::Integer(i),
+        Some(Value::Real(r)) => math_finite(Some(f(r))),
+        _ => Value::Null,
+    })
+}
+
+/// Parse the first argument of a JSON function as a document: `NULL` → `None`;
+/// malformed JSON is an error (matching SQLite).
+/// Render a JSON document result as text (`json_*`) or as a JSONB blob
+/// (`jsonb_*`), chosen by the function name.
+fn json_doc_result(lname: &str, j: &super::json::Json) -> Value {
+    if lname.starts_with("jsonb") {
+        Value::Blob(j.to_jsonb())
+    } else {
+        Value::Text(j.serialize().into())
+    }
+}
+
+fn json_root(v: &Value) -> Result<Option<super::json::Json>> {
+    match v {
+        Value::Null => Ok(None),
+        // A BLOB document is JSONB (SQLite's binary JSON); text is JSON/JSON5.
+        Value::Blob(b) => match super::json::Json::from_jsonb(b) {
+            Some(j) => Ok(Some(j)),
+            None => Err(Error::Error("malformed JSON".into())),
+        },
+        other => match super::json::parse(&eval::to_text(other)) {
+            Some(j) => Ok(Some(j)),
+            None => Err(Error::Error("malformed JSON".into())),
+        },
+    }
+}
+
+/// Validate a JSON path argument, raising SQLite's `bad JSON path: '<path>'`
+/// error if it is malformed. A `NULL` path is left for the caller to treat as a
+/// missing lookup (SQLite returns NULL rather than erroring on a NULL path).
+fn check_path(p: &Value) -> Result<()> {
+    // A NULL path is not validated — callers treat it as a missing lookup
+    // (SQLite returns NULL rather than erroring). Every other type is coerced to
+    // text first (SQLite applies its usual text conversion before parsing the
+    // path), so an integer/real/blob argument is validated as the path it spells
+    // — e.g. `json_extract(j, 1)` raises `bad JSON path: '1'`, just like sqlite.
+    if matches!(p, Value::Null) {
+        return Ok(());
+    }
+    let s = eval::to_text(p);
+    if !super::json::path_is_valid(&s) {
+        return Err(Error::Error(alloc::format!("bad JSON path: '{s}'")));
+    }
+    Ok(())
+}
+
+/// Convert a *value* argument of a JSON/JSONB constructor or mutator to JSON. A
+/// BLOB is embedded as its JSON when it decodes as JSONB (so `jsonb_*` results
+/// compose, e.g. `jsonb_object('a', jsonb_array(1,2))`) and otherwise rejected —
+/// graphite has no value subtypes, so it falls back to "does it parse as JSONB".
+fn json_value_arg(val: &Value, expr: Option<&Expr>, ctx: &EvalCtx) -> Result<super::json::Json> {
+    if let Value::Blob(b) = val {
+        return super::json::Json::from_jsonb(b)
+            .ok_or_else(|| Error::Error("JSON cannot hold BLOB values".into()));
+    }
+    let subtype = expr.is_some_and(|e| carries_json_subtype(e, ctx));
+    Ok(arg_to_json_with_subtype(val, subtype))
+}
+
+/// The *value* argument of `json_set`/`json_insert`/`json_replace` (and their
+/// `jsonb_*` forms). Identical to [`json_value_arg`] except that a plain
+/// (non-JSON-subtype) SQL TEXT value becomes a **TEXTRAW** element — the raw
+/// UTF-8 bytes stored verbatim, unescaped — matching sqlite's
+/// `jsonFunctionArgToBlob`, which serves exactly this argument position (the
+/// JSON *text* constructors `json_object`/`json_array` instead escape a plain
+/// string into a `TEXT`/`TEXTJ` node when their output is re-encoded).
+fn json_edit_value_arg(
+    val: &Value,
+    expr: Option<&Expr>,
+    ctx: &EvalCtx,
+) -> Result<super::json::Json> {
+    if let Value::Blob(b) = val {
+        return super::json::Json::from_jsonb(b)
+            .ok_or_else(|| Error::Error("JSON cannot hold BLOB values".into()));
+    }
+    // A JSON-subtype TEXT value (the output of a json-producing expression) is
+    // parsed as JSON; any other plain TEXT is stored raw (TEXTRAW).
+    let subtype = expr.is_some_and(|e| carries_json_subtype(e, ctx));
+    if let Value::Text(s) = val
+        && !subtype
+    {
+        return Ok(super::json::Json::text_raw(s.as_str()));
+    }
+    Ok(arg_to_json_with_subtype(val, subtype))
+}
+
+/// `json_extract`: one path returns the SQL value at that path (objects/arrays as
+/// minified JSON text); multiple paths return a JSON array of the extracted
+/// elements (missing paths become JSON `null`). `jsonb_extract` is the same but
+/// returns object/array results (and the multi-path array) as JSONB blobs.
+fn json_extract(root: &super::json::Json, paths: &[Value], jsonb: bool) -> Result<Value> {
+    // SQLite scans the paths left to right: a NULL path collapses the whole
+    // result to NULL (even when a *later* path is malformed), but a malformed
+    // non-NULL path that comes *first* still errors before the NULL is reached.
+    for p in paths {
+        if matches!(p, Value::Null) {
+            return Ok(Value::Null);
+        }
+        check_path(p)?;
+    }
+    // A non-scalar single-path result is JSONB under jsonb_extract; scalars are
+    // returned as their SQL value either way.
+    let scalar_or_doc = |j: &super::json::Json| -> Value {
+        match j {
+            super::json::Json::Array(_) | super::json::Json::Object(_) if jsonb => {
+                Value::Blob(j.to_jsonb())
+            }
+            _ => j.to_sql(),
+        }
+    };
+    if paths.len() == 1 {
+        return Ok(
+            match super::json::navigate(root, &eval::to_text(&paths[0])) {
+                Some(j) => scalar_or_doc(j),
+                None => Value::Null,
+            },
+        );
+    }
+    let items = paths
+        .iter()
+        .map(|p| match super::json::navigate(root, &eval::to_text(p)) {
+            Some(j) => j.clone(),
+            None => super::json::Json::Null,
+        })
+        .collect();
+    let arr = super::json::Json::Array(items);
+    Ok(if jsonb {
+        Value::Blob(arr.to_jsonb())
+    } else {
+        Value::Text(arr.serialize().into())
+    })
+}
+
+/// Convert a constructor argument to JSON: when `subtype` holds (the argument
+/// carries SQLite's JSON subtype — see [`carries_json_subtype`]), a TEXT value is
+/// spliced in as parsed JSON rather than quoted as a string.
+pub(crate) fn arg_to_json_with_subtype(val: &Value, subtype: bool) -> super::json::Json {
+    if let Value::Text(s) = val
+        && subtype
+        && let Some(j) = super::json::parse(s)
+    {
+        return j;
+    }
+    super::json::value_to_json(val)
+}
+
+/// Runtime-aware companion to [`produces_json`]: additionally true when `expr` is
+/// a single-path `json_extract(J, path)` whose extracted node is a JSON object or
+/// array. SQLite marks such a result with the JSON subtype, but its text is
+/// indistinguishable from a scalar string of the same characters (`json_extract`
+/// of the *string* `"[1,2]"` vs of the *array* `[1,2]` both yield the SQL text
+/// `[1,2]`), so the subtype can only be decided from the source expression at
+/// runtime — which the JSON *scalar* constructors/editors can do because they
+/// hold the evaluation `ctx`. (The `json_group_*` aggregates cannot, and keep the
+/// static [`produces_json`] approximation.)
+pub(crate) fn carries_json_subtype(expr: &Expr, ctx: &EvalCtx) -> bool {
+    if let Expr::Paren(inner) = expr {
+        return carries_json_subtype(inner, ctx);
+    }
+    if produces_json(expr) {
+        return true;
+    }
+    if let Expr::Function { name, args, .. } = expr
+        && name.eq_ignore_ascii_case("json_extract")
+        && args.len() == 2
+        && let Ok(doc) = eval::eval(&args[0], ctx)
+        && let Ok(Some(root)) = json_root(&doc)
+        && let Ok(path) = eval::eval(&args[1], ctx)
+        && !matches!(path, Value::Null)
+    {
+        return matches!(
+            super::json::navigate(&root, &eval::to_text(&path)),
+            Some(super::json::Json::Array(_) | super::json::Json::Object(_))
+        );
+    }
+    false
+}
+
+/// Static, conservative test: could `expr` carry the JSON subtype at runtime?
+/// True for the statically-JSON forms ([`produces_json`]) AND a single-path
+/// `json_extract` (whose subtype is value-dependent — [`carries_json_subtype`]
+/// decides it at run time). The VDBE aggregate spike uses this to DECLINE such
+/// arguments (deferring to the tree-walker, which has the row `ctx`), since it
+/// evaluates arguments to bare values that no longer carry their source
+/// expression.
+pub(crate) fn might_carry_json_subtype(expr: &Expr) -> bool {
+    if let Expr::Paren(inner) = expr {
+        return might_carry_json_subtype(inner);
+    }
+    if produces_json(expr) {
+        return true;
+    }
+    matches!(expr,
+        Expr::Function { name, args, .. }
+            if name.eq_ignore_ascii_case("json_extract") && args.len() == 2)
+}
+
+/// Whether an expression *statically* yields a value carrying SQLite's JSON
+/// subtype. Functions that always emit a JSON structure (including the
+/// `json_group_array`/`json_group_object` aggregates) qualify; `json_extract`
+/// only with two or more paths (then its result is always a JSON array — a
+/// single path's subtype is value-dependent and needs the runtime subtype, not
+/// modelled here); the `->` operator always carries the subtype (`->>` does not).
+pub(crate) fn produces_json(e: &Expr) -> bool {
+    match e {
+        Expr::Function { name, args, .. } => {
+            let lname = name.to_ascii_lowercase();
+            match lname.as_str() {
+                // `json_quote` marks its result with the JSON subtype too
+                // (sqlite's `jsonQuoteFunc` calls `sqlite3_result_subtype`), so
+                // `json_set('{}','$.a',json_quote('s'))` embeds `"s"` as JSON.
+                "json" | "json_quote" | "json_array" | "json_object" | "json_insert"
+                | "json_replace" | "json_set" | "json_patch" | "json_remove"
+                | "json_group_array" | "json_group_object" => true,
+                // Multiple paths → a JSON array (subtype). One path's subtype is
+                // value-dependent (structure vs scalar), so don't claim it here.
+                "json_extract" => args.len() >= 3,
+                _ => false,
+            }
+        }
+        // `->` (JsonExtract) carries the JSON subtype; `->>` (JsonExtractText) does not.
+        Expr::Binary {
+            op: crate::sql::ast::BinaryOp::JsonExtract,
+            ..
+        } => true,
+        Expr::Paren(inner) => produces_json(inner),
+        _ => false,
+    }
+}
+
+fn type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Integer(_) => "integer",
+        Value::Real(_) => "real",
+        Value::Text(_) => "text",
+        Value::Blob(_) => "blob",
+    }
+}
+
+fn trim_fn(v: &[Value], left: bool, right: bool) -> Value {
+    if v.is_empty() || matches!(v[0], Value::Null) {
+        return Value::Null;
+    }
+    // A NULL trim-set yields NULL, like any other NULL argument (sqlite:
+    // `trim(X, NULL)` / `ltrim` / `rtrim` are all NULL).
+    if v.len() >= 2 && matches!(v[1], Value::Null) {
+        return Value::Null;
+    }
+    // SQLite trims whole *characters* found in the trim set (default: a single
+    // space) from each end. Work over raw bytes split into lenient `SKIP_UTF8`
+    // character units, so a non-UTF-8 subject/trim-set is exact (byte-identical to
+    // the old char path for valid UTF-8) rather than collapsing through a lossy
+    // decode. A unit is trimmed when it byte-equals a unit of the trim set.
+    let s = eval::text_bytes(&v[0]);
+    let set = if v.len() >= 2 {
+        eval::text_bytes(&v[1])
+    } else {
+        alloc::vec![b' ']
+    };
+    let s_bounds = utf8_unit_boundaries(&s);
+    let set_bounds = utf8_unit_boundaries(&set);
+    let set_units: Vec<&[u8]> = (0..set_bounds.len() - 1)
+        .map(|k| &set[set_bounds[k]..set_bounds[k + 1]])
+        .collect();
+    let is_trim = |unit: &[u8]| set_units.contains(&unit);
+    let n = s_bounds.len() - 1;
+    let mut start = 0;
+    let mut end = n;
+    if left {
+        while start < end && is_trim(&s[s_bounds[start]..s_bounds[start + 1]]) {
+            start += 1;
+        }
+    }
+    if right {
+        while end > start && is_trim(&s[s_bounds[end - 1]..s_bounds[end]]) {
+            end -= 1;
+        }
+    }
+    Value::Text(crate::value::Text::from_bytes(
+        s[s_bounds[start]..s_bounds[end]].to_vec(),
+    ))
+}
+
+/// Decode the first UTF-8 character of `bytes` to its codepoint — a faithful port
+/// of SQLite's `sqlite3Utf8Read` (util/utf.c). It is deliberately lenient: a lead
+/// byte below 0xC0 (ASCII or a stray continuation byte) yields the byte value
+/// itself, and a malformed multi-byte sequence (overlong, surrogate, or a
+/// non-character) yields U+FFFD — never a decode failure. `bytes` must be
+/// non-empty (callers check first). This lets `unicode()` of a non-UTF-8 text
+/// return the same codepoint SQLite does instead of collapsing to NULL.
+fn utf8_read_first(bytes: &[u8]) -> u32 {
+    // `sqlite3Utf8Trans1`: the low bits contributed by each lead byte 0xC0..=0xFF.
+    const TRANS1: [u8; 64] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        0x1e, 0x1f, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
+        0x0d, 0x0e, 0x0f, 0x00, 0x01, 0x02, 0x03, 0x00, 0x01, 0x02, 0x03, 0x00, 0x01, 0x02, 0x03,
+        0x00, 0x01, 0x02, 0x03,
+    ];
+    let first = bytes[0];
+    if first < 0xc0 {
+        return u32::from(first);
+    }
+    let mut c = u32::from(TRANS1[(first - 0xc0) as usize]);
+    let mut i = 1;
+    while i < bytes.len() && (bytes[i] & 0xc0) == 0x80 {
+        c = (c << 6) + u32::from(bytes[i] & 0x3f);
+        i += 1;
+    }
+    if c < 0x80 || (c & 0xffff_f800) == 0xd800 || (c & 0xffff_fffe) == 0xfffe {
+        0xfffd
+    } else {
+        c
+    }
+}
+
+/// Byte offsets at which each UTF-8 "character" begins, plus a final sentinel at
+/// `bytes.len()`, using SQLite's lenient `SKIP_UTF8` stepping (a lead byte
+/// consumes the following continuation bytes; anything else is its own unit).
+/// `boundaries.len() - 1` is the character count and unit `k` spans
+/// `boundaries[k]..boundaries[k + 1]`. For valid UTF-8 this matches `char`
+/// boundaries exactly; for non-UTF-8 text it steps byte-wise like SQLite instead
+/// of going through a lossy decode.
+fn utf8_unit_boundaries(bytes: &[u8]) -> alloc::vec::Vec<usize> {
+    let mut bounds = alloc::vec::Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        bounds.push(i);
+        let lead = bytes[i];
+        i += 1;
+        if lead >= 0xc0 {
+            while i < bytes.len() && (bytes[i] & 0xc0) == 0x80 {
+                i += 1;
+            }
+        }
+    }
+    bounds.push(bytes.len());
+    bounds
+}
+
+fn substr(v: &[Value]) -> Result<Value> {
+    if v.len() < 2 || v.len() > 3 {
+        return Err(wrong_arg_count("substr"));
+    }
+    if matches!(v[0], Value::Null) {
+        return Ok(Value::Null);
+    }
+    // `substr` of a blob slices bytes and returns a blob; otherwise it slices
+    // characters of the text form and returns text. Both are modelled as a byte
+    // buffer `data` split into units by `bounds`: for a blob each byte is a unit;
+    // for text the units are UTF-8 characters (lenient for non-UTF-8 bytes, so a
+    // byte-backed text slices exactly like SQLite rather than via a lossy decode).
+    let blob = matches!(v[0], Value::Blob(_));
+    let data: alloc::vec::Vec<u8> = match &v[0] {
+        Value::Blob(b) => b.clone(),
+        Value::Text(s) => s.as_bytes().to_vec(),
+        other => eval::to_text(other).into_bytes(),
+    };
+    let bounds: alloc::vec::Vec<usize> = if blob {
+        (0..=data.len()).collect()
+    } else {
+        utf8_unit_boundaries(&data)
+    };
+    // `substr(x, NULL [, …])` returns NULL — a NULL start position propagates
+    // like any other NULL argument (the length already does, below).
+    if matches!(v[1], Value::Null) {
+        return Ok(Value::Null);
+    }
+    let len = (bounds.len() - 1) as i64;
+    // Faithful port of SQLite's `substrFunc` (src/func.c): `p1` is a 1-based
+    // start (negative counts from the end), `p2` a signed length (negative
+    // means "the |p2| units ending at p1"). The default `p2` for the 2-arg form
+    // is the LENGTH limit (1e9), which we clamp to `len` below. All arithmetic
+    // saturates so pathological i64 inputs (e.g. i64::MIN) cannot overflow,
+    // matching SQLite's behaviour where the window collapses to empty or the
+    // whole string.
+    let mut p1 = eval::to_int_value(&v[1]);
+    let mut p2 = if v.len() == 3 {
+        // `substr(x, p1, NULL)` returns NULL (the length argument is required
+        // to be non-NULL to produce a value).
+        if matches!(v[2], Value::Null) {
+            return Ok(Value::Null);
+        }
+        eval::to_int_value(&v[2])
+    } else {
+        1_000_000_000
+    };
+    if p1 < 0 {
+        p1 = p1.saturating_add(len);
+        if p1 < 0 {
+            if p2 < 0 {
+                p2 = 0;
+            } else {
+                p2 = p2.saturating_add(p1);
+            }
+            p1 = 0;
+        }
+    } else if p1 > 0 {
+        p1 -= 1;
+    } else if p2 > 0 {
+        p2 -= 1;
+    }
+    if p2 < 0 {
+        if p2 < -p1 {
+            p2 = p1;
+        } else {
+            p2 = -p2;
+        }
+        p1 = p1.saturating_sub(p2);
+    }
+    // `p1 >= 0 && p2 >= 0` now holds. Clamp the window to the available units,
+    // then map the unit window back to a byte range via `bounds`.
+    let unit_count = bounds.len() - 1;
+    let start = (p1.max(0) as usize).min(unit_count);
+    let take = (p2.max(0) as usize).min(unit_count - start);
+    let out = data[bounds[start]..bounds[start + take]].to_vec();
+    if blob {
+        Ok(Value::Blob(out))
+    } else {
+        Ok(Value::Text(crate::value::Text::from_bytes(out)))
+    }
+}
+
+fn instr(v: &[Value]) -> Result<Value> {
+    if v.len() != 2 {
+        return Err(wrong_arg_count("instr"));
+    }
+    if matches!(v[0], Value::Null) || matches!(v[1], Value::Null) {
+        return Ok(Value::Null);
+    }
+    // Faithful port of SQLite's `instrFunc`. When BOTH arguments are blobs the
+    // result is a 1-based BYTE offset; otherwise a 1-based CHARACTER offset into
+    // the text form (0 when not found). The search advances the haystack one unit
+    // at a time — a whole UTF-8 character for text (lenient `SKIP_UTF8` stepping,
+    // so a non-UTF-8 operand is exact and a needle can only match on a character
+    // boundary), a single byte for the both-blob case — and `memcmp`s at each
+    // position, counting units advanced.
+    let both_blob = matches!(v[0], Value::Blob(_)) && matches!(v[1], Value::Blob(_));
+    let hay = eval::text_bytes(&v[0]);
+    let needle = eval::text_bytes(&v[1]);
+    let mut n: i64 = 0;
+    let mut off = 0usize;
+    let found = loop {
+        if off + needle.len() <= hay.len() && hay[off..off + needle.len()] == needle[..] {
+            break true;
+        }
+        if off >= hay.len() {
+            break false;
+        }
+        off += 1;
+        if !both_blob {
+            while off < hay.len() && (hay[off] & 0xc0) == 0x80 {
+                off += 1;
+            }
+        }
+        n += 1;
+    };
+    Ok(Value::Integer(if found { n + 1 } else { 0 }))
+}
+
+fn replace(v: &[Value]) -> Result<Value> {
+    if v.len() != 3 {
+        return Err(wrong_arg_count("replace"));
+    }
+    // SQLite short-circuits in a specific order: a NULL subject or a NULL pattern
+    // yields NULL, but an EMPTY pattern returns the subject (converted to text)
+    // *before* the replacement argument is examined — so `replace('ab','',NULL)`
+    // is `'ab'`, not NULL. Checking all three for NULL up front got this wrong.
+    if matches!(v[0], Value::Null) || matches!(v[1], Value::Null) {
+        return Ok(Value::Null);
+    }
+    // SQLite's `replace` works on the raw `value_text` bytes of each argument (a
+    // byte-wise substring replace) and always returns text, so operate on bytes —
+    // keeping a non-UTF-8 subject/pattern/replacement exact instead of collapsing
+    // through a lossy decode.
+    let s = eval::text_bytes(&v[0]);
+    let from = eval::text_bytes(&v[1]);
+    if from.is_empty() {
+        return Ok(Value::Text(crate::value::Text::from_bytes(s)));
+    }
+    if matches!(v[2], Value::Null) {
+        return Ok(Value::Null);
+    }
+    let to = eval::text_bytes(&v[2]);
+    let mut out: Vec<u8> = Vec::with_capacity(s.len());
+    let mut i = 0;
+    while i < s.len() {
+        if s[i..].starts_with(&from[..]) {
+            out.extend_from_slice(&to);
+            i += from.len();
+        } else {
+            out.push(s[i]);
+            i += 1;
+        }
+    }
+    Ok(Value::Text(crate::value::Text::from_bytes(out)))
+}
+
+fn round(v: &[Value]) -> Result<Value> {
+    if v.is_empty() || v.len() > 2 {
+        return Err(wrong_arg_count("round"));
+    }
+    // A NULL value or NULL precision both yield NULL.
+    if matches!(v[0], Value::Null) || matches!(v.get(1), Some(Value::Null)) {
+        return Ok(Value::Null);
+    }
+    let x = eval::to_f64(&v[0]);
+    let digits = if v.len() == 2 {
+        eval::to_int_value(&v[1]).clamp(0, 30) as u32
+    } else {
+        0
+    };
+    let r = round_half_away(x, digits);
+    // SQLite normalises a negative-zero result to positive zero
+    // (`round(-0.4)` is `0.0`, not `-0.0`).
+    Ok(Value::Real(if r == 0.0 { 0.0 } else { r }))
+}
+
+/// Round `x` to `n` decimal places, half away from zero, matching SQLite. Instead
+/// of `round(x * 10^n) / 10^n` — which loses precision (e.g. `2.675 * 100` rounds
+/// *up* to exactly `267.5` in f64, giving 2.68 where SQLite gives 2.67) — this
+/// formats `x` to high fixed precision (exposing the true decimal digits) and
+/// rounds the digit string, so it sees that `2.675` is really `2.67499…`.
+pub(crate) fn round_half_away(x: f64, n: u32) -> f64 {
+    if !x.is_finite() || x == 0.0 {
+        return x;
+    }
+    // Values at or beyond 2^52 have no fractional part in f64; return unchanged
+    // (this also bounds the formatted string length).
+    if crate::util::float::abs(x) >= 4_503_599_627_370_496.0 {
+        return x;
+    }
+    let neg = x < 0.0;
+    let ax = crate::util::float::abs(x);
+    let prec = n as usize + 25;
+    let s = alloc::format!("{ax:.prec$}");
+    let dot = s.find('.').unwrap_or(s.len());
+    let frac = if dot < s.len() { &s[dot + 1..] } else { "" };
+    // Round up when the first dropped digit (position `n`) is >= 5.
+    let round_up = frac.as_bytes().get(n as usize).is_some_and(|&d| d >= b'5');
+    // Kept digits: the integer part followed by the first `n` fractional digits.
+    let mut digits: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    digits.extend_from_slice(&s.as_bytes()[..dot]);
+    if n > 0 {
+        let take = (n as usize).min(frac.len());
+        digits.extend_from_slice(&frac.as_bytes()[..take]);
+        // Pad with zeros if the formatting produced fewer than n fraction digits.
+        digits.resize(dot + n as usize, b'0');
+    }
+    if round_up {
+        let mut i = digits.len();
+        loop {
+            if i == 0 {
+                digits.insert(0, b'1');
+                break;
+            }
+            i -= 1;
+            if digits[i] == b'9' {
+                digits[i] = b'0';
+            } else {
+                digits[i] += 1;
+                break;
+            }
+        }
+    }
+    // Reassemble with the decimal point `n` digits from the right and parse back.
+    let nn = n as usize;
+    let s2 = if nn == 0 {
+        alloc::string::String::from_utf8(digits).unwrap_or_default()
+    } else {
+        let point = digits.len() - nn;
+        let mut out = alloc::string::String::new();
+        out.push_str(core::str::from_utf8(&digits[..point]).unwrap_or("0"));
+        out.push('.');
+        out.push_str(core::str::from_utf8(&digits[point..]).unwrap_or("0"));
+        out
+    };
+    let mag: f64 = s2.parse().unwrap_or(ax);
+    if neg { -mag } else { mag }
+}
+
+fn scalar_min_max(v: &[Value], want_min: bool) -> Result<Value> {
+    // Scalar min()/max() take 2+ args (the 1-arg/`*` forms are aggregates,
+    // routed elsewhere); 0 args is an error in SQLite.
+    if v.is_empty() {
+        let name = if want_min { "min" } else { "max" };
+        return Err(Error::Error(alloc::format!(
+            "wrong number of arguments to function {name}()"
+        )));
+    }
+    // NULL if any arg is NULL.
+    if v.iter().any(|x| matches!(x, Value::Null)) {
+        return Ok(Value::Null);
+    }
+    // Mirror SQLite's `minmaxFunc`: scan left-to-right keeping the best so far.
+    // For `min`, replace whenever `best >= candidate` (so on a tie the *later*
+    // argument wins — `min(1.0,1)` is the integer `1`); for `max`, replace only
+    // when `best < candidate` (so on a tie the *earlier* argument wins —
+    // `max(1.0,1)` is the real `1.0`). This preserves the storage class of the
+    // exact argument SQLite would return.
+    let mut best = v[0].clone();
+    for x in &v[1..] {
+        let ord = eval::compare(&best, x);
+        let take = if want_min {
+            ord != core::cmp::Ordering::Less
+        } else {
+            ord == core::cmp::Ordering::Less
+        };
+        if take {
+            best = x.clone();
+        }
+    }
+    Ok(best)
+}
+
+fn hex_encode(v: &Value) -> String {
+    let bytes = match v {
+        Value::Blob(b) => b.clone(),
+        Value::Text(s) => s.as_bytes().to_vec(),
+        other => eval::to_text(other).into_bytes(),
+    };
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push(nibble(b >> 4));
+        s.push(nibble(b & 0xf));
+    }
+    s
+}
+
+fn nibble(n: u8) -> char {
+    match n {
+        0..=9 => (b'0' + n) as char,
+        _ => (b'A' + n - 10) as char,
+    }
+}
+
+fn char_fn(v: &[Value]) -> Value {
+    // Faithful port of SQLite's `charFunc` (src/func.c): each argument is a code
+    // point; an out-of-range value (negative or > U+10FFFF) becomes U+FFFD, then
+    // the low 21 bits are UTF-8-encoded *without* the surrogate check the Rust
+    // `char` type enforces — so `char(0xD800)` yields the raw 3-byte encoding
+    // `ED A0 80` exactly like SQLite, which the byte-backed TEXT can now hold.
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    for x in v {
+        let cp = eval::to_int_value(x);
+        let cp = if (0..=0x10_ffff).contains(&cp) {
+            cp
+        } else {
+            0xfffd
+        };
+        let c = (cp as u32) & 0x1f_ffff;
+        if c < 0x80 {
+            out.push(c as u8);
+        } else if c < 0x800 {
+            out.push(0xc0 + ((c >> 6) & 0x1f) as u8);
+            out.push(0x80 + (c & 0x3f) as u8);
+        } else if c < 0x1_0000 {
+            out.push(0xe0 + ((c >> 12) & 0x0f) as u8);
+            out.push(0x80 + ((c >> 6) & 0x3f) as u8);
+            out.push(0x80 + (c & 0x3f) as u8);
+        } else {
+            out.push(0xf0 + ((c >> 18) & 0x07) as u8);
+            out.push(0x80 + ((c >> 12) & 0x3f) as u8);
+            out.push(0x80 + ((c >> 6) & 0x3f) as u8);
+            out.push(0x80 + (c & 0x3f) as u8);
+        }
+    }
+    Value::Text(crate::value::Text::from_bytes(out))
+}

@@ -8,7 +8,7 @@
 // fs/fake-db.c against the platform SQLite shared library, so it needs these
 // declarations and constants without requiring a host sqlite3-dev package.
 // This header is used solely to build the C behavioral oracle: the Rust
-// fake_db module uses vendored pure-Rust redb and never links SQLite.
+// fake_db module uses vendored pure-Rust graphitesql and never links SQLite.
 // New C-oracle uses must add their exact public declarations here rather than
 // depending on a generated or host-specific SQLite header.
 

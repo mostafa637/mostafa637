@@ -2,9 +2,10 @@
 //!
 //! `tools/fake-db-dump.c` links the upstream C metadata implementation to its
 //! local SQLite runtime, then records every return, metadata read and hash of
-//! ordered logical tables. The Rust side uses the vendored pure-Rust `redb`
-//! library instead. Matching this fixture therefore checks the Rust database
-//! model rather than merely comparing two calls to SQLite.
+//! ordered logical tables. The Rust side uses the vendored pure-Rust
+//! SQLite-3-compatible `graphitesql` library instead. Matching this fixture
+//! therefore checks an independently implemented Rust SQLite engine rather
+//! than merely comparing two calls to native SQLite.
 //!
 //! Regenerate the C oracle locally with:
 //!
@@ -88,8 +89,8 @@ fn read_value(row: Option<MetadataRow>) -> ReadValue {
 }
 
 // C keeps a transaction open over several fixture records. Route every
-// primitive to that redb transaction when one exists; otherwise use FakeDb's
-// autocommit counterpart.
+// primitive to that pure-Rust SQLite transaction when one exists; otherwise
+// use FakeDb's autocommit counterpart.
 macro_rules! metadata_call {
     ($active:expr, $db:expr, $method:ident($($argument:expr),* $(,)?)) => {{
         match $active.as_ref() {
@@ -236,7 +237,7 @@ fn run_operation(fields: &[&str], db: &FakeDb, active: &mut Option<FakeDbTransac
 fn pure_rust_fake_db_matches_the_c_sqlite_metadata_reference() {
     let fixture = std::fs::read_to_string(FIXTURE)
         .unwrap_or_else(|error| panic!("cannot read {FIXTURE}: {error}"));
-    let db = FakeDb::open_in_memory().expect("pure-Rust redb opens an in-memory fakefs database");
+    let db = FakeDb::open_in_memory().expect("pure-Rust SQLite opens an in-memory fakefs database");
     let mut active: Option<FakeDbTransaction> = None;
     let mut pending: Option<Pending> = None;
     let mut operations = 0usize;

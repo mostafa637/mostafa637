@@ -13,9 +13,9 @@ name = "ish_emu"
 path = "src/lib.rs"
 
 [dependencies]
-# Pure-Rust embedded ACID B-tree store, vendored at v3.1.2 so Cargo does not
-# need the unavailable crates.io registry or any native database library.
-redb = { path = "vendor/redb", default-features = false }
+# Pure-Rust SQLite 3 engine, vendored at v0.1.7 so Cargo does not need the
+# unavailable crates.io registry or any native SQLite/database library.
+graphitesql = { path = "vendor/graphitesql", default-features = false, features = ["std"] }
 
 [profile.release]
 opt-level = 3
