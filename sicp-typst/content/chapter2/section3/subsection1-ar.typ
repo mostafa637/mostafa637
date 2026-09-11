@@ -54,7 +54,7 @@ print(llist("a", b))
 print(llist("a", b))
 ```)
 
-في القسم @sec:conditionals قدمنا #py("==") و #py("!=") كـ محمولات أولية على الأعداد.
+في القسم @sec:conditionals قدمنا #py("==") و #py("!=") كمحمولات أولية على الأعداد.
 #idx("equality", sub: "of strings")
 #idx("==", sub: "as string comparison operator")
 

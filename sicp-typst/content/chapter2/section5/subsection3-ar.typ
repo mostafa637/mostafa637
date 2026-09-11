@@ -18,7 +18,7 @@
 #idx("polynomial arithmetic", sub: "definition of polynomial")
 #idx("polynomial(s)", sub: "definition of")
 
-تُعرّف حدودية متعددي الحدود (#en[polynomial]) عادةً بدلالة متغير غير محدد (أو متغير مستقل - #idx("indeterminate") #emph[indeterminate]) يُرمز له بالرمز $x$. وتُكتب الحدودية كـ مجموع من الحدود (#en[terms]):
+تُعرّف حدودية متعددي الحدود (#en[polynomial]) عادةً بدلالة متغير غير محدد (أو متغير مستقل - #idx("indeterminate") #emph[indeterminate]) يُرمز له بالرمز $x$. وتُكتب الحدودية كمجموع من الحدود (#en[terms]):
 $ a_n x^n + a_(n-1) x^(n-1) + ... + a_1 x + a_0 $
 حيث $a_n, a_(n-1), ..., a_0$ هي المعاملات (#idx("coefficient") #emph[coefficients])، و $n$ هي الدرجة أو الرتبة (#emph[order])، و $x^k$ هي القوى المتتالية للمتغير.
 

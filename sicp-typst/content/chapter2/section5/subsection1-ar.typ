@@ -48,7 +48,7 @@ def make_python_number(n):
     return get("make", "python_number")(n)
 ```)
 
-الآن وبعد أن أصبح إطار عمل نظام الحساب العام قائماً، يمكننا facilmente تضمين أنواع جديدة من الأعداد. إليك حزمة تؤدي الحساب الكسري. لاحظ أنه كفائدة للخاصية الجمعية، يمكننا استخدام شفرة الأعداد الكسرية من القسم @sec:rationals دون تعديل كـ دوال داخلية في الحزمة:
+الآن وبعد أن أصبح إطار عمل نظام الحساب العام قائماً، يمكننا facilmente تضمين أنواع جديدة من الأعداد. إليك حزمة تؤدي الحساب الكسري. لاحظ أنه كفائدة للخاصية الجمعية، يمكننا استخدام شفرة الأعداد الكسرية من القسم @sec:rationals دون تعديل كدوال داخلية في الحزمة:
 #idx("package", sub: "rational-number")#idx("rational package")#idx("rational-number arithmetic", sub: "interfaced to generic arithmetic system")#idx("installrationalpackage", decl: true)#idx("makerational", decl: true)
 #snippet(```python
 def install_rational_package():

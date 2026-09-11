@@ -35,7 +35,7 @@ def is_polar(z):
     return type_tag(z) == "polar"
 ```)
 
-مع وسوم الأنواع، يمكن لـ #en[Ben] و #en[Alyssa] الآن تعديل الشفرة الخاصة بهما بحيث يمكن لتمثيليهما المختلفين التعايش في النظام نفسه. وكلما بنى #en[Ben] عدداً مركباً، يوسمه كـ مستطيلي. وكلما بنيت #en[Alyssa] عدداً مركباً، توسمه كـ قطبي. بالإضافة إلى ذلك، يجب على #en[Ben] و #en[Alyssa] التأكد من أن أسماء دوالهما لا تتعارض. وإحدى الطرق للقيام بذلك هي أن يلحق #en[Ben] اللاحقة #py("rectangular") باسم كل دالة من دوال التمثيل الخاصة به وأن تلحق #en[Alyssa] اللاحقة #py("polar") بأسماء دوالها. إليك تمثيل #en[Ben] المستطيلي المعدل من القسم @sec:representations-complex-numbers:
+مع وسوم الأنواع، يمكن لـ #en[Ben] و #en[Alyssa] الآن تعديل الشفرة الخاصة بهما بحيث يمكن لتمثيليهما المختلفين التعايش في النظام نفسه. وكلما بنى #en[Ben] عدداً مركباً، يوسمه كمستطيلي. وكلما بنيت #en[Alyssa] عدداً مركباً، توسمه كقطبي. بالإضافة إلى ذلك، يجب على #en[Ben] و #en[Alyssa] التأكد من أن أسماء دوالهما لا تتعارض. وإحدى الطرق للقيام بذلك هي أن يلحق #en[Ben] اللاحقة #py("rectangular") باسم كل دالة من دوال التمثيل الخاصة به وأن تلحق #en[Alyssa] اللاحقة #py("polar") بأسماء دوالها. إليك تمثيل #en[Ben] المستطيلي المعدل من القسم @sec:representations-complex-numbers:
 #idx("realpartrectangular", decl: true)#idx("imagpartrectangular", decl: true)#idx("magnituderectangular", decl: true)#idx("anglerectangular", decl: true)#idx("makefromrealimagrectangular", decl: true)#idx("makefrommagangrectangular", decl: true)
 #snippet(```python
 def real_part_rectangular(z): return head(z)

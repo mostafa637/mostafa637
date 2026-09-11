@@ -33,7 +33,7 @@ llist(2, "b") llist(3, "a") llist(3, "b")
 #idx("require", decl: true)
 #snippet(```python
 def require(p):
-    if  not  p:
+    if not p:
         amb()
     else:
         pass

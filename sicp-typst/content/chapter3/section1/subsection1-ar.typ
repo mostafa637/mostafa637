@@ -98,7 +98,7 @@ global balance
 
 تغير إعادة الإسناد #meta("name") بحيث تصبح قيمته هي النتيجة التي يتم الحصول عليها بتقييم #meta("new-value"). في الحالة المطروحة، نحن نغير #py("balance") بحيث تصبح قيمته الجديدة هي نتيجة طرح #py("amount") من القيمة السابقة لـ #py("balance").#footnote[تبدو تعليمات إعادة الإسناد وإسنادات التصريح متشابهة ويجب ألا يتم الخلط بينها وبين
 #idx("assignment", sub: "equality test vs.")
-تعبيرات اختبار المساواة التي تأخذ الشكل #syntax(meta("expression_1"), " == ", meta("expression_2")) والتي تُقيّم كـ #py("True") إذا كان #meta("expression")$""_(1)$ يُقيّم إلى نفس القيمة مثل #meta("expression")$""_(2)$ وكـ #py("False") بخلاف ذلك.]
+تعبيرات اختبار المساواة التي تأخذ الشكل #syntax(meta("expression_1"), " == ", meta("expression_2")) والتي تُقيّم ك#py("True") إذا كان #meta("expression")$""_(1)$ يُقيّم إلى نفس القيمة مثل #meta("expression")$""_(2)$ وك#py("False") بخلاف ذلك.]
 
 تستخدم الدالة #py("withdraw") أيضاً
 #idx("sequence of statements")

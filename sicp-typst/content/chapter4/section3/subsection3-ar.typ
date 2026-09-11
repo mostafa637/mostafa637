@@ -285,7 +285,7 @@ def analyze_amb(component):
 #idx("محثات", sub: "المقييم غير الحتمي")#idx("driverloop", sub: "للمقييم غير الحتمي", decl: true)
 #snippet(```python
 input_prompt = "amb-evaluate input:"
-output_prompt =  "amb-evaluate value:"
+output_prompt = "amb-evaluate value:"
 
 def driver_loop(env):
     def internal_loop(retry):
@@ -317,7 +317,7 @@ def driver_loop(env):
 
 الاستدعاء الأولي لـ #py("internal_loop") يستخدم دالة #py("retry") تشتكي من عدم وجود مشكلة حالية وتستأنف حلقة المحرك. وهذا هو السلوك الذي سيحدث إذا كتب المستخدم #py("retry") عندما لا يكون هناك تقييم قيد التقدم.
 
-ونبدأ حلقة المحرك كالمعتاد، عن طريق إعداد البيئة العامة وتمريرها كالبيئة المحيطة بالتكرار الأول لـ #py("driver_loop").
+ونبدأ حلقة المحرك كالمعتاد، عن طريق تهيئة البيئة العالمية وتمريرها كالبيئة المحيطة بالتكرار الأول لـ #py("driver_loop").
 
 #snippet(```python
 the_global_environment = setup_environment()
@@ -437,7 +437,7 @@ else:
 #exercise(label-name: <ex:require_special>, [
 إذا لم نكن قد أدركنا أن
 #idx("require", sub: "كشكل نحوي")
-#py("require") يمكن تنفيذها كدالة اعتيادية تستخدم #py("amb")، ليتم تعريفها بواسطة المستخدم كجزء من برنامج غير حتمي، لكنا اضطررنا لتنفيذها كـ شكل نحوي. وهذا سيتطلب دوال بناء جملة
+#py("require") يمكن تنفيذها كدالة اعتيادية تستخدم #py("amb")، ليتم تعريفها بواسطة المستخدم كجزء من برنامج غير حتمي، لكنا اضطررنا لتنفيذها كشكل نحوي. وهذا سيتطلب دوال بناء جملة
 
 #snippet(```python
 def is_require(component):

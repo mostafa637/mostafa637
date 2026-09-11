@@ -82,14 +82,14 @@ tail
 للتعامل مع الأرقام الكبيرة جدًا بحيث لا يمكن تمثيلها في المقدار الثابت من المساحة المخصصة لمؤشر واحد، يمكننا استخدام نوع بيانات
 #idx("bignum")
 #idx("number(s)", sub: "bignum")
-#emph[عدد ضخم] (#en[bignum]) متميز، يحدد له المؤشر قائمة يتم فيها تخزين أجزاء الرقم.#footnote[هذا تمامًا مثل كتابة رقم كـ تسلسل من الأرقام، باستثناء أن كل "رقم" هو رقم بين 0 وأكبر رقم يمكن تخزينه في مؤشر واحد.]
+#emph[عدد ضخم] (#en[bignum]) متميز، يحدد له المؤشر قائمة يتم فيها تخزين أجزاء الرقم.#footnote[هذا تمامًا مثل كتابة رقم كتسلسل من الأرقام، باستثناء أن كل "رقم" هو رقم بين 0 وأكبر رقم يمكن تخزينه في مؤشر واحد.]
 
 السلسلة النصية
 #idx("string(s)", sub: "representation of")
 قد تُمثَّل كمؤشر معلّم النوع يحدد تسلسلاً من الأحرف التي تشكل التمثيل المطبوع للسلسلة. يبني المحلل مثل هذا التسلسل عندما يواجه سلسلة نصية صريحة، والمُعامل التجميعي للسلاسل النصية #py("+") والدوال الأوّلية المنتجة للسلاسل مثل
 #py("stringify")
 تبني مثل هذا التسلسل.
-نظرًا لأننا نريد أن يتم التعرف على حالتين من السلسلة النصية كـ "نفس" السلسلة بواسطة
+نظرًا لأننا نريد أن يتم التعرف على حالتين من السلسلة النصية ك"نفس" السلسلة بواسطة
 #py("===") ونريد أن تكون
 #idx("===", sub: "as string comparison operator")
 #idx("equality", sub: "of strings")
@@ -116,7 +116,7 @@ tail
 #py("vector_ref")
 و
 #py("vector_set")
-متاحان كـ عمليات أوّلية. نفترض أيضًا أن العمليات العددية على المؤشرات (مثل زيادة مؤشر، أو استخدام مؤشر زوج لدليل شعاع، أو إضافة عددين) تستخدم فقط جزء الدليل من المؤشر معلّم النوع.
+متاحان كعمليات أوّلية. نفترض أيضًا أن العمليات العددية على المؤشرات (مثل زيادة مؤشر، أو استخدام مؤشر زوج لدليل شعاع، أو إضافة عددين) تستخدم فقط جزء الدليل من المؤشر معلّم النوع.
 
 على سبيل المثال، يمكننا جعل آلة المسجّلات تدعم التعليمات
 #idx("head (primitive function)", sub: "implemented with vectors")#idx("tail (primitive function)", sub: "implemented with vectors")
@@ -161,7 +161,7 @@ perform(list(op(\"vector_set\"), reg(\"the_tails\"), reg(", meta("reg"), $""_(1)
 assign(", meta("reg"), $""_(1)$, ", list(op(\"pair\"), reg(", meta("reg"), $""_(2)$, "), reg(", meta("reg"), $""_(3)$, ")))
       ")
 
-تُنفذ كـ التسلسل التالي من عمليات الأشعة:#footnote[هذا بالأساس هو تنفيذ #py("pair") بدلالة #py("set_head") و #py("set_tail")، كما هو موضح في القسم @sec:mutable-list-structure. العملية #py("get_new_pair") المستخدمة في ذلك التنفيذ تتحقق هنا بواسطة المؤشر #py("free").]
+تُنفذ كالتسلسل التالي من عمليات الأشعة:#footnote[هذا بالأساس هو تنفيذ #py("pair") بدلالة #py("set_head") و #py("set_tail")، كما هو موضح في القسم @sec:mutable-list-structure. العملية #py("get_new_pair") المستخدمة في ذلك التنفيذ تتحقق هنا بواسطة المؤشر #py("free").]
 
 #syntax("
 perform(list(op(\"vector_set\"),
@@ -230,7 +230,7 @@ const y = list(x, x);
 
 #exercise(label-name: <ex:count-leaves-machine>, [
 نفذ آلات مسجّلات للدوال التالية #idx("countleaves", sub: "as register machine").
-افترض أن عمليات ذاكرة بنية القائمة متاحة كـ أوّليات آلة.
+افترض أن عمليات ذاكرة بنية القائمة متاحة كأوّليات آلة.
 
 + العودية #py("count_leaves"): #snippet(```python function count_leaves(tree) { return is_null(tree) ? 0 : ! is_pair(tree) ? 1 : count_leaves(head(tree)) + count_leaves(tail(tree)); } ```)
 + العودية #py("count_leaves") مع عدّاد صريح: #snippet(```python function count_leaves(tree) { function count_iter(tree, n) { return is_null(tree) ? n : ! is_pair(tree) ? n + 1 : count_iter(tail(tree), count_iter(head(tree), n)); } return count_iter(tree, 0); } ```)
@@ -238,7 +238,7 @@ const y = list(x, x);
 
 #exercise(label-name: <ex:5_21>, [
 قدم التمرين @ex:append من القسم @sec:mutable-list-structure دالة #py("append") تضيف قائمتين لتشكيل قائمة جديدة ودالة #py("append_mutator") تربط قائمتين معًا. صمم آلة مسجّلات لتنفيذ كل من هذه الدوال #idx("append", sub: "as register machine") #idx("appendmutator", sub: "as register machine").
-افترض أن عمليات ذاكرة بنية القائمة متاحة كـ عمليات أوّلية.
+افترض أن عمليات ذاكرة بنية القائمة متاحة كعمليات أوّلية.
 ])
 
 #idx("pair(s)", sub: "represented using vectors")

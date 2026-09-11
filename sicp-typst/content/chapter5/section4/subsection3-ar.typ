@@ -8,10 +8,10 @@
 #idx("explicit-control evaluator for Python", sub: "blocks")
 #idx("explicit-control evaluator for Python", sub: "declarations")
 
-يُقيّم جسم الكتلة بالنسبة للبيئة الحالية الممتدة بإطار يربط جميع الأسماء المحلية بالقيمة #py("\"*unassigned*\""). نستخدم مؤقتًا المسجّل #py("val") لحفظ قائمة جميع المتغيرات المُعلنة في الكتلة، والتي يتم الحصول عليها بـ
+يُقيّم جسم الكتلة بالنسبة للبيئة الحالية الممتدة بإطار يربط جميع الأسماء المحلية بالقيمة #py("\"*unassigned*\""). نستخدم مؤقتًا المسجّل #py("val") لحفظ قائمة كل المتغيرات المُعلنة في الكتلة، وهي القائمة التي نحصل عليها بالمسح الخارج للإعلانات (#en[scanning out declarations]) عبر
 #idx("scanning out declarations", sub: "in explicit-control evaluator")
 #py("scan_out_declarations")
-من القسم @sec:core-of-evaluator. يُفترض أن الدالتين #py("scan_out_declarations") و #py("list_of_unassigned") متاحتان كعمليات آلة.#footnote[تقترح الحاشية السفلية @foot:syntax-transformer أن التنفيذ الفعلي سيجري تحويلات البناء قبل تنفيذ البرنامج. وفي نفس السياق، يجب استخراج الأسماء المُعلنة في الكتل في خطوة معالجة مسبقة بدلاً من استخراجها في كل مرة يُقيّم فيها كتلة.]
+من القسم @sec:core-of-evaluator. ونفترض أن الدالتين #py("scan_out_declarations") و #py("list_of_unassigned") متاحتان كعمليتَي آلة.#footnote[تقترح الحاشية السفلية @foot:syntax-transformer أن التنفيذ الفعلي سيجري تحويلات البناء قبل تنفيذ البرنامج. وفي نفس السياق، يجب استخراج الأسماء المُعلنة في الكتل في خطوة معالجة مسبقة بدلاً من استخراجها في كل مرة يُقيّم فيها كتلة.]
 #idx("evblock", decl: true)
 #syntax("
 \"ev_block\",
@@ -54,8 +54,8 @@
 الإعلانات
 #idx("explicit-control evaluator for Python", sub: "declarations")
 عن المتغيرات والثوابت تُعالج بطريقة مماثلة.
-لاحظ أنه في حين أن قيمة الإسناد هي القيمة التي تم إسنادها، فإن قيمة الإعلان هي #py("undefined"). يتم التعامل مع ذلك عن طريق ضبط #py("val") على #py("undefined") قبل المواصلة.
-كما في المُقيِّم ما فوق الدائري، نحول تعريف الدالة إلى إعلان ثابت تعبير قيمته هو تعبير لامدا. يحدث هذا عند #py("ev_function_definition")، والتي تجري التحويل في مكانه في #py("comp") وتنتقل إلى #py("ev_declaration").
+لاحظ أنه في حين أن قيمة الإسناد هي القيمة التي تم إسنادها، فإن قيمة الإعلان هي #py("undefined"). ويعالَج ذلك بضبط #py("val") على #py("undefined") قبل المتابعة.
+وكما فعلنا في المُقيِّم فوق الدائري (#en[metacircular])، نحوِّل تعريفَ الدالة إلى إعلان ثابتٍ مكافئٍ قيمةُ تعبيره تعبيرُ لامدا. ويحدث ذلك عند #py("ev_function_definition")، التي تُجري التحويل في موضعِه داخل #py("comp") ثم تنتقل إلى #py("ev_declaration").
 
 #idx("evfunctiondefinition", decl: true)#idx("evdeclaration", decl: true)
 #snippet(```python

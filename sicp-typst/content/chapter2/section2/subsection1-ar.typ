@@ -76,7 +76,7 @@ pair(", meta("a"), $""_(1)$, ", pair(", meta("a"), $""_(2)$, ", pair(", $dots.h$
 #idx("pair(s)", sub: "box notation for")
 #idx("notation in this book", sub: "box notation for data")
 نتيجة #py("pair(1, 2)")
-تُطبع كـ #py("[1, 2]")، وكائن البيانات في الشكل @fig:sequence-of-pairs
+تُطبع ك#py("[1, 2]")، وكائن البيانات في الشكل @fig:sequence-of-pairs
 يُطبع كـ
 #py("[1, [2, [3, [4, None]]]]"):
 

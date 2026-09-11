@@ -7,18 +7,18 @@
 #idx("metacircular evaluator for Python", sub: "syntax of evaluated language")
 #idx("parsing Python")
 
-يكتب المبرمجون البرامج كـ نص، أي تسلسلات من المحارف، تـُدخل في بيئة برمجة أو محرر نصوص. ولتشغيل مـُقيِّمنا، نحتاج إلى البدء بـ تمثيل لـ نص البرنامج هذا كـ قيمة في Python.
+يكتب المبرمجون البرامج كنص، أي تسلسلات من المحارف، تُدخل في بيئة برمجة أو محرر نصوص. ولتشغيل مُقيِّمنا، نحتاج إلى البدء بـ تمثيل لـ نص البرنامج هذا كقيمة في Python.
 في القسم @sec:strings قدمنا السلاسل النصية لتمثيل النص. ونود تقييم برامج مثل
 #py("\"size = 2\\n5 * size\"")
 من القسم @sec:naming.
-لسوء الحظ، فإن مثل نص البرنامج هذا لا يوفر هيكلاً كافياً للمـُقيِّم. في هذا المثال، تبدو أجزاء البرنامج
+لسوء الحظ، فإن مثل نص البرنامج هذا لا يوفر هيكلاً كافياً للمُقيِّم. في هذا المثال، تبدو أجزاء البرنامج
 #py("\"size = 2\"") و
 #py("\"5 * size\"") متشابهة، لكنها تحمّل معاني مختلفة جداً. والدوال النحوية التجريدية مثل
 #py("declaration_value_expression") ستكون صعبة وغير ضامنة للسلامة لتنفيذها بـ فحص نص البرنامج.
 في هذا القسم، نقدم لذلك دالة
 #idx("parse")
 #py("parse") تترجم نص البرنامج إلى
-#emph[تمثيل القائمة المـُعنونة] (#en[tagged-list representation])، المـُذكرة بالبيانات المـُعنونة في القسم @sec:manifest-types.
+#emph[تمثيل القائمة المُعنونة] (#en[tagged-list representation])، المُذكرة بالبيانات المُعنونة في القسم @sec:manifest-types.
 على سبيل المثال، فإن تطبيق #py("parse") على السلسلة النصية للبرنامج أعلاه ينتج هيكل بيانات يعكس هيكل البرنامج: تسلسل يتكون من إعلان ثابت يربط الاسم
 #py("size") بالقيمة 2 وعملية ضرب.
 
@@ -30,25 +30,25 @@ parse("size = 2\n5 * size")
 parse("size = 2\n5 * size")
 ```)
 
-تصل الدوال النحوية المستخدمة بواسطة المـُقيِّم إلى تمثيل القائمة المـُعنونة المـُنتج بواسطة
+تصل الدوال النحوية المستخدمة بواسطة المُقيِّم إلى تمثيل القائمة المُعنونة المُنتج بواسطة
 #py("parse").
 
-يـُذكر المـُقيِّم بـ برنامج
+يُذكر المُقيِّم بـ برنامج
 #idx("metacircular evaluator for Python", sub: "symbolic differentiation and")
 التفاضل الرمزي
-المـُناقش في القسم @sec:symbolic-differentiation.
+المُناقش في القسم @sec:symbolic-differentiation.
 كِلا البرنامجين يعملان على بيانات رمزية.
 وفي كِلا البرنامجين، تتحدد نتيجة العمل على كائن ما بـ العمل عودياً على أجزاء الكائن ودمج النتائج بطريقة تعتمد على نوع الكائن.
 في كِلا البرنامجين استخدمنا
 #idx("data abstraction")
-تجريد البيانات لفصل القواعد العامة للعمليات عن تفاصيل كيفية تمثيل الكائنات. في برنامج التفاضل، كان هذا يعني أن دالة التفاضل نفسها يمكنها التعامل مع التعبيرات الجبرية في البادئة، أو الوسطية، أو في شكل آخر. وبالنسبة للمـُقيِّم، هذا يعني أن البناء النحوي للغة الجاري تقييمها يتحدد فقط بـ #py("parse") والدوال التي تصنف وتستخرج أجزاء القوائم المـُعنونة المـُنتجة بواسطة #py("parse").
+تجريد البيانات لفصل القواعد العامة للعمليات عن تفاصيل كيفية تمثيل الكائنات. في برنامج التفاضل، كان هذا يعني أن دالة التفاضل نفسها يمكنها التعامل مع التعبيرات الجبرية في البادئة، أو الوسطية، أو في شكل آخر. وبالنسبة للمُقيِّم، هذا يعني أن البناء النحوي للغة الجاري تقييمها يتحدد فقط بـ #py("parse") والدوال التي تصنف وتستخرج أجزاء القوائم المُعنونة المُنتجة بواسطة #py("parse").
 
-#sicp-figure(image("/images/img_javascript/ch4-parse-abstraction.svg", width: 70%), caption: [تجريد البناء النحوي في المـُقيِّم.], label-name: <fig:parse-abstraction>)
+#sicp-figure(image("/images/img_javascript/ch4-parse-abstraction.svg", width: 70%), caption: [تجريد البناء النحوي في المُقيِّم.], label-name: <fig:parse-abstraction>)
 
 يوضح الشكل @fig:parse-abstraction
 #idx("abstraction barriers", sub: "in representing Python syntax")
 حاجز التجريد
-المـُشكل بواسطة الدوال الشرطية والمحددات النحوية، والتي تصل بين المـُقيِّم وتمثيل القائمة المـُعنونة للبرامج، والتي بدورها تـُفصل عن تمثيل السلسلة النصية بواسطة #py("parse"). ونصف أدناه إعراب مكونات البرامج ونردج الدوال الشرطية والمحددات النحوية المقابلة، بالإضافة إلى المنشئات إذا كانت مطلوبة.
+المُشكل بواسطة الدوال الشرطية والمحددات النحوية، والتي تصل بين المُقيِّم وتمثيل القائمة المُعنونة للبرامج، والتي بدورها تُفصل عن تمثيل السلسلة النصية بواسطة #py("parse"). ونصف أدناه إعراب مكونات البرامج ونردج الدوال الشرطية والمحددات النحوية المقابلة، بالإضافة إلى المنشئات إذا كانت مطلوبة.
 
 #idx("parsing Python")
 
@@ -57,7 +57,7 @@ parse("size = 2\n5 * size")
 التعبيرات الحرفية
 
 #idx("literal expression", sub: "parsing of")
-تـُعرب إلى قوائم مـُعنونة بالعنوان #py("\"literal\"") والقيمة الفعلية.
+تُعرب إلى قوائم مُعنونة بالعنوان #py("\"literal\"") والقيمة الفعلية.
 
 $ mat(delim: #none, lt.double space italic("literal")-italic("expression") space gt.double, =, mono("list(\"literal\", ")italic("value")mono(")")) $
 
@@ -96,7 +96,7 @@ def is_literal(component):
     return is_tagged_list(component, "literal")
 ```)
 
-تـُمّ تعريفها بدلالة الدالة #py("is_tagged_list")، والتي تحدد القوائم التي تبدأ بالسلسلة النصية المحددة:
+تُمّ تعريفها بدلالة الدالة #py("is_tagged_list")، والتي تحدد القوائم التي تبدأ بالسلسلة النصية المحددة:
 #idx("istaggedlist", decl: true)
 #snippet(```python
 def is_tagged_list(component, the_tag):
@@ -130,11 +130,11 @@ def make_literal(value):
 
 #subheading([الأسماء])
 
-يتضمن تمثيل القائمة المـُعنونة لـ
+يتضمن تمثيل القائمة المُعنونة لـ
 
 #idx("name", sub: "parsing of")
 #idx("symbol(s)", sub: "in parsing of names")
-الأسماء العنوان #py("\"name\"") كـ عنصر أول والسلسلة النصية التي تمثل الاسم كـ عنصر ثاني.
+الأسماء العنوان #py("\"name\"") كعنصر أول والسلسلة النصية التي تمثل الاسم كعنصر ثاني.
 
 $ mat(delim: #none, lt.double space italic("name") space gt.double, =, mono("list(\"name\", ")italic("symbol")mono(")")) $
 
@@ -144,7 +144,7 @@ $ mat(delim: #none, lt.double space italic("name") space gt.double, =, mono("lis
 #idx("isname")
 #py("is_name").
 
-يـُوصل إلى الرمز باستخدام المحدد
+يُوصل إلى الرمز باستخدام المحدد
 #idx("symbolofname")
 #py("symbol_of_name").
 
@@ -170,7 +170,7 @@ $ mat(delim: #none, lt.double space italic("expression")mono(";") space gt.doubl
 تطبيقات الدوال
 
 #idx("function application", sub: "parsing of")
-تـُعرب كما يلي:
+تُعرب كما يلي:
 
 #syntax($lt.double space$, meta("fun-expr"), "(", meta("arg-expr"), $""_(1)$, ", ", $dots.h$, ", ", meta("arg-expr"), $""_(n)$, ")", $space gt.double$, " =
      llist(\"application\",
@@ -178,7 +178,7 @@ $ mat(delim: #none, lt.double space italic("expression")mono(";") space gt.doubl
           llist(", $lt.double space$, meta("arg-expr"), $""_(1) med gt.double$, ", ", $dots.h$, ", ", $lt.double space$, meta("arg-expr"), $""_(n) med gt.double$, "))
 	  ")
 
-نعلن عن #idx("isapplication") #py("is_application") كـ دالة شرطية نحوية وعن #idx("functionexpression") #idx("argexpressions") #py("function_expression") و #py("arg_expressions") كـ محددات.
+نعلن عن #idx("isapplication") #py("is_application") كدالة شرطية نحوية وعن #idx("functionexpression") #idx("argexpressions") #py("function_expression") و #py("arg_expressions") كمحددات.
 
 نضيف منشئاً لتطبيقات الدوال، لاستخدامه بواسطة #py("operator_combination_to_application"):
 #idx("makeapplication", decl: true)
@@ -193,7 +193,7 @@ def make_application(function_expression, argument_expressions):
 
 #idx("conditional expression", sub: "parsing of")
 #idx("conditional statement", sub: "parsing of")
-تـُعرب كما يلي:
+تُعرب كما يلي:
 
 #syntax($lt.double space$, meta("predicate"), " ? ", meta("consequent-expression"), " : ", meta("alternative-expression"), $space gt.double$, " =
         llist(\"conditional_expression\",
@@ -202,7 +202,7 @@ def make_application(function_expression, argument_expressions):
              ", $lt.double space$, meta("alternative-expression"), $space gt.double$, ")
 	  ")
 
-وبالمثل، تـُعرب العبارات الشرطية كما يلي:
+وبالمثل، تُعرب العبارات الشرطية كما يلي:
 
 #syntax($lt.double space$, "if (", meta("predicate"), ") ", meta("consequent-block"), " else ", meta("alternative-block"), $space gt.double$, " =
         llist(\"conditional_statement\",
@@ -228,12 +228,12 @@ def make_application(function_expression, argument_expressions):
 تعبير الدالة غير المسمات (#en[lambda])
 
 #idx("lambda expression", sub: "parsing of")
-الذي جسمه تعبير يـُعرب كما لو أن الجسم يتكون من كتلة تحتوي على عبارة إرجاع واحدة يكون تعبير إرجاعها هو جسم تعبير #en[lambda].
+الذي جسمه تعبير يُعرب كما لو أن الجسم يتكون من كتلة تحتوي على عبارة إرجاع واحدة يكون تعبير إرجاعها هو جسم تعبير #en[lambda].
 
 #syntax($lt.double space$, "(", meta("name"), $""_(1)$, ", ", $dots.h$, ", ", meta("name"), $""_(n)$, ") => ", meta("expression"), $space gt.double$, " =
     ", $lt.double space$, "(", meta("name"), $""_(1)$, ", ", $dots.h$, ", ", meta("name"), $""_(n)$, ") => { return ", meta("expression"), "; }", $space gt.double$)
 
-وتعبير #en[lambda] الذي جسمه كتلة يـُعرب كما يلي:
+وتعبير #en[lambda] الذي جسمه كتلة يُعرب كما يلي:
 
 #syntax($lt.double space$, "(", meta("name"), $""_(1)$, ", ", $dots.h$, ", ", meta("name"), $""_(n)$, ") => ", meta("block"), $space gt.double$, " =
      llist(\"lambda_expression\",
@@ -268,7 +268,7 @@ def make_lambda_expression(parameters, body):
 عبارة التسلسل
 
 #idx("sequence of statements", sub: "parsing of")
-تغلف تسلسلاً من العبارات في عبارة واحدة. ويـُعرب تسلسل العبارات كما يلي:
+تغلف تسلسلاً من العبارات في عبارة واحدة. ويُعرب تسلسل العبارات كما يلي:
 
 #syntax($lt.double space$, meta("statement"), $""_(1)$, " ", $dots.c$, " ", meta("statement"), $""_(n) med gt.double$, " =
      llist(\"sequence\", llist(", $lt.double space$, meta("statement"), $""_(1) med gt.double$, ", ", $dots.h$, ", ", $lt.double space$, meta("statement"), $""_(n) med gt.double$, "))
@@ -283,8 +283,8 @@ def make_lambda_expression(parameters, body):
 #py("rest_statements"). ونختبر ما إذا كانت القائمة فارغة باستخدام الدالة الشرطية
 #py("is_empty_sequence") وما إذا كانت تحتوي على عنصر واحد فقط
 باستخدام الدالة الشرطية
-#py("is_last_statement").#footnote[هذه المحددات لقائمة العبارات ليست مقصودة كـ تجريد للبيانات.
-بل تـُمّ تقديمها كـ أسماء تذكيرية لعمليات القائمة الأساسية لجعل فهم المـُقيِّم صريح التحكم في القسم @sec:eceval أسهل.]<foot:mceval-abstraction>
+#py("is_last_statement").#footnote[هذه المحددات لقائمة العبارات ليست مقصودة كتجريد للبيانات.
+بل تُمّ تقديمها كأسماء تذكيرية لعمليات القائمة الأساسية لجعل فهم المُقيِّم صريح التحكم في القسم @sec:eceval أسهل.]<foot:mceval-abstraction>
 #idx("firststatement", decl: true)#idx("reststatements", decl: true)#idx("isemptysequence", decl: true)#idx("islaststatement", decl: true)
 #snippet(```python
 def first_statement(stmts):
@@ -305,7 +305,7 @@ def is_last_statement(stmts):
 الكتل
 
 #idx("block", sub: "parsing of")
-تـُعرب كما يلي:#footnote[قد يقرر تنفيذ المـُعرب تمثيل الكتلة بـ تسلسل عباراتها فقط إذا لم تكن أي من عبارات التسلسل إعلانات، أو تمثيل تسلسل يحتوي على عبارة واحدة فقط بـ تلك العبارة. معالجات اللغة في هذا الفصل وفي الفصل 5 لا تعتمد على هذه القرارات.]
+تُعرب كما يلي:#footnote[قد يقرر تنفيذ المُعرب تمثيل الكتلة بـ تسلسل عباراتها فقط إذا لم تكن أي من عبارات التسلسل إعلانات، أو تمثيل تسلسل يحتوي على عبارة واحدة فقط بـ تلك العبارة. معالجات اللغة في هذا الفصل وفي الفصل 5 لا تعتمد على هذه القرارات.]
 
 $ mat(delim: #none, lt.double space mono(\{) space italic("statements") space mono(\}) space gt.double, =, mono("list(\"block\",") space lt.double space italic("statements") space gt.double mono(")")) $
 
@@ -322,7 +322,7 @@ $ mat(delim: #none, lt.double space mono(\{) space italic("statements") space mo
 عبارات الإرجاع
 
 #idx("return statement", sub: "parsing of")
-تـُعرب كما يلي:
+تُعرب كما يلي:
 
 $ mat(delim: #none, lt.double space bold(mono("return")) space italic("expression") mono(";") space gt.double, =, mono("list(\"return_statement\",") space lt.double space italic("expression") space gt.double mono(")")) $
 
@@ -338,7 +338,7 @@ $ mat(delim: #none, lt.double space bold(mono("return")) space italic("expressio
 الإسنادات
 
 #idx("assignment", sub: "parsing of")
-تـُعرب كما يلي:
+تُعرب كما يلي:
 
 $ mat(delim: #none, lt.double med italic("name") space mono("=") space italic("expression") med gt.double, =, mono("list(\"assignment\",") space lt.double med italic("name") med gt.double mono(", ") lt.double med italic("expression") med gt.double mono(")")) $
 
@@ -350,7 +350,7 @@ $ mat(delim: #none, lt.double med italic("name") space mono("=") space italic("e
 و
 #idx("assignmentvalueexpression")
 #py("assignment_value_expression").
-والرمز مـُغلف في قائمة مـُعنونة تمثل الاسم، وبالتالي فإن
+والرمز مُغلف في قائمة مُعنونة تمثل الاسم، وبالتالي فإن
 #py("assignment_symbol") تحتاج إلى فك تغليفه.
 #idx("assignmentsymbol", decl: true)
 #snippet(```python
@@ -364,7 +364,7 @@ def assignment_symbol(component):
 
 #idx("assignment", sub: "parsing of")
 #idx("variable", sub: "assignment, parsing of")
-تـُعرب كما يلي:
+تُعرب كما يلي:
 
 #syntax($lt.double space$, meta("name"), "$ = $", meta("expression"), $space gt.double$, " =
      llist(\"assignment\", ", $lt.double space$, meta("name"), $space gt.double$, ", ", $lt.double space$, meta("expression"), $space gt.double$, ")
@@ -372,7 +372,7 @@ def assignment_symbol(component):
 
 المحددات
 #py("assignment_symbol") و
-#py("assignment_value_expression") تـُطبق على كِلا النوعين.
+#py("assignment_value_expression") تُطبق على كِلا النوعين.
 #idx("assignmentsymbol", decl: true)#idx("assignmentvalueexpression", decl: true)
 #snippet(```python
 def assignment_symbol(component):
@@ -393,7 +393,7 @@ def make_assignment(name, value_expression):
 تعاريف الدوال
 
 #idx("function definition", sub: "parsing of")
-تـُعرب كما يلي:
+تُعرب كما يلي:
 
 #syntax($lt.double space$, "function ", meta("name"), "(", meta("name"), $""_(1)$, ", ", $dots.h$, " ", meta("name"), $""_(n)$, ") ", meta("block"), $space gt.double$, " =
     llist(\"function_definition\",
@@ -425,7 +425,7 @@ def is_declaration(component):
 
 المحددات
 #py("declaration_symbol") و
-#py("declaration_value_expression") تـُطبق على جميع
+#py("declaration_value_expression") تُطبق على جميع
 الأنواع الثلاثة.
 #idx("declarationsymbol", decl: true)#idx("declarationvalueexpression", decl: true)
 #snippet(```python
@@ -453,7 +453,7 @@ def make_constant_declaration(name, value_expression):
 
 بعض الأشكال النحوية
 #idx("syntactic form", sub: "as derived component")
-في لغتنا يمكن تعريفها بدلالة مكونات تتضمن أشكالاً نحوية أخرى، بدلاً من أن تـُنفذ مباشرة.
+في لغتنا يمكن تعريفها بدلالة مكونات تتضمن أشكالاً نحوية أخرى، بدلاً من أن تُنفذ مباشرة.
 ومثال على ذلك هو
 #idx("function definition", sub: "as derived component")
 #idx("derived components in evaluator", sub: "function definition")
@@ -464,13 +464,13 @@ def function_decl_to_constant_decl(component):
     return make_constant_declaration( function_definition_name(component), make_lambda_expression( function_definition_parameters(component), function_definition_body(component)))
 ```)
 
-تنفيذ تقييم تعاريف الدوال بهذه الطريقة يبسط المـُقيِّم لأنه يقلل من عدد الأشكال النحوية التي يجب تحديد عملية تقييمها صراحة.
+تنفيذ تقييم تعاريف الدوال بهذه الطريقة يبسط المُقيِّم لأنه يقلل من عدد الأشكال النحوية التي يجب تحديد عملية تقييمها صراحة.
 
 وبالمثل، نُعرّف
 
 #idx("operator combination", sub: "parsing of")
 تركيبات المعاملات بدلالة تطبيقات الدوال.
-تركيبات المعاملات أحادية أو ثنائية وتحمل رمز معاملها كـ عنصر ثاني في تمثيل القائمة المـُعنونة:
+تركيبات المعاملات أحادية أو ثنائية وتحمل رمز معاملها كعنصر ثاني في تمثيل القائمة المُعنونة:
 
 #syntax($lt.double space$, meta("unary-operator"), " ", meta("expression"), $space gt.double$, " =
      llist(\"unary_operator_combination\",
@@ -509,7 +509,7 @@ def function_decl_to_constant_decl(component):
 #py("first_operand")، و
 #py("second_operand").
 
-يستخدم المـُقيِّم
+يستخدم المُقيِّم
 #py("operator_combination_to_application")
 لتحديد
 #idx("operator combination", sub: "as function application")
@@ -523,7 +523,7 @@ def operator_combination_to_application(component):
     return make_application(make_name(operator), llist(first_operand(component))) if is_unary_operator_combination(component) else make_application(make_name(operator), llist(first_operand(component), second_operand(component)))
 ```)
 
-المكونات (مثل تعاريف الدوال وتركيبات المعاملات) التي نختار تنفيذها كـ تحويلات نحوية تـُسمى
+المكونات (مثل تعاريف الدوال وتركيبات المعاملات) التي نختار تنفيذها كتحويلات نحوية تُسمى
 #idx("derived component")
 #emph[المكونات المشتقة]. وتراكيب التركيب المنطقي هي أيضاً مكونات مشتقة (انظر التمرين @ex:eval-and-or).
 
@@ -536,21 +536,21 @@ def operator_combination_to_application(component):
 
 #exercise(label-name: <ex:parse>, [
 العكس لـ #py("parse")
-يـُسمى
+يُسمى
 #idx("unparse", sub: "as inverse of parse")
-#py("unparse"). ويأخذ كوسيط قائمة مـُعنونة كما تنتجها #py("parse")
+#py("unparse"). ويأخذ كوسيط قائمة مُعنونة كما تنتجها #py("parse")
 ويرجع سلسلة نصية تلتزم بـ تدوين Python.
 
 + اكتب دالة #py("unparse") باتباع هيكل #py("evaluate") (دون وسيط البيئة)، ولكن بإنتاج سلسلة نصية تمثل المكون المعطى، بدلاً من تقييمه. تذكر من القسم @sec:circuit-simulator أن المعامل #py("+") يمكن تطبيقه على سلسلتين نصيتين لربطهما وأن الدالة الأوليّة #py("stringify") تحول القيم مثل 1.5 و صح و #py("None") إلى سلاسل نصية. احرص على احترام أسبقيات المعاملات بـ إحاطة السلاسل النصية الناتجة عن إلغاء إعراب تركيبات المعاملات بالأقواس (دائماً أو عندما يكون ذلك ضرورياً).
-+ دالتك #py("unparse") ستكون مفيدة عند حل التمارين اللاحقة في هذا القسم. حسن #py("unparse") بـ إضافة المحارف #py("\" \"") (مسافة) و #py("\"\\n\"") (سطر جديد) إلى السلسلة النصية الناتجة، لاتباع أسلوب المحاذاة #idx("indentation") المستخدَم في برامج Python في هذا الكتاب. وإضافة مثل محارف المسافات البيضاء #idx("whitespace characters") هذه إلى (أو إزالتها من) نص البرنامج لجعل النص أسهل في القراءة تـُسمى #idx("pretty-printing") #emph[الطباعة الجميلة].
++ دالتك #py("unparse") ستكون مفيدة عند حل التمارين اللاحقة في هذا القسم. حسن #py("unparse") بـ إضافة المحارف #py("\" \"") (مسافة) و #py("\"\\n\"") (سطر جديد) إلى السلسلة النصية الناتجة، لاتباع أسلوب المحاذاة #idx("indentation") المستخدَم في برامج Python في هذا الكتاب. وإضافة مثل محارف المسافات البيضاء #idx("whitespace characters") هذه إلى (أو إزالتها من) نص البرنامج لجعل النص أسهل في القراءة تُسمى #idx("pretty-printing") #emph[الطباعة الجميلة].
 ])
 
 #exercise(label-name: <ex:data-directed-eval>, [
-أعد كتابة #py("evaluate") بحيث تـُجرى عملية التوجيه بـ أسلوب موجه بالبيانات
+أعد كتابة #py("evaluate") بحيث تُجرى عملية التوجيه بـ أسلوب موجه بالبيانات
 #idx("data-directed programming", sub: "in metacircular evaluator")
 #idx("metacircular evaluator for Python", sub: "data-directed evaluate")
 #idx("evaluate (metacircular)", sub: "data-directed")
-قارن هذا بـ دالة التفاضل الموجهة بالبيانات في التمرين @ex:data-directed-differentiation. (يمكنك استخدام عنوان تمثيل القائمة المـُعنونة كـ نوع المكونات.)
+قارن هذا بـ دالة التفاضل الموجهة بالبيانات في التمرين @ex:data-directed-differentiation. (يمكنك استخدام عنوان تمثيل القائمة المُعنونة كنوع المكونات.)
 ])
 
 #exercise(label-name: <ex:eval-and-or>, [
@@ -566,7 +566,7 @@ def operator_combination_to_application(component):
 فالعطف المنطقي $italic("expression")_(1)$ #py("&&") $italic("expression")_(2)$ هو سكر نحوي لـ $italic("expression")_(1)$ #py("?") $italic("expression")_(2)$ #py(":") #py("false")، و
 الفصل المنطقي $italic("expression")_(1)$ #py("||") $italic("expression")_(2)$ هو سكر نحوي لـ $italic("expression")_(1)$ #py("?") #py("true") #py(":") $italic("expression")_(2)$.
 
-وتـُعرب كـ
+وتُعرب كـ
 #idx("&& (logical conjunction)", sub: "parsing of", sort: ";1")
 #idx("|| (logical disjunction)", sub: "parsing of", sort: ";2")
 يلي:
@@ -578,17 +578,17 @@ def operator_combination_to_application(component):
 	  ")
 
 حيث #meta("logical-operation") هو #py("&&") أو #py("||").
-ثبت #py("&&") و #py("||") كـ أشكال نحوية جديدة للمـُقيِّم بـ إعلان دوال نحوية ودوال تقييم مناسبة #py("eval_and") و #py("eval_or"). وبدلاً من ذلك، بين كيفية تنفيذ #py("&&") و #py("||") كـ مكونات مشتقة.
+ثبت #py("&&") و #py("||") كأشكال نحوية جديدة للمُقيِّم بـ إعلان دوال نحوية ودوال تقييم مناسبة #py("eval_and") و #py("eval_or"). وبدلاً من ذلك، بين كيفية تنفيذ #py("&&") و #py("||") كمكونات مشتقة.
 ])
 
 #exercise(label-name: <ex:directly>, [
-+ في Python، يجب ألا تحتوي تعبيرات #en[lambda] على #idx("parameters", sub: "duplicate") #idx("duplicate parameters") #idx("metacircular evaluator for Python", sub: "preventing duplicate parameters") بارامترات مكررة. المـُقيِّم في القسم @sec:core-of-evaluator لا يفحص ذلك.
++ في Python، يجب ألا تحتوي تعبيرات #en[lambda] على #idx("parameters", sub: "duplicate") #idx("duplicate parameters") #idx("metacircular evaluator for Python", sub: "preventing duplicate parameters") بارامترات مكررة. المُقيِّم في القسم @sec:core-of-evaluator لا يفحص ذلك.
 
-  - عدل المـُقيِّم بحيث تعطي أي محاولة لتطبيق دالة بـ بارامترات مكررة إشارة خطأ.
+  - عدل المُقيِّم بحيث تعطي أي محاولة لتطبيق دالة بـ بارامترات مكررة إشارة خطأ.
   - نفذ دالة #py("verify") تفحص ما إذا كان أي تعبير #en[lambda] في برنامج معطى يحتوي على بارامترات مكررة. ومع مثل هذه الدالة، يمكننا فحص البرنامج بأكمله قبل أن نمرره إلى #py("evaluate").
 
-  من أجل تنفيذ هذا الفحص في مـُقيِّم لـ Python، أي من هاتين المقاربتين تفضل؟ ولماذا؟
-+ في Python، يجب أن تكون بارامترات تعبير #en[lambda] متميزة عن #idx("metacircular evaluator for Python", sub: "parameters distinct from local names") #idx("parameters", sub: "distinct from local names") #idx("internal declaration", sub: "names distinct from parameters") الأسماء Mـُعلنة #emph[مباشرة] في كتلة الجسم لتعبير #en[lambda] (عكس الكتلة الداخلية). استخدم مقاربتك المفضلة أعلاه للفحص عن هذا أيضاً.
+  من أجل تنفيذ هذا الفحص في مُقيِّم لـ Python، أي من هاتين المقاربتين تفضل؟ ولماذا؟
++ في Python، يجب أن تكون بارامترات تعبير #en[lambda] متميزة عن #idx("metacircular evaluator for Python", sub: "parameters distinct from local names") #idx("parameters", sub: "distinct from local names") #idx("internal declaration", sub: "names distinct from parameters") الأسماء Mُعلنة #emph[مباشرة] في كتلة الجسم لتعبير #en[lambda] (عكس الكتلة الداخلية). استخدم مقاربتك المفضلة أعلاه للفحص عن هذا أيضاً.
 ])
 
 #exercise([
@@ -597,7 +597,7 @@ def operator_combination_to_application(component):
 #idx("metacircular evaluator for Python", sub: "let* (Scheme variant of let)")
 #idx("let* (Scheme variant of let)")
 #idx("Scheme", sub: "let* in")
-#py("let") يـُسمى #py("let*"). وكان بإمكاننا تقريب سلوك #py("let*") في Python بـ النص على أن إعلان #py("let*") يقدم ضمناً كتلة جديدة يحتوي جسمها على الإعلان وجميع العبارات اللاحقة لتسلسل العبارات الذي يحدث فيه الإعلان. على سبيل المثال، فإن البرنامج
+#py("let") يُسمى #py("let*"). وكان بإمكاننا تقريب سلوك #py("let*") في Python بـ النص على أن إعلان #py("let*") يقدم ضمناً كتلة جديدة يحتوي جسمها على الإعلان وجميع العبارات اللاحقة لتسلسل العبارات الذي يحدث فيه الإعلان. على سبيل المثال، فإن البرنامج
 
 #snippet(```python
 let* x = 3
@@ -606,7 +606,7 @@ let* z = x + y + 5
 print(x * z)
 ```)
 
-يعرض 39 وكان يمكن رؤيته كـ اختصار لـ
+يعرض 39 وكان يمكن رؤيته كاختصار لـ
 
 #snippet(```python
 {
@@ -621,10 +621,10 @@ print(x * z)
 }
 ```)
 
-+ اكتب برنامجاً في هذه اللغة المـُوسعة لـ Python يتصرف بشكل مختلف عندما تـُستبدل بعض الوقوعات للكلمة المفتاحية #py("let") بـ #py("let*").
-+ قدم #py("let*") كـ شكل نحوي جديد بـ تصميم تمثيل قائمة مـُعنونة مناسب وكتابة قاعدة إعراب. وأعلن عن دالة شرطية نحوية ومحددات لتمثيل القائمة المـُعنونة.
-+ بفرض أن #py("parse") تنفذ قاعدتك الجديدة، اكتب دالة #py("let_star_to_nested_let") تحول أي وقوع لـ #py("let*") في برنامج معطى كما هو موضح أعلاه. ويمكننا حينها تقييم برنامج #py("p") في اللغة المـُوسعة بـ تشغيل #py("evaluate(let_star_to_nested_let(p))").
-+ كـ بديل، فكر في تنفيذ #py("let*") بـ إضافة بند إلى #py("evaluate") يتعرف على الشكل النحوي الجديد ويستدعي دالة #py("eval_let_star_declaration"). لماذا لا تعمل هذه المقاربة؟
++ اكتب برنامجاً في هذه اللغة المُوسعة لـ Python يتصرف بشكل مختلف عندما تُستبدل بعض الوقوعات للكلمة المفتاحية #py("let") بـ #py("let*").
++ قدم #py("let*") كشكل نحوي جديد بـ تصميم تمثيل قائمة مُعنونة مناسب وكتابة قاعدة إعراب. وأعلن عن دالة شرطية نحوية ومحددات لتمثيل القائمة المُعنونة.
++ بفرض أن #py("parse") تنفذ قاعدتك الجديدة، اكتب دالة #py("let_star_to_nested_let") تحول أي وقوع لـ #py("let*") في برنامج معطى كما هو موضح أعلاه. ويمكننا حينها تقييم برنامج #py("p") في اللغة المُوسعة بـ تشغيل #py("evaluate(let_star_to_nested_let(p))").
++ كبديل، فكر في تنفيذ #py("let*") بـ إضافة بند إلى #py("evaluate") يتعرف على الشكل النحوي الجديد ويستدعي دالة #py("eval_let_star_declaration"). لماذا لا تعمل هذه المقاربة؟
 ])
 
 #exercise(label-name: <ex:while_loop>, [
@@ -671,7 +671,7 @@ def factorial(n):
     return product
 ```)
 
-تـُعرب حلقات طالما كما يلي:
+تُعرب حلقات طالما كما يلي:
 
 #syntax($lt.double space$, "while (", meta("predicate"), ") ", meta("block"), $space gt.double$, " =
         llist(\"while_loop\", ", $lt.double space$, meta("predicate"), $space gt.double$, ", ", $lt.double space$, meta("block"), $space gt.double$, ")
@@ -679,11 +679,11 @@ def factorial(n):
 
 + أعلن عن دالة شرطية نحوية ومحددات للتعامل مع حلقات طالما.
 + أعلن عن دالة #py("while_loop") تأخذ كوسائط دالة شرطية وجسماً—كل منهما ممثل بـ دالة بلا وسائط—وتحاكي سلوك حلقة طالما. وستبدو دالة #py("factorial") حينها كما يلي: #snippet(```python def factorial(n): product = 1 counter = 1 def pred(): return counter <= n def body(): nonlocal product, counter product = counter * product counter = counter + 1 while_loop(pred, body) return product ```) ينبغي لدالتك #py("while_loop") توليد عملية تكرارية (انظر القسم @sec:recursion-and-iteration).
-+ ثبت حلقات طالما كـ مكون مشتق بـ تعريف دالة تحويل #py("while_to_application") تستخدم دالتك #py("while_loop").
++ ثبت حلقات طالما كمكون مشتق بـ تعريف دالة تحويل #py("while_to_application") تستخدم دالتك #py("while_loop").
 + ما المشكلة التي تنشأ مع هذه المقاربة لتنفيذ حلقات طالما، عندما يقرر المبرمج داخل جسم الحلقة الإرجاع من الدالة التي تحتوي على الحلقة؟
-+ غير مقاربتك لمعالجة المشكلة. ماذا عن تثبيت حلقات طالما مباشرة للمـُقيِّم، باستخدام دالة #py("eval_while")؟
-+ باتباع هذه المقاربة المباشرة، نفذ عبارة #idx("syntactic forms", sub: "break statement") #idx("break (keyword)") #idx("keywords", sub: "break") #py("break;") تنهي فوراً الحلقة التي تـُقيَّم فيها.
-+ نفذ عبارة #idx("syntactic forms", sub: "continue statement") #idx("continue (keyword)", sort: "continue") #idx("keywords", sub: "continue") #strong[#raw("continue")]#py(";") تنهي فقط تكرار الحلقة الذي تـُقيَّم فيه، وتستمر بتقييم الدالة الشرطية لحلقة طالما.
++ غير مقاربتك لمعالجة المشكلة. ماذا عن تثبيت حلقات طالما مباشرة للمُقيِّم، باستخدام دالة #py("eval_while")؟
++ باتباع هذه المقاربة المباشرة، نفذ عبارة #idx("syntactic forms", sub: "break statement") #idx("break (keyword)") #idx("keywords", sub: "break") #py("break;") تنهي فوراً الحلقة التي تُقيَّم فيها.
++ نفذ عبارة #idx("syntactic forms", sub: "continue statement") #idx("continue (keyword)", sort: "continue") #idx("keywords", sub: "continue") #strong[#raw("continue")]#py(";") تنهي فقط تكرار الحلقة الذي تُقيَّم فيه، وتستمر بتقييم الدالة الشرطية لحلقة طالما.
 ])
 
 #exercise(label-name: <ex:value_producing>, [
@@ -695,14 +695,14 @@ def factorial(n):
 #idx("metacircular evaluator for Python", sub: "value of program at top level")
 تقييم برنامج Python يتكون من تسلسل عبارات (إعلانات، كتل، عبارات تعبير، وعبارات شرطية) #emph[خارج] أي جسم دالة.
 
-بالنسبة لمثل هذا البرنامج، تميز Python استاتيكياً بين #emph[العبارات المـُنتجة للقيمة] و #emph[العبارات غير المـُنتجة للقيمة]. (هنا "استاتيكياً" تعني أنه يمكننا إجراء التمييز بـ #emph[فحص] البرنامج بدلاً من تشغيله.)
+بالنسبة لمثل هذا البرنامج، تميز Python استاتيكياً بين #emph[العبارات المُنتجة للقيمة] و #emph[العبارات غير المُنتجة للقيمة]. (هنا "استاتيكياً" تعني أنه يمكننا إجراء التمييز بـ #emph[فحص] البرنامج بدلاً من تشغيله.)
 جميع الإعلانات هي غير منتجة للقيمة، وجميع عبارات التعبير والعبارات الشرطية هي منتجة للقيمة.
 وقيمة عبارة التعبير هي قيمة التعبير.
-وقيمة العبارة الشرطية هي قيمة الفرع الذي يـُنفَّذ، أو القيمة #py("None") إذا كان هذا الفرع غير منتج للقيمة.
+وقيمة العبارة الشرطية هي قيمة الفرع الذي يُنفَّذ، أو القيمة #py("None") إذا كان هذا الفرع غير منتج للقيمة.
 والكتلة منتجة للقيمة إذا كان جسمها (تسلسل العبارات) منتجاً للقيمة، وحينها تكون قيمتها هي قيمة جسمها.
-والتسلسل منتج للقيمة إذا كانت أي من عبارات مكوناته منتجة للقيمة، وحينها تكون قيمتها هي قيمة عبارة مكوناته المـُنتجة للقيمة #emph[الأخيرة].
+والتسلسل منتج للقيمة إذا كانت أي من عبارات مكوناته منتجة للقيمة، وحينها تكون قيمتها هي قيمة عبارة مكوناته المُنتجة للقيمة #emph[الأخيرة].
 وأخيراً، إذا لم يكن البرنامج بأكمله منتجاً للقيمة، فإن قيمته هي القيمة #py("None").
 
 + وفقاً لهذا التحديد، ما هي قيم البرامج الأربعة التالية؟ #snippet(```python 1; 2; 3 1; { if (true) {} else { 2; } } 1; const x = 2 1; { let x = 2; { x = x + 3; } } ```)
-+ عدل المـُقيِّم للالتزام بهذا التحديد.
++ عدل المُقيِّم للالتزام بهذا التحديد.
 ])
