@@ -27,7 +27,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `mmap.rs`    | `kernel/mmap.c` + `mm.h` | 243   | **done** — `mmap2`, the old `mmap`, `munmap`, `mremap`, `mprotect`, `brk`, the no-op syscalls and `mm_copy`; 51 operations and the full page table after each verified against the C |
 | `errno.rs`   | `kernel/errno.{h,c}`  | 105     | **done** — host→guest errno translation; 4,216 `err_map` inputs and all 10 `errno_map` probes verified against the C, table generated from the host headers |
 | `user.rs`    | `kernel/user.c`       | 97      | **done** — the guest↔kernel byte copies (`user_read`/`user_write`/`user_write_task_ptrace`/`user_read_string`/`user_write_string`); 52 operations, 77 guest pages and 192,937 bytes verified against the C |
-| `resource.rs` | `kernel/resource.{h,c}` | 265   | **done** — `rlimit`/`rusage` guest ABIs, resource-limit rules, affinity bitmap, and scheduler/priority compatibility calls; host telemetry is an explicit adapter |
+| `resource.rs` | `kernel/resource.{h,c}` | 265   | **done** — `rlimit`/`rusage` guest ABIs, resource-limit rules, affinity bitmap, and scheduler/priority compatibility calls; 51 deterministic C operations and 52 full state snapshots verified against unmodified C |
 | `task.rs`    | `kernel/task.{h,c}`   | 346     | **foundation ported** — PID table, parent/child links, task creation/destruction, mm attachment, task credentials/names, thread-group topology, zombie visibility and explicit current-task selection |
 | `group.rs`   | `kernel/group.c`      | 131     | **done** — `setpgid`/`getpgid`, `setsid`/`getsid`, session and process-group membership rules |
 | `getset.rs`  | `kernel/getset.c`     | 202     | **done** — PID/UID/GID getters and setters, supplementary groups, capability stubs and personality |
@@ -57,7 +57,8 @@ running 1 test     (tests/user_differential.rs)    ->     192,937 guest+host byt
 running 3 tests    (tests/modrm_differential.rs)   ->  10,264 decode fields
 running 2 tests    (tests/tlb_differential.rs)     -> 172,312 tlb state words
 running 2 tests    (tests/vec_differential.rs)     ->   9,794 vec/mmx results
-test result: ok. 172 passed
+running 1 test     (tests/resource_differential.rs)->      51 resource operations + 52 full state snapshots
+test result: ok. 207 passed
 $ cargo clippy --all-targets                   # clean, no warnings
 ```
 
@@ -605,6 +606,24 @@ native telemetry rather than the core silently substituting wall-clock data.
 `ThreadGroup` now carries limits, own usage, and children usage; `exit.c` will
 connect its reaping transitions to that storage.
 
+`tests/resource_differential.rs` replays 51 calls from
+`tests/fixtures/resource_reference.txt`. `tools/resource-dump.c` compiles and
+links the **unmodified** `kernel/resource.c`; a deterministic task/group,
+two-page guest window, and linker-wrapped `getrusage(RUSAGE_THREAD)` / `sysconf`
+inputs make the comparison reproducible locally. After every call the test
+compares the raw return value, all 16 `(cur,max)` limit pairs, all 18
+`children_rusage` ABI words, effective UID, and an FNV-1a hash of the whole
+guest window. C initializes only the two timeval fields of a host rusage, so
+the fixture compares that defined prefix and explicitly clears its indeterminate
+tail before hashing rather than treating compiler stack garbage as an ABI.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_resource_reference.sh
+wrote tests/fixtures/resource_reference.txt: 182 lines, 51 C operations, 52 snapshots
+$ cargo test --test resource_differential
+… 51 resource operations and 52 full C-state snapshots matched exactly
+```
+
 The host thread launcher in `task.c` and signal/tty/filesystem pointers in the
 rest of `struct task` remain later engine/kernel ports; they are intentionally
 not represented as fake implementations. The new `iSH Rust Core` workflow runs
@@ -651,6 +670,7 @@ ish-rs/
 │   ├── mmap_differential.rs    # word-exact replay of the mmap reference
 │   ├── tlb_differential.rs     # word-exact replay of the tlb reference
 │   ├── vec_differential.rs     # word-exact replay of the vec/mmx reference
+│   ├── resource_differential.rs # state-exact replay of the resource reference
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -661,7 +681,8 @@ ish-rs/
 │       ├── errno_reference.txt # 4216 err_map inputs + host errno numbers
 │       ├── mmap_reference.txt  # 51 mmap ops + the whole page table after each
 │       ├── tlb_reference.txt   # 56 full struct tlb dumps from the C
-│       └── vec_reference.txt   # 9.8k vec/mmx results from the C
+│       ├── vec_reference.txt   # 9.8k vec/mmx results from the C
+│       └── resource_reference.txt # 51 deterministic resource calls from the C
 └── tools/
     ├── f80-dump.c              # float80 reference generator (not part of iSH)
     ├── fpu-dump.c              # cpu/fpu reference generator
@@ -673,6 +694,7 @@ ish-rs/
     ├── user-dump.c             # user-memory reference generator (links user.c)
     ├── errno-dump.c            # errno reference generator (links errno.c)
     ├── mmap-dump.c             # mmap reference generator (links mmap.c)
+    ├── resource-dump.c         # deterministic resource.c reference generator
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -685,6 +707,7 @@ ish-rs/
     ├── gen_user_reference.sh
     ├── gen_errno_reference.sh
     ├── gen_mmap_reference.sh
+    ├── gen_resource_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh

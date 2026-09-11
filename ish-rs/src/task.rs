@@ -492,6 +492,16 @@ impl TaskTable {
         self.groups.get(&leader)
     }
 
+    /// Mutably look up a thread group by its leader PID.
+    ///
+    /// Resource accounting, exit handling, and future signal/time syscall
+    /// ports own fields in this structure. Exposing the same mutable lookup as
+    /// [`TaskTable::task_mut`] lets an embedding supply that state without
+    /// reintroducing C's raw group pointers.
+    pub fn thread_group_mut(&mut self, leader: Pid) -> Option<&mut ThreadGroup> {
+        self.groups.get_mut(&leader)
+    }
+
     /// The task selected as C's thread-local `current`.
     pub fn current_pid(&self) -> Option<Pid> {
         self.current
@@ -715,7 +725,7 @@ impl TaskTable {
     }
 
     pub(crate) fn group_mut(&mut self, id: Pid) -> Option<&mut ThreadGroup> {
-        self.groups.get_mut(&id)
+        self.thread_group_mut(id)
     }
 
     pub(crate) fn pid_slot(&self, pid: Pid) -> Option<&PidSlot> {
