@@ -1,0 +1,335 @@
+# stat reference, generated from unmodified fs/stat.h and fs/stat.c
+S statbuf size=88
+F statbuf dev off=0 size=8
+F statbuf inode off=8 size=8
+F statbuf mode off=16 size=4
+F statbuf nlink off=20 size=4
+F statbuf uid off=24 size=4
+F statbuf gid off=28 size=4
+F statbuf rdev off=32 size=8
+F statbuf size off=40 size=8
+F statbuf blksize off=48 size=4
+F statbuf blocks off=56 size=8
+F statbuf atime off=64 size=4
+F statbuf atime_nsec off=68 size=4
+F statbuf mtime off=72 size=4
+F statbuf mtime_nsec off=76 size=4
+F statbuf ctime off=80 size=4
+F statbuf ctime_nsec off=84 size=4
+V statbuf dev=0x1122334455667788
+V statbuf inode=0x2233445566778899
+V statbuf mode=0x11223344
+V statbuf nlink=0x22334455
+V statbuf uid=0x33445566
+V statbuf gid=0x44556677
+V statbuf rdev=0x5566778899aabbcc
+V statbuf size=0x66778899aabbccdd
+V statbuf blksize=0x778899aa
+V statbuf blocks=0x8899aabbccddeeff
+V statbuf atime=0x99001122
+V statbuf atime_nsec=0xaa112233
+V statbuf mtime=0xbb223344
+V statbuf mtime_nsec=0xcc334455
+V statbuf ctime=0xdd445566
+V statbuf ctime_nsec=0xee556677
+E statbuf bytes=8877665544332211998877665544332244332211554433226655443377665544ccbbaa9988776655ddccbbaa99887766aa998877aaaaaaaaffeeddccbbaa998822110099332211aa443322bb554433cc665544dd776655ee
+S oldstat size=32
+F oldstat dev off=0 size=2
+F oldstat ino off=2 size=2
+F oldstat mode off=4 size=2
+F oldstat nlink off=6 size=2
+F oldstat uid off=8 size=2
+F oldstat gid off=10 size=2
+F oldstat rdev off=12 size=2
+F oldstat size off=16 size=4
+F oldstat atime off=20 size=4
+F oldstat mtime off=24 size=4
+F oldstat ctime off=28 size=4
+V oldstat dev=0x1122
+V oldstat ino=0x2233
+V oldstat mode=0x3344
+V oldstat nlink=0x4455
+V oldstat uid=0x5566
+V oldstat gid=0x6677
+V oldstat rdev=0x7788
+V oldstat size=0x8899aabb
+V oldstat atime=0x99001122
+V oldstat mtime=0xaa112233
+V oldstat ctime=0xbb223344
+E oldstat bytes=2211332244335544665577668877aaaabbaa998822110099332211aa443322bb
+S newstat size=64
+F newstat dev off=0 size=4
+F newstat ino off=4 size=4
+F newstat mode off=8 size=2
+F newstat nlink off=10 size=2
+F newstat uid off=12 size=2
+F newstat gid off=14 size=2
+F newstat rdev off=16 size=4
+F newstat size off=20 size=4
+F newstat blksize off=24 size=4
+F newstat blocks off=28 size=4
+F newstat atime off=32 size=4
+F newstat atime_nsec off=36 size=4
+F newstat mtime off=40 size=4
+F newstat mtime_nsec off=44 size=4
+F newstat ctime off=48 size=4
+F newstat ctime_nsec off=52 size=4
+F newstat pad off=56 size=8
+V newstat dev=0x11223344
+V newstat ino=0x22334455
+V newstat mode=0x3344
+V newstat nlink=0x4455
+V newstat uid=0x5566
+V newstat gid=0x6677
+V newstat rdev=0x778899aa
+V newstat size=0x8899aabb
+V newstat blksize=0x99001122
+V newstat blocks=0xaa112233
+V newstat atime=0xbb223344
+V newstat atime_nsec=0xcc334455
+V newstat mtime=0xdd445566
+V newstat mtime_nsec=0xee556677
+V newstat ctime=0xff667788
+V newstat ctime_nsec=0x112233
+V newstat pad0=0xffffffffffffffa0
+V newstat pad1=0xffffffffffffffa1
+V newstat pad2=0xffffffffffffffa2
+V newstat pad3=0xffffffffffffffa3
+V newstat pad4=0xffffffffffffffa4
+V newstat pad5=0xffffffffffffffa5
+V newstat pad6=0xffffffffffffffa6
+V newstat pad7=0xffffffffffffffa7
+E newstat bytes=44332211554433224433554466557766aa998877bbaa998822110099332211aa443322bb554433cc665544dd776655ee887766ff33221100a0a1a2a3a4a5a6a7
+S newstat64 size=96
+F newstat64 dev off=0 size=8
+F newstat64 _pad1 off=8 size=4
+F newstat64 fucked_ino off=12 size=4
+F newstat64 mode off=16 size=4
+F newstat64 nlink off=20 size=4
+F newstat64 uid off=24 size=4
+F newstat64 gid off=28 size=4
+F newstat64 rdev off=32 size=8
+F newstat64 _pad2 off=40 size=4
+F newstat64 size off=44 size=8
+F newstat64 blksize off=52 size=4
+F newstat64 blocks off=56 size=8
+F newstat64 atime off=64 size=4
+F newstat64 atime_nsec off=68 size=4
+F newstat64 mtime off=72 size=4
+F newstat64 mtime_nsec off=76 size=4
+F newstat64 ctime off=80 size=4
+F newstat64 ctime_nsec off=84 size=4
+F newstat64 ino off=88 size=8
+V newstat64 dev=0x1122334455667788
+V newstat64 _pad1=0x12345678
+V newstat64 fucked_ino=0x23456789
+V newstat64 mode=0x11223344
+V newstat64 nlink=0x33445566
+V newstat64 uid=0x44556677
+V newstat64 gid=0x55667788
+V newstat64 rdev=0x2233445566778899
+V newstat64 _pad2=0x66778899
+V newstat64 size=0x33445566778899aa
+V newstat64 blksize=0x778899aa
+V newstat64 blocks=0x445566778899aabb
+V newstat64 atime=0x99001122
+V newstat64 atime_nsec=0xaa112233
+V newstat64 mtime=0xbb223344
+V newstat64 mtime_nsec=0xcc334455
+V newstat64 ctime=0xdd445566
+V newstat64 ctime_nsec=0xee556677
+V newstat64 ino=0x5566778899aabbcc
+E newstat64 bytes=8877665544332211785634128967452344332211665544337766554488776655998877665544332299887766aa99887766554433aa998877bbaa99887766554422110099332211aa443322bb554433cc665544dd776655eeccbbaa9988776655
+S statfsbuf size=120
+F statfsbuf type off=0 size=8
+F statfsbuf bsize off=8 size=8
+F statfsbuf blocks off=16 size=8
+F statfsbuf bfree off=24 size=8
+F statfsbuf bavail off=32 size=8
+F statfsbuf files off=40 size=8
+F statfsbuf ffree off=48 size=8
+F statfsbuf fsid off=56 size=8
+F statfsbuf namelen off=64 size=8
+F statfsbuf frsize off=72 size=8
+F statfsbuf flags off=80 size=8
+F statfsbuf spare off=88 size=32
+V statfsbuf type=0x1122334455667788
+V statfsbuf bsize=0x2233445566778899
+V statfsbuf blocks=0x33445566778899aa
+V statfsbuf bfree=0x445566778899aabb
+V statfsbuf bavail=0x5566778899aabbcc
+V statfsbuf files=0x66778899aabbccdd
+V statfsbuf ffree=0x778899aabbccddee
+V statfsbuf fsid=0x8899aabbccddeeff
+V statfsbuf namelen=0x9900112233445566
+V statfsbuf frsize=0xaa11223344556677
+V statfsbuf flags=0xbb22334455667788
+V statfsbuf spare0=0xcc33445566778899
+V statfsbuf spare1=0xcc3344556677889a
+V statfsbuf spare2=0xcc3344556677889b
+V statfsbuf spare3=0xcc3344556677889c
+E statfsbuf bytes=88776655443322119988776655443322aa99887766554433bbaa998877665544ccbbaa9988776655ddccbbaa99887766eeddccbbaa998877ffeeddccbbaa9988665544332211009977665544332211aa88776655443322bb99887766554433cc9a887766554433cc9b887766554433cc9c887766554433cc
+S statfs_ size=64
+F statfs_ type off=0 size=4
+F statfs_ bsize off=4 size=4
+F statfs_ blocks off=8 size=4
+F statfs_ bfree off=12 size=4
+F statfs_ bavail off=16 size=4
+F statfs_ files off=20 size=4
+F statfs_ ffree off=24 size=4
+F statfs_ fsid off=28 size=8
+F statfs_ namelen off=36 size=4
+F statfs_ frsize off=40 size=4
+F statfs_ flags off=44 size=4
+F statfs_ spare off=48 size=16
+V statfs_ type=0x11223344
+V statfs_ bsize=0x22334455
+V statfs_ blocks=0x33445566
+V statfs_ bfree=0x44556677
+V statfs_ bavail=0x55667788
+V statfs_ files=0x66778899
+V statfs_ ffree=0x778899aa
+V statfs_ fsid=0x8899aabbccddeeff
+V statfs_ namelen=0x99001122
+V statfs_ frsize=0xaa112233
+V statfs_ flags=0xbb223344
+V statfs_ spare0=0xcc334455
+V statfs_ spare1=0xcc334456
+V statfs_ spare2=0xcc334457
+V statfs_ spare3=0xcc334458
+E statfs_ bytes=443322115544332266554433776655448877665599887766aa998877ffeeddccbbaa998822110099332211aa443322bb554433cc564433cc574433cc584433cc
+S statfs64_ size=84
+F statfs64_ type off=0 size=4
+F statfs64_ bsize off=4 size=4
+F statfs64_ blocks off=8 size=8
+F statfs64_ bfree off=16 size=8
+F statfs64_ bavail off=24 size=8
+F statfs64_ files off=32 size=8
+F statfs64_ ffree off=40 size=8
+F statfs64_ fsid off=48 size=8
+F statfs64_ namelen off=56 size=4
+F statfs64_ frsize off=60 size=4
+F statfs64_ flags off=64 size=4
+F statfs64_ pad off=68 size=16
+V statfs64_ type=0x11223344
+V statfs64_ bsize=0x22334455
+V statfs64_ blocks=0x33445566778899aa
+V statfs64_ bfree=0x445566778899aabb
+V statfs64_ bavail=0x5566778899aabbcc
+V statfs64_ files=0x66778899aabbccdd
+V statfs64_ ffree=0x778899aabbccddee
+V statfs64_ fsid=0x8899aabbccddeeff
+V statfs64_ namelen=0x99001122
+V statfs64_ frsize=0xaa112233
+V statfs64_ flags=0xbb223344
+V statfs64_ pad0=0xcc334455
+V statfs64_ pad1=0xcc334456
+V statfs64_ pad2=0xcc334457
+V statfs64_ pad3=0xcc334458
+E statfs64_ bytes=4433221155443322aa99887766554433bbaa998877665544ccbbaa9988776655ddccbbaa99887766eeddccbbaa998877ffeeddccbbaa998822110099332211aa443322bb554433cc564433cc574433cc584433cc
+S statx_timestamp_ size=16
+F statx_timestamp_ sec off=0 size=8
+F statx_timestamp_ nsec off=8 size=4
+F statx_timestamp_ _pad off=12 size=4
+V statx_timestamp_ sec=0x1122334455667788
+V statx_timestamp_ nsec=0x22334455
+V statx_timestamp_ _pad=0x33445566
+E statx_timestamp_ bytes=88776655443322115544332266554433
+S statx_ size=256
+F statx_ mask off=0 size=4
+F statx_ blksize off=4 size=4
+F statx_ attributes off=8 size=8
+F statx_ nlink off=16 size=4
+F statx_ uid off=20 size=4
+F statx_ gid off=24 size=4
+F statx_ mode off=28 size=2
+F statx_ _pad1 off=30 size=2
+F statx_ ino off=32 size=8
+F statx_ size off=40 size=8
+F statx_ blocks off=48 size=8
+F statx_ attributes_mask off=56 size=8
+F statx_ atime off=64 size=16
+F statx_ btime off=80 size=16
+F statx_ ctime off=96 size=16
+F statx_ mtime off=112 size=16
+F statx_ rdev_major off=128 size=4
+F statx_ rdev_minor off=132 size=4
+F statx_ dev_major off=136 size=4
+F statx_ dev_minor off=140 size=4
+F statx_ mnt_id off=144 size=8
+F statx_ dio_mem_align off=152 size=4
+F statx_ dio_offset_align off=156 size=4
+F statx_ _pad2 off=160 size=96
+V statx_ mask=0x11223344
+V statx_ blksize=0x22334455
+V statx_ attributes=0x33445566778899aa
+V statx_ nlink=0x44556677
+V statx_ uid=0x55667788
+V statx_ gid=0x66778899
+V statx_ mode=0x7788
+V statx_ _pad1=0x8899
+V statx_ ino=0x9900112233445566
+V statx_ size=0xaa11223344556677
+V statx_ blocks=0xbb22334455667788
+V statx_ attributes_mask=0xcc33445566778899
+V statx_ atime_sec=0x1111111111111111
+V statx_ atime_nsec=0x22222222
+V statx_ atime__pad=0x23232323
+V statx_ btime_sec=0x3333333333333333
+V statx_ btime_nsec=0x44444444
+V statx_ btime__pad=0x45454545
+V statx_ ctime_sec=0x5555555555555555
+V statx_ ctime_nsec=0x66666666
+V statx_ ctime__pad=0x67676767
+V statx_ mtime_sec=0x7777777777777777
+V statx_ mtime_nsec=0x88888888
+V statx_ mtime__pad=0x89898989
+V statx_ rdev_major=0xdd445566
+V statx_ rdev_minor=0xee556677
+V statx_ dev_major=0xff667788
+V statx_ dev_minor=0x112233
+V statx_ mnt_id=0x1122334455667788
+V statx_ dio_mem_align=0x22446688
+V statx_ dio_offset_align=0x33557799
+V statx_ _pad20=0xc0
+V statx_ _pad21=0xc1
+V statx_ _pad22=0xc2
+V statx_ _pad23=0xc3
+V statx_ _pad24=0xc4
+V statx_ _pad25=0xc5
+V statx_ _pad26=0xc6
+V statx_ _pad27=0xc7
+V statx_ _pad28=0xc8
+V statx_ _pad29=0xc9
+V statx_ _pad210=0xca
+V statx_ _pad211=0xcb
+V statx_ _pad212=0xcc
+V statx_ _pad213=0xcd
+V statx_ _pad214=0xce
+V statx_ _pad215=0xcf
+V statx_ _pad216=0xd0
+V statx_ _pad217=0xd1
+V statx_ _pad218=0xd2
+V statx_ _pad219=0xd3
+V statx_ _pad220=0xd4
+V statx_ _pad221=0xd5
+V statx_ _pad222=0xd6
+V statx_ _pad223=0xd7
+E statx_ bytes=4433221155443322aa9988776655443377665544887766559988776688779988665544332211009977665544332211aa88776655443322bb99887766554433cc11111111111111112222222223232323333333333333333344444444454545455555555555555555666666666767676777777777777777778888888889898989665544dd776655ee887766ff3322110088776655443322118866442299775533c0000000c1000000c2000000c3000000c4000000c5000000c6000000c7000000c8000000c9000000ca000000cb000000cc000000cd000000ce000000cf000000d0000000d1000000d2000000d3000000d4000000d5000000d6000000d7000000
+W indeterminate _pad1 _pad2 (never assigned by stat_convert_newstat64, defined as zero by this oracle)
+I zero dev=0 inode=0 mode=0 nlink=0 uid=0 gid=0 rdev=0 size=0 blksize=0 blocks=0 atime=0 atime_nsec=0 mtime=0 mtime_nsec=0 ctime=0 ctime_nsec=0
+C zero bytes=000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+C zero fields dev=0 fucked_ino=0 ino=0 mode=0 nlink=0 uid=0 gid=0 rdev=0 size=0 blksize=0 blocks=0 atime=0 atime_nsec=0 mtime=0 mtime_nsec=0 ctime=0 ctime_nsec=0
+I all-ones dev=0xffffffffffffffff inode=0xffffffffffffffff mode=0xffffffff nlink=0xffffffff uid=0xffffffff gid=0xffffffff rdev=0xffffffffffffffff size=0xffffffffffffffff blksize=0xffffffff blocks=0xffffffffffffffff atime=0xffffffff atime_nsec=0xffffffff mtime=0xffffffff mtime_nsec=0xffffffff ctime=0xffffffff ctime_nsec=0xffffffff
+C all-ones bytes=ffffffffffffffff00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+C all-ones fields dev=0xffffffffffffffff fucked_ino=0xffffffff ino=0xffffffffffffffff mode=0xffffffff nlink=0xffffffff uid=0xffffffff gid=0xffffffff rdev=0xffffffffffffffff size=0xffffffffffffffff blksize=0xffffffff blocks=0xffffffffffffffff atime=0xffffffff atime_nsec=0xffffffff mtime=0xffffffff mtime_nsec=0xffffffff ctime=0xffffffff ctime_nsec=0xffffffff
+I typical dev=0x1234 inode=0x5678 mode=0x81a4 nlink=0x3 uid=0x3e8 gid=0x3e8 rdev=0 size=0x1000 blksize=0x1000 blocks=0x8 atime=0x1 atime_nsec=0x2 mtime=0x3 mtime_nsec=0x4 ctime=0x5 ctime_nsec=0x6
+C typical bytes=34120000000000000000000078560000a481000003000000e8030000e803000000000000000000000000000000100000000000000010000008000000000000000100000002000000030000000400000005000000060000007856000000000000
+C typical fields dev=0x1234 fucked_ino=0x5678 ino=0x5678 mode=0x81a4 nlink=0x3 uid=0x3e8 gid=0x3e8 rdev=0 size=0x1000 blksize=0x1000 blocks=0x8 atime=0x1 atime_nsec=0x2 mtime=0x3 mtime_nsec=0x4 ctime=0x5 ctime_nsec=0x6
+I wide dev=0xffffffffffffffff inode=0xaaaaaaaa55555555 mode=0xffffffff nlink=0xffffffff uid=0xffffffff gid=0xffffffff rdev=0xffffffffffffffff size=0x7fffffffffffffff blksize=0x10000 blocks=0xffffffffffffffff atime=0x7fffffff atime_nsec=0x3b9aca00 mtime=0xffffffff mtime_nsec=0xffffffff ctime=0 ctime_nsec=0x1
+C wide bytes=ffffffffffffffff0000000055555555ffffffffffffffffffffffffffffffffffffffffffffffff00000000ffffffffffffff7f00000100ffffffffffffffffffffff7f00ca9a3bffffffffffffffff000000000100000055555555aaaaaaaa
+C wide fields dev=0xffffffffffffffff fucked_ino=0x55555555 ino=0xaaaaaaaa55555555 mode=0xffffffff nlink=0xffffffff uid=0xffffffff gid=0xffffffff rdev=0xffffffffffffffff size=0x7fffffffffffffff blksize=0x10000 blocks=0xffffffffffffffff atime=0x7fffffff atime_nsec=0x3b9aca00 mtime=0xffffffff mtime_nsec=0xffffffff ctime=0 ctime_nsec=0x1
+I inode-split dev=0x200000001 inode=0xdeadbeef00000001 mode=0 nlink=0 uid=0 gid=0 rdev=0 size=0 blksize=0 blocks=0 atime=0 atime_nsec=0 mtime=0 mtime_nsec=0 ctime=0 ctime_nsec=0
+C inode-split bytes=0100000002000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000efbeadde
+C inode-split fields dev=0x200000001 fucked_ino=0x1 ino=0xdeadbeef00000001 mode=0 nlink=0 uid=0 gid=0 rdev=0 size=0 blksize=0 blocks=0 atime=0 atime_nsec=0 mtime=0 mtime_nsec=0 ctime=0 ctime_nsec=0
+K statx_basic_stats=0x7ff

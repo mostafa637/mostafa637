@@ -36,6 +36,7 @@
 //! | [`fchdir`]      | `util/fchdir.{h,c}`       | ported, the process-wide lock around a working-directory change |
 //! | [`timer`]       | `util/timer.{h,c}`        | ported, timespec helpers and the interruptible timer thread |
 //! | [`futex`]       | `kernel/futex.{h,c}`      | ported, refcounted wait queues with wake/requeue and the robust-list calls |
+//! | [`stat`]        | `fs/stat.{h,c}`           | ported, the guest stat layouts and `stat_convert_newstat64` |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -69,6 +70,7 @@ pub mod modrm;
 pub mod random;
 pub mod rebuild;
 pub mod resource;
+pub mod stat;
 pub mod sync;
 pub mod task;
 pub mod timer;

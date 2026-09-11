@@ -44,6 +44,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `timer.rs`   | `util/timer.{h,c}`    | 163     | **done** — the timespec helpers (single-subtract carry included) and the interruptible timer thread with its reload and free-ownership rules; 58 C records replayed against a scripted clock |
 | `futex.rs`   | `kernel/futex.{h,c}`  | 217     | **done** — the refcounted `(mem, addr)` hash table, wake/requeue with their reference transfers, the `wait_for` wait contract, and the two robust-list calls; 82 C records replayed over hand-built queues |
 | `fchdir.rs`  | `util/fchdir.{h,c}`   | 12      | **done** — one process-wide lock taken around the host's `fchdir`, held across the relative-path work that follows; 12 C records replayed with two workers contending for it |
+| `stat.rs`    | `fs/stat.{h,c}`       | 307     | **done** — the nine guest stat structures with their packings and padding, and `stat_convert_newstat64`; 9 C layouts, 173 field values and 5 converted `statbuf`s verified byte-for-byte |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -57,7 +58,7 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --all-targets
-running 232 tests  (unit tests in src/)
+running 240 tests  (unit tests in src/)
 running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
 running 3 tests    (tests/errno_differential.rs)   ->   4,216 err_map inputs
 running 2 tests    (tests/mmap_differential.rs)    ->      51 mmap operations
@@ -80,7 +81,8 @@ running 2 tests    (tests/sync_differential.rs)    ->      46 waiting/notify/loc
 running 2 tests    (tests/timer_differential.rs)   ->      58 timer records from a scripted clock
 running 2 tests    (tests/futex_differential.rs)   ->      82 futex records from hand-built queues
 running 2 tests    (tests/fchdir_differential.rs)  ->      12 fchdir records from two contending workers
-test result: ok. 275 passed
+running 2 tests    (tests/stat_differential.rs)    ->       9 struct layouts + 5 converted statbufs
+test result: ok. 285 passed
 $ cargo clippy --all-targets -- -D warnings       # clean, no warnings
 ```
 
@@ -957,6 +959,59 @@ in the corpus because a test may not change the test process's working
 directory. `process_lock()` is the crate's stand-in for C's file-scope static; a
 second `FchdirLock` would be a second lock, and therefore no lock at all.
 
+### stat
+
+`fs/stat.h` is where iSH decides what a `stat` result looks like to the guest,
+and `fs/stat.c`'s `stat_convert_newstat64` is the one function every one of the
+five stat syscalls funnels through. The rest of the file — `sys_stat64`,
+`sys_lstat64`, `sys_fstatat64`, `sys_fstat64`, `sys_statx` and
+`generic_statat` — needs `path_normalize`, `find_mount_and_trim_path`,
+`mount_release`, `f_get` and the `user_*` bridge, none of which exists in the
+crate yet, so what is ported is the layout and the conversion.
+
+Three things in that layout are easy to get wrong on the way to Rust:
+
+* **`newstat64` is packed, and stays packed.** `dev` is 8 bytes at 0, the
+  low half of the inode is a 4-byte `fucked_ino` at 12, `size` straddles 44..52,
+  and the full 64-bit inode is last, at 88. That is the 32-bit guest's
+  `struct stat64`, and a port that let the compiler align the fields would write
+  the wrong bytes, so `Statfs`, `Statfs64` and `Statx` are packed too, and the
+  differential test compares `size_of`, `align_of` and `offset_of!` with the C
+  compiler's numbers rather than trusting them.
+* **Two of the structs have padding that is not a field.** `statbuf` has four
+  bytes between `blksize` and `blocks`, and `oldstat` has two between `rdev` and
+  `size`. The filesystems hand whole `statbuf`s around, so the size matters, and
+  `to_le_bytes` zeroes the padding where the C's contents are whatever the
+  compiler left.
+* **The conversion writes one value twice and leaves two fields unassigned.**
+  The inode becomes both `fucked_ino` (truncated) and `ino` (whole), and `_pad1`
+  and `_pad2` have no source at all: C copies them to the guest uninitialized,
+  which at `-O0` leaks the previous stack frame's bytes and at `-O2` happened to
+  be zeros. That is not an ABI, so the oracle zeroes them and the fixture carries
+  a `W` record saying so; the port writes zero.
+
+`tools/stat-dump.c` includes the real `fs/stat.c`, so the conversion it calls is
+the original, and takes every size and offset from `sizeof`/`offsetof` on the
+real headers. The corpus sets each field of each of the nine structures to a
+distinct value and records the struct's whole byte image, so a field written at
+the wrong offset, truncated, or quietly dropped shows up as a byte mismatch —
+and so does a port that writes something into a `0xAA` padding byte. Bytes that
+no field covers are checked separately: the C image has `0xAA` there and the
+Rust image has zero.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_stat_reference.sh
+wrote tests/fixtures/stat_reference.txt: 335 lines, 9 struct layouts, 5 conversions
+$ cargo test --test stat_differential
+… 9 struct layouts and every field byte matched C; 6 padding bytes are zero
+… 5 statbufs converted to exactly the C's newstat64 bytes
+```
+
+The five conversion cases exist to make specific mistakes loud: `all-ones` and
+`wide` catch a narrowed 64-bit field, `inode-split` (an inode whose halves
+differ, `0xdeadbeef_00000001`) catches a conversion that keeps only one half of
+the inode, and `typical` is an ordinary 0644 file.
+
 ## Layout
 
 ```
@@ -996,7 +1051,8 @@ ish-rs/
 │   ├── sync.rs                 # util/sync.{h,c} locks, waits, unwind flag
 │   ├── timer.rs                # util/timer.{h,c} timespec helpers + timer thread
 │   ├── futex.rs                # kernel/futex.{h,c} refcounted wait queues
-│   └── fchdir.rs               # util/fchdir.{h,c} the working-directory lock
+│   ├── fchdir.rs               # util/fchdir.{h,c} the working-directory lock
+│   └── stat.rs                 # fs/stat.{h,c} guest stat layouts + newstat64 conversion
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
@@ -1020,6 +1076,7 @@ ish-rs/
 │   ├── timer_differential.rs   # C timer corpus replayed on a scripted clock
 │   ├── futex_differential.rs   # C futex corpus replayed over hand-built queues
 │   ├── fchdir_differential.rs  # C fchdir corpus replayed with two workers
+│   ├── stat_differential.rs    # C struct layouts, images and conversions replayed
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -1042,7 +1099,8 @@ ish-rs/
 │       ├── sync_reference.txt  # 46 waiting/notify/unwind/lock records from the C
 │       ├── timer_reference.txt # 58 timer records, scripted clock and sleeps
 │       ├── futex_reference.txt # 82 futex records, hand-built queues and parks
-│       └── fchdir_reference.txt# 12 fchdir records, two workers and a wrapped call
+│       ├── fchdir_reference.txt# 12 fchdir records, two workers and a wrapped call
+│       └── stat_reference.txt  # 9 C struct layouts, 173 field values, 5 conversions
 ├── vendor/
 │   └── graphitesql/            # v0.1.7 pure-Rust SQLite-3-compatible library
 └── tools/
@@ -1068,6 +1126,7 @@ ish-rs/
     ├── timer-dump.c            # timer oracle (scripted clock, sleeps and free)
     ├── futex-dump.c            # futex oracle (hand-built queues, scripted parks)
     ├── fchdir-dump.c           # fchdir oracle (wraps fchdir, two contending workers)
+    ├── stat-dump.c             # stat oracle (sizeof/offsetof plus the C conversion)
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -1092,6 +1151,7 @@ ish-rs/
     ├── gen_timer_reference.sh
     ├── gen_futex_reference.sh
     ├── gen_fchdir_reference.sh
+    ├── gen_stat_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
