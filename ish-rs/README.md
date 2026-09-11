@@ -32,7 +32,8 @@ against the compiled C original**, not just against hand-written expectations.
 | `uname.rs`   | `kernel/uname.c`      | 81      | **done** — guest `uname`/`sysinfo` layouts, C string/truncation behavior, and explicit hostname/uptime/memory host data; 10 deterministic C operations verified byte-for-byte |
 | `ipc.rs`     | `kernel/ipc.c`        | 6       | **done** — the complete legacy System V IPC multiplexor `_ENOSYS` compatibility stub; 5 raw C calls verified |
 | `log.rs`     | `kernel/log.c` + `util/fifo.c` | 250 | **done** — one-MiB printk FIFO, complete-line host sink, and old `sys_syslog` ABI; 31 C operations and all defined outputs verified |
-| `fake_db.rs` | `fs/fake-db.c` | 289 | **metadata API ported** — vendored pure-Rust SQLite-3-compatible `graphitesql`; 40 C/SQLite operations and 41 snapshots verified; migration/rebuild integration follows |
+| `fake_db.rs` | `fs/fake-db.c` + `fs/fake-migrate.c` | 351 | **metadata API + schema migration ported** — vendored pure-Rust SQLite-3-compatible `graphitesql`; 40 C/SQLite operations, 41 snapshots, and all v0–v2 migrations verified |
+| `fake_rebuild.rs` | `fs/fake-rebuild.c` | 122 | **host-inode rebuild ported** — explicit byte-path host adapter, hard-link repair, and C's pre-relink-inode behavior verified against a deterministic C host oracle |
 | `task.rs`    | `kernel/task.{h,c}`   | 346     | **foundation ported** — PID table, parent/child links, task creation/destruction, mm attachment, task credentials/names, thread-group topology, zombie visibility and explicit current-task selection |
 | `group.rs`   | `kernel/group.c`      | 131     | **done** — `setpgid`/`getpgid`, `setsid`/`getsid`, session and process-group membership rules |
 | `getset.rs`  | `kernel/getset.c`     | 202     | **done** — PID/UID/GID getters and setters, supplementary groups, capability stubs and personality |
@@ -66,9 +67,11 @@ running 1 test     (tests/resource_differential.rs)->      51 resource operation
 running 1 test     (tests/random_differential.rs)  ->       9 getrandom operations
 running 1 test     (tests/uname_differential.rs)   ->      10 uname/sysinfo operations
 running 1 test     (tests/ipc_differential.rs)     ->       5 legacy IPC operations
-running 1 test     (tests/log_differential.rs)     ->      31 log/syslog operations
-running 1 test     (tests/fake_db_differential.rs) ->      40 C/SQLite metadata operations + 41 snapshots
-test result: ok. 220 passed
+running 1 test     (tests/log_differential.rs)          ->      31 log/syslog operations
+running 1 test     (tests/fake_db_differential.rs)      ->      40 C/SQLite metadata operations + 41 snapshots
+running 1 test     (tests/fake_migrate_differential.rs) ->       3 historical C schema migrations + v2 unlink
+running 1 test     (tests/fake_rebuild_differential.rs) ->       7-path C host-inode/hard-link rebuild
+test result: ok. 223 passed
 $ cargo clippy --all-targets -- -D warnings       # clean, no warnings
 ```
 
@@ -392,9 +395,10 @@ comparison would not see.
 The reference generator links the real `kernel/memory.c`, so it needs
 `tools/stub-include/sqlite3.h`: `memory.c` → `fs/fd.h` → `fs/fake-db.h` →
 `<sqlite3.h>`. It uses only opaque pointer types; the same small compatibility
-header also lets the *C-only* fake-db oracle link unmodified `fake-db.c` where a
-host SQLite development header is absent. The Rust runtime itself uses the
-pure-Rust `graphitesql` SQLite implementation, not this header or native SQLite.
+header also lets the *C-only* fake-db, migration, and rebuild oracles link
+unmodified fakefs C sources where a host SQLite development header is absent.
+The Rust runtime itself uses the pure-Rust `graphitesql` SQLite implementation,
+not this header or native SQLite.
 It also links the real `kernel/errno.c` (whose `EPIPE` path pulls in `current` and
 `send_signal`, stubbed with counters) rather than faking the host→guest errno
 table. The generator refuses to emit a fixture unless both counters are still
@@ -706,14 +710,20 @@ and contains neither SQLite C source nor a native binding, `rusqlite`,
 
 Unlike the earlier generic key-value backing store, `graphitesql` reads and
 writes SQLite version-3 database files. `FakeDb` creates the current iSH
-`meta`/`stats`/`paths` schema, including its `user_version = 3`, and
-`FakeDbTransaction` maps iSH's deferred/immediate sequence to an owned
-pure-Rust SQLite transaction. The port preserves implicit positive inode
-allocation, `insert or replace` orphaning, component-aware rename, links,
+`meta`/`stats`/`paths` schema, including its `user_version = 3`, and opens
+historical v0–v2 schemas by executing the same ordered migration sequence as
+`fs/fake-migrate.c`. `FakeDbTransaction` maps iSH's deferred/immediate sequence
+to an owned pure-Rust SQLite transaction. The port preserves implicit positive
+inode allocation, `insert or replace` orphaning, component-aware rename, links,
 missing-path zero/error behavior, `path_from_inode`, rollback, and cleanup.
-Current-version iSH metadata files can be opened through this SQLite-compatible
-engine; migration of older schemas and host-directory rebuild remain explicit
-future filesystem-layer work.
+
+`fake_rebuild.rs` ports `fs/fake-rebuild.c` through `FakeDb::rebuild_with_host`.
+Its `RebuildHost` boundary receives the same `fix_path`-normalized byte paths
+as C's `fstatat`/`unlinkat`/`linkat` calls, and `RootedHostFs` provides a
+standard-library Unix/iOS adapter. The conversion deliberately retains the C
+ordering quirk: a repaired hard link is stored under the destination inode
+observed **before** unlinking and re-linking it. Full VFS syscall integration in
+`fs/fake.c` remains a later filesystem-layer port.
 
 The C oracle still uses the original C SQLite implementation **only locally**
 to establish compatibility. `tools/fake-db-dump.c` compiles unmodified
@@ -730,6 +740,24 @@ $ ISH_SRC=/path/to/ish ./tools/gen_fake_db_reference.sh
 wrote tests/fixtures/fake_db_reference.txt: 132 lines, 40 C operations, 41 snapshots
 $ cargo test --test fake_db_differential
 … 40 pure-Rust metadata operations and 41 C state snapshots matched
+```
+
+`tools/fake-migrate-dump.c` separately links unmodified
+`fs/fake-migrate.c`, seeds each persisted v0, v1, and v2 schema, and records
+the resulting v3 logical state, `user_version`, `inode_to_path` index, and
+removed `delete_path` trigger. `tools/fake-rebuild-dump.c` links unmodified
+`fs/fake-rebuild.c` to the same local C SQLite oracle while substituting a
+deterministic host for `fstatat`/`unlinkat`/`linkat`. Its Rust replay compares
+the rebuilt metadata, host hard-link topology, syscall counts, and cleanup of
+the temporary tables.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_fake_migrate_reference.sh
+wrote tests/fixtures/fake_migrate_reference.txt: 7 lines, 3 C migrations, 1 v2 unlink
+$ ISH_SRC=/path/to/ish ./tools/gen_fake_rebuild_reference.sh
+wrote tests/fixtures/fake_rebuild_reference.txt: 9 lines from unmodified C rebuild
+$ cargo test --test fake_migrate_differential --test fake_rebuild_differential
+… pure-Rust migration and rebuild behavior matched unmodified C
 ```
 
 The host thread launcher in `task.c` and signal/tty/filesystem pointers in the
@@ -763,7 +791,8 @@ ish-rs/
 │   ├── errno_table.rs          # generated host->guest errno table (do not edit)
 │   ├── ipc.rs                  # kernel/ipc.c
 │   ├── log.rs                  # kernel/log.c + util/fifo.c
-│   ├── fake_db.rs              # fs/fake-db.c metadata over pure-Rust SQLite
+│   ├── fake_db.rs              # fs/fake-db.c metadata + schema migration over pure-Rust SQLite
+│   ├── fake_rebuild.rs         # fs/fake-rebuild.c host-inode / hard-link repair
 │   ├── resource.rs             # kernel/resource.{h,c}
 │   ├── random.rs               # kernel/random.{h,c}
 │   ├── uname.rs                # kernel/uname.c
@@ -789,6 +818,8 @@ ish-rs/
 │   ├── ipc_differential.rs     # raw-argument replay of the IPC stub reference
 │   ├── log_differential.rs     # output/state replay of the log/syslog reference
 │   ├── fake_db_differential.rs # pure-Rust replay of the C SQLite metadata reference
+│   ├── fake_migrate_differential.rs # C-derived v0–v2 schema migration replay
+│   ├── fake_rebuild_differential.rs # C-derived host-inode rebuild replay
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -805,7 +836,9 @@ ish-rs/
 │       ├── uname_reference.txt # 10 deterministic uname/sysinfo calls from the C
 │       ├── ipc_reference.txt   # 5 raw legacy IPC calls from the C
 │       ├── log_reference.txt   # 31 log/syslog operations from the C
-│       └── fake_db_reference.txt # 40 fake-db operations + table states from C
+│       ├── fake_db_reference.txt # 40 fake-db operations + table states from C
+│       ├── fake_migrate_reference.txt # v0–v2 fakefs migration states from C
+│       └── fake_rebuild_reference.txt # fakefs host-inode rebuild state from C
 ├── vendor/
 │   └── graphitesql/            # v0.1.7 pure-Rust SQLite-3-compatible library
 └── tools/
@@ -825,6 +858,8 @@ ish-rs/
     ├── ipc-dump.c              # deterministic ipc.c reference generator
     ├── log-dump.c              # deterministic log.c/fifo.c reference generator
     ├── fake-db-dump.c          # C/SQLite fake-db behavioral-oracle generator
+    ├── fake-migrate-dump.c     # C/SQLite fake-schema-migration oracle
+    ├── fake-rebuild-dump.c     # C/SQLite deterministic-host rebuild oracle
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -843,6 +878,8 @@ ish-rs/
     ├── gen_ipc_reference.sh
     ├── gen_log_reference.sh
     ├── gen_fake_db_reference.sh
+    ├── gen_fake_migrate_reference.sh
+    ├── gen_fake_rebuild_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh

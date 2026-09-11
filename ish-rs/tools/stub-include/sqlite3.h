@@ -55,6 +55,7 @@ int sqlite3_bind_blob(sqlite3_stmt *stmt, int index, const void *value, int n,
 int sqlite3_bind_int64(sqlite3_stmt *stmt, int index, int64_t value);
 int sqlite3_column_int(sqlite3_stmt *stmt, int column);
 int64_t sqlite3_column_int64(sqlite3_stmt *stmt, int column);
+const unsigned char *sqlite3_column_text(sqlite3_stmt *stmt, int column);
 const void *sqlite3_column_blob(sqlite3_stmt *stmt, int column);
 int sqlite3_column_bytes(sqlite3_stmt *stmt, int column);
 int64_t sqlite3_last_insert_rowid(sqlite3 *db);

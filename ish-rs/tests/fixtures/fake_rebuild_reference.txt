@@ -1,0 +1,9 @@
+# fake-rebuild reference, generated from unmodified iSH fs/fake-rebuild.c
+# D rebuilt logical stats-and-paths hash
+# H rebuilt mock-host hash
+# C fstatat unlinkat linkat call counts
+# T remaining paths_old stats_old table counts
+D 2173d109a302f1ab
+H e25950f5366a622c
+C 7 3 3
+T 0 0

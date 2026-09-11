@@ -19,6 +19,15 @@ for source in "$ISH_SRC/fs/fake-migrate.c" "$ISH_SRC/fs/fake-db.h" "$ISH_SRC/fs/
     fi
 done
 
+# When the input is a Git checkout, reject locally edited oracle source rather
+# than silently blessing behavior from a modified C implementation. Exported
+# source trees remain usable because they have no Git HEAD to compare against.
+if git -C "$ISH_SRC" rev-parse --verify HEAD >/dev/null 2>&1 \
+    && ! git -C "$ISH_SRC" diff --quiet HEAD -- fs/fake-migrate.c; then
+    echo "fs/fake-migrate.c must be unmodified to regenerate this C oracle" >&2
+    exit 1
+fi
+
 build() {
     cc -O2 -Wall -Wextra -Werror -I"$ISH_SRC" -Itools/stub-include \
         -o /tmp/fake-migrate-dump tools/fake-migrate-dump.c \

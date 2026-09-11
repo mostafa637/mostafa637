@@ -170,8 +170,9 @@ pub struct MetadataRow {
 ///
 /// `create` writes a SQLite version-3 database using pure Rust. `open` also
 /// upgrades compatible historical iSH metadata schemas v0–v2 through the same
-/// durable v3 state as upstream `fakefs_migrate`. Host-filesystem rebuild and
-/// fakefs integration remain separate conversion work.
+/// durable v3 state as upstream `fakefs_migrate`. The host-inode rebuild is
+/// available through [`Self::rebuild_with_host`]; full fakefs integration
+/// remains separate conversion work.
 pub struct FakeDb {
     connection: ConnectionSlot,
 }
@@ -394,6 +395,19 @@ impl FakeDb {
     /// Delete every stat record with no path mapping, as C initialization does.
     pub fn clear_orphans(&self) -> Result<(), FakeDbError> {
         self.autocommit(FakeDbTransaction::clear_orphans)
+    }
+
+    /// Rebuild metadata after host filesystem inode numbers have changed.
+    ///
+    /// This is the pure-Rust counterpart of `fs/fake-rebuild.c`. The supplied
+    /// host adapter performs the C `fstatat`, `unlinkat`, and `linkat` work
+    /// relative to its root; the SQLite transaction and metadata rewrite stay
+    /// in this pure-Rust SQLite database.
+    pub fn rebuild_with_host<H: crate::fake_rebuild::RebuildHost>(
+        &self,
+        host: &mut H,
+    ) -> Result<crate::fake_rebuild::RebuildReport, FakeDbError> {
+        self.with_connection(|connection| crate::fake_rebuild::rebuild(connection, host))
     }
 
     /// Hash the ordered logical stat and path tables like the local C harness.
@@ -822,14 +836,17 @@ fn put_connection(slot: &ConnectionSlot, database: Connection) -> Result<(), Fak
     Ok(())
 }
 
-fn execute(connection: &mut Connection, sql: &str) -> Result<(), FakeDbError> {
+pub(crate) fn execute(connection: &mut Connection, sql: &str) -> Result<(), FakeDbError> {
     connection
         .execute(sql)
         .map(|_| ())
         .map_err(FakeDbError::database)
 }
 
-fn query_rows(connection: &Connection, sql: &str) -> Result<Vec<Vec<Value>>, FakeDbError> {
+pub(crate) fn query_rows(
+    connection: &Connection,
+    sql: &str,
+) -> Result<Vec<Vec<Value>>, FakeDbError> {
     connection
         .query(sql)
         .map(|result| result.rows)
@@ -856,7 +873,7 @@ fn one_column(row: Vec<Value>) -> Result<Value, FakeDbError> {
     }
 }
 
-fn integer_from_value(value: &Value) -> Result<i64, FakeDbError> {
+pub(crate) fn integer_from_value(value: &Value) -> Result<i64, FakeDbError> {
     match value {
         Value::Integer(value) => Ok(*value),
         other => Err(FakeDbError::Database(format!(
@@ -865,7 +882,7 @@ fn integer_from_value(value: &Value) -> Result<i64, FakeDbError> {
     }
 }
 
-fn blob_from_value(value: &Value) -> Result<&[u8], FakeDbError> {
+pub(crate) fn blob_from_value(value: &Value) -> Result<&[u8], FakeDbError> {
     match value {
         Value::Blob(value) => Ok(value),
         other => Err(FakeDbError::Database(format!(
@@ -878,14 +895,14 @@ fn stat_from_value(value: &Value) -> Result<IshStat, FakeDbError> {
     IshStat::from_le_bytes(blob_from_value(value)?)
 }
 
-fn sqlite_integer(value: u64) -> i64 {
+pub(crate) fn sqlite_integer(value: u64) -> i64 {
     // `fake-db.c` passes inode_t through sqlite3_bind_int64. Preserve that C
     // cast for out-of-range caller input even though normal implicit rowids are
     // positive signed SQLite integers.
     value as i64
 }
 
-fn blob_literal(bytes: &[u8]) -> String {
+pub(crate) fn blob_literal(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut literal = String::with_capacity(3 + bytes.len() * 2);
     literal.push_str("X'");
