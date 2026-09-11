@@ -64,12 +64,12 @@
   get(key, default: default)
 }
 
-// One store key (and engine variable) per transcript, numbered in document
-// order. A counter (not a state) drives the numbering: counter steps are
-// ordinary flow content, so the numbering survives page breaks and repeated
-// layout passes — state updates inside context blocks stalled after a few
-// boxes in plain typst compiles.
-#let _transcript-counter = counter("sicp-transcript")
+// One store key (and engine variable) per transcript: the transcript's own
+// code plus its occurrence index among identical-code transcripts. Derived
+// via a queryable metadata marker — NOT a counter — so the key is stable no
+// matter where the cell sits in the layout (counters misread inside figures,
+// e.g. inside `#exercise`, which wraps its body in one).
+#let _cell-key(code, k) = json.encode(code) + "#" + str(k)
 
 /// The code Calepin executes for one interpreter transcript: the snippet runs
 /// under `exec` (script semantics, exactly as the book narrates), so only
@@ -112,13 +112,19 @@
 /// typeset here by listings. Silence — no box at all — when the snippet
 /// prints nothing (or nothing is stored yet).
 #let output(code) = {
-  let text-code = if type(code) == str { code } else { code.text }
+  // Key is built from the TRIMMED code: the ```-block form and the runner's
+  // raw source disagree about trailing newlines, and the key must match both.
+  let text-code = (if type(code) == str { code } else { code.text }).trim()
   [
-    #_transcript-counter.step()
-    #context [
-      #let n = _transcript-counter.get().first() - 1
-      #let var = "_sicp_t" + str(n)
-      #calepin.chunk(
+    #metadata(text-code)
+    #context {
+      // k = how many earlier transcripts carry the exact same code (0-based).
+      // Query-based, so it needs no mutable counter and stays correct inside
+      // figures (`#exercise`) where counter-based numbering misread.
+      let k = query(selector(metadata).before(here()))
+        .filter(m => m.value == text-code).len() - 1
+      let var = _cell-key(text-code, k)
+      calepin.chunk(
         "python",
         raw(transcript-source(text-code, var), lang: "python", block: true),
         echo: false,
@@ -128,14 +134,12 @@
         error: false,
         ..(("store-set": var,)),
       )
-      #context {
-        let stored = _store-get(var)
-        let out = if type(stored) == str { stored } else { "" }
-        if out != "" {
-          listings(out, options: transcript-options)
-        }
+      let stored = _store-get(var)
+      let out = if type(stored) == str { stored } else { "" }
+      if out != "" {
+        listings(out, options: transcript-options)
       }
-    ]
+    }
   ]
 }
 

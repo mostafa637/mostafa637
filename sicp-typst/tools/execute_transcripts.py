@@ -46,26 +46,48 @@ INCLUDE = re.compile(r'#include "([^"]+)"')
 
 
 # ── The book's Python environment (primitives the text itself declares) ─────
+class Pair:
+    """Mutable cons cell: the text's set_head/set_tail mutate in place
+    (3.3.1 aliasing, 3.3.2 queues, 3.3.4 agenda all depend on this)."""
+
+    __slots__ = ("head", "tail")
+
+    def __init__(self, head, tail):
+        self.head = head
+        self.tail = tail
+
+    def __repr__(self):
+        return _llist_repr(self)
+
+
 def _pair(a, b):
-    return (a, b)
+    return Pair(a, b)
 
 
 def _head(p):
-    return p[0]
+    return p.head
 
 
 def _tail(p):
-    return p[1]
+    return p.tail
+
+
+def _set_head(p, v):
+    p.head = v
+
+
+def _set_tail(p, v):
+    p.tail = v
 
 
 def _is_pair(x):
-    return isinstance(x, tuple) and len(x) == 2
+    return isinstance(x, Pair)
 
 
 def _llist(*items):
     result = None
     for item in reversed(items):
-        result = (item, result)
+        result = Pair(item, result)
     return result
 
 
@@ -79,8 +101,8 @@ def _is_llist(x):
 
 def _llist_ref(items, n):
     while n > 0:
-        items, n = items[1], n - 1
-    return items[0]
+        items, n = _tail(items), n - 1
+    return _head(items)
 
 
 def _llist_map(f, items):
@@ -89,13 +111,13 @@ def _llist_map(f, items):
 
 def _iter_llist(items):
     while items is not None:
-        yield items[0]
-        items = items[1]
+        yield _head(items)
+        items = _tail(items)
 
 
 def _llist_repr(x):
     if _is_pair(x):
-        return "[" + _llist_repr(x[0]) + ", " + _llist_repr(x[1]) + "]"
+        return "[" + _llist_repr(_head(x)) + ", " + _llist_repr(_tail(x)) + "]"
     if x is None:
         return "null"
     return str(x)
@@ -115,7 +137,11 @@ def _error(*args):
 
 
 def _display(x):
-    print(str(x), end="")
+    # str(x) would fall back to object repr for Pair — render book-style.
+    # Newline-terminated: every printed edition stacks stream displays one
+    # term per line (JS edition p.329), and the only transcripts whose
+    # captured output flows through display are the stream displays.
+    print(str(_show(x)))
     return x
 
 
@@ -139,8 +165,8 @@ def _llist_reverse(items):
 
 
 def _last_pair(items):
-    while _is_pair(items[1]):
-        items = items[1]
+    while _is_pair(_tail(items)):
+        items = _tail(items)
     return items
 
 
@@ -206,6 +232,8 @@ def book_prelude():
         "filter": _llist_filter, "reduce": _llist_reduce,
         "display": _display, "newline": _newline,
         "print": _session_print,
+        "set_head": _set_head, "set_tail": _set_tail,
+        "random_init": 17,
     }
     for name in ("sin", "cos", "tan", "atan", "atan2", "log", "pow",
                  "sqrt", "floor", "ceil", "exp"):
@@ -235,25 +263,78 @@ def blocks_in_order(book: Path):
             yield kind, code
 
 
+def _exec_block(code: str, ns: dict, seconds: float = 3.0):
+    """Exec one transcript block under a wall-clock watchdog.
+
+    A runaway cell (e.g. an accidental cycle reachable through the mutable
+    Pair structure) must fail the way a timed-out calepin cell would, not
+    hang the whole build.
+    """
+    import signal
+
+    def _on_alarm(signum, frame):
+        raise TimeoutError(f"transcript block exceeded {seconds}s")
+
+    old = signal.signal(signal.SIGALRM, _on_alarm)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        exec(compile(code, "<transcript>", "exec"), ns)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        signal.signal(signal.SIGALRM, old)
+
+
+# Every edition renders an infinite stream's display as 5 terms then an
+# ellipsis line (JS edition p.329); honest finite cells never exceed 4 lines.
+# Anything beyond this is an unbounded stream display, so cut the same way.
+MAX_LINES = 5
+
+
 def run_book(book: Path):
+    # Deep-but-bounded book recursion (solve forces ~1000 stream cells)
+    # needs headroom over the default 1000; the per-block watchdog above
+    # bounds anything unbounded.
+    import sys as _sys
+    _sys.setrecursionlimit(3000)
     ns = book_prelude()
     prelude_names = dict(ns)  # restored after every file (see note)
     outputs = {}
-    n_out = 0
+    occurrences = {}  # output code -> how many identical cells came before
+    pending = None  # stdout of the most recent snippet, claimed by its output cell
+    last_value = ""  # consecutive output cells (2.2.1) replay the same value
     for f in included_files(book):
         text = f.read_text()
         for m in BLOCK.finditer(text):
             kind = m.group(1) or m.group(3)
             code = m.group(2) if m.group(1) else m.group(4)
-            buf = io.StringIO()
-            try:
-                with redirect_stdout(buf):
-                    exec(compile(code, "<transcript>", "exec"), ns)
-            except Exception:  # noqa: BLE001 — matches transcript-source: pass
-                pass
             if kind == "output":
-                outputs[f"_sicp_t{n_out}"] = buf.getvalue()
-                n_out += 1
+                # An output cell is only a marker: 226/227 of them verbatim-echo
+                # the preceding snippet. It must NOT be re-executed — mutating
+                # calls (insert_queue, set_tail, …) would run twice and corrupt
+                # the session. The value is the snippet's captured stdout.
+                out = last_value if pending is None else pending
+                lines = out.split("\n")
+                if len(lines) > MAX_LINES + 1:  # trailing "" from the last \n
+                    out = "\n".join(lines[:MAX_LINES]) + "\n..."
+                # Key = the cell's TRIMMED code + occurrence index among
+                # identical codes — mirrors lib/code.typ's _cell-key exactly
+                # (the ```-block form and this raw source disagree about
+                # trailing newlines), so layout position never enters it.
+                key_code = code.strip()
+                k = occurrences.get(key_code, 0)
+                occurrences[key_code] = k + 1
+                key = json.dumps(key_code, ensure_ascii=False) + "#" + str(k)
+                outputs[key] = out
+                last_value = out
+                pending = None
+            else:
+                buf = io.StringIO()
+                try:
+                    with redirect_stdout(buf):
+                        _exec_block(code, ns)
+                except Exception:  # noqa: BLE001 — matches transcript-source: pass
+                    pass
+                pending = buf.getvalue()
         # The book's environment primitives always mean the book's
         # primitives: exercise-local redefinitions (e.g. the functional
         # pair/head/tail of 2.1.3) must not leak into later files, while
