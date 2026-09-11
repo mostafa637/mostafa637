@@ -63,6 +63,7 @@ pub mod modrm;
 pub mod random;
 pub mod rebuild;
 pub mod resource;
+pub mod sync;
 pub mod task;
 pub mod tlb;
 pub mod tls;

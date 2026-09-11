@@ -40,6 +40,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `getset.rs`  | `kernel/getset.c`     | 202     | **done** — PID/UID/GID getters and setters, supplementary groups, capability stubs and personality |
 | `tls.rs`     | `kernel/tls.c`        | 42      | **done** — i386 `user_desc`, `set_thread_area` and `set_tid_address` |
 | `misc.rs`    | `kernel/misc.c`       | 59      | **done** — `prctl`, `arch_prctl` and the host-safe reboot policy |
+| `sync.rs`    | `util/sync.{h,c}`     | 307     | **done** — `lock_t`/`cond_t`/`wrlock_t`, `wait_for`'s two `EINTR` checks and timeout mapping, the published waiter, and the explicit unwind flag; 46 C records replayed, deadline arithmetic included |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -72,7 +73,8 @@ running 1 test     (tests/log_differential.rs)     ->      31 log/syslog operati
 running 1 test     (tests/fake_db_differential.rs) ->      40 C/SQLite metadata operations + 41 snapshots
 running 3 tests    (tests/fake_db_migrate_differential.rs) -> 3 migrations x 5 historical schema generations
 running 2 tests    (tests/fake_db_rebuild_differential.rs) -> scripted-host rebuild: 6 host ops + 2 rebuilt tables
-test result: ok. 242 passed
+running 2 tests    (tests/sync_differential.rs)    ->      46 waiting/notify/lock records
+test result: ok. 253 passed
 $ cargo clippy --all-targets -- -D warnings       # clean, no warnings
 ```
 
@@ -773,6 +775,49 @@ not represented as fake implementations. The new `iSH Rust Core` workflow runs
 a focused rustfmt check (without rewriting generated decoder output), every
 unit/differential test, and strict clippy on every change under `ish-rs/`.
 
+### Locks, condition variables and the wait contract
+
+`util/sync.{h,c}` is the bottom of every blocking path in the kernel: `task.c`,
+`signal.c`, `futex.c`, `fs/lock.c`, `time.c`, `ptrace.c`, `eventfd.c` and the tty
+layer all wait through it. It was next in the ascending order for the same
+reason `fake-db.c` was: two hundred lines whose dependencies (`errno`, `task`)
+are complete.
+
+Three behaviors are worth naming, because each is easy to get subtly wrong:
+
+* **`wait_for` checks for a pending signal twice**, once before blocking and
+  once after, and returns `_EINTR` either time. `wait_for_ignore_signals` — the
+  version `vfork` and `waitpid`'s stop path use — checks neither.
+* **Any failed wait that is not `ETIMEDOUT` is reported as success.** A
+  deadline pthread rejects with `EINVAL` therefore looks like a spurious wakeup,
+  which is exactly what "no signal pending" then turns into a success.
+* **`trylock` does not record an owner.** Only `lock()` stores `pthread_self()`
+  in `lock->owner`, and `signal.c`'s `pthread_equal(lock->owner, pthread_self())`
+  probe — deciding whether the task being signalled is the one that would have
+  to release the lock — depends on that asymmetry.
+
+The C oracle wraps pthread instead of the kernel: `pthread_cond_wait` and
+`pthread_cond_timedwait` are linker-wrapped so the harness scripts whether a
+wait wakes, times out, or fails; `clock_gettime(CLOCK_MONOTONIC)` is wrapped so
+the timeout arithmetic is fixed; and `pthread_cond_broadcast` /
+`pthread_cond_signal` reveal which condvar `notify` and `notify_once` reached.
+Every value in the fixture is therefore machine-independent.
+
+```
+$ ISH_SRC=/path/to/ish ./tools/gen_sync_reference.sh
+wrote tests/fixtures/sync_reference.txt: 48 lines, 12 waits, 3 ignore-signal waits, 14 parks
+$ cargo test --test sync_differential
+… every wait, deadline, notify target, lock owner and wrlock counter matched the C
+```
+
+The single path the corpus does not script is "a `SIGUSR1` handler fires while
+an unwind is armed": that is where C's `sigusr1_handler` longjmps into
+`sigunwind_start`'s `sigsetjmp` frame, and a portable oracle cannot pin where a
+compiler resumes that frame (`-O0` and `-O2` harnesses disagree). The port
+models the jump as an explicit transition instead — [`Unwind::Unwound`] reports
+the `sigsetjmp`-returned-1 arm — and the rest of the contract, arming,
+disarming, and the no-request no-op, is replayed against the C.
+
 ## Layout
 
 ```
@@ -808,7 +853,8 @@ ish-rs/
 │   ├── group.rs                # kernel/group.c
 │   ├── getset.rs               # kernel/getset.c
 │   ├── tls.rs                  # kernel/tls.c
-│   └── misc.rs                 # kernel/misc.c
+│   ├── misc.rs                 # kernel/misc.c
+│   └── sync.rs                 # util/sync.{h,c} locks, waits, unwind flag
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
@@ -828,6 +874,7 @@ ish-rs/
 │   ├── fake_db_differential.rs # pure-Rust replay of the C SQLite metadata reference
 │   ├── fake_db_migrate_differential.rs # C migration ladder replayed over 5 generations
 │   ├── fake_db_rebuild_differential.rs # C rebuild replayed against a scripted host
+│   ├── sync_differential.rs    # C wait/notify/lock corpus replayed
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -846,7 +893,8 @@ ish-rs/
 │       ├── log_reference.txt   # 31 log/syslog operations from the C
 │       ├── fake_db_reference.txt # 40 fake-db operations + table states from C
 │       ├── fake_db_migrate_reference.txt # 3 C migrations x 5 schema generations
-│       └── fake_db_rebuild_reference.txt # scripted-host rebuild corpus + host ops
+│       ├── fake_db_rebuild_reference.txt # scripted-host rebuild corpus + host ops
+│       └── sync_reference.txt  # 46 waiting/notify/unwind/lock records from the C
 ├── vendor/
 │   └── graphitesql/            # v0.1.7 pure-Rust SQLite-3-compatible library
 └── tools/
@@ -868,6 +916,7 @@ ish-rs/
     ├── fake-db-dump.c          # C/SQLite fake-db behavioral-oracle generator
     ├── fake-db-migrate-dump.c  # migration-ladder oracle (includes fake-migrate.c)
     ├── fake-db-rebuild-dump.c  # rebuild oracle (wraps fstatat/unlinkat/linkat)
+    ├── sync-dump.c             # wait/notify oracle (wraps pthread_cond_*)
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -888,6 +937,7 @@ ish-rs/
     ├── gen_fake_db_reference.sh
     ├── gen_fake_db_migrate_reference.sh
     ├── gen_fake_db_rebuild_reference.sh
+    ├── gen_sync_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
@@ -959,6 +1009,31 @@ ish-rs/
   iSH code and no guest syscall can observe an implicit index name, so the
   differential comparison pins every explicit object and ignores the implicit
   ones; `migrate.rs` has a test that records the difference.
+* **Waiting is a trait, not a thread.** `util/sync.c` blocks by calling
+  pthread directly, which makes every rule it encodes untestable without a real
+  late wakeup. The port puts the blocking call behind `Parker`, so the
+  differential corpus can answer "woken", "timed out", or "`EINVAL`" exactly as
+  the C harness's linker-wrapped pthread does; `ThreadParker` is the production
+  implementation and the unit tests cover it with real threads. The host state
+  the wait reads — `current->pending`, `current->blocked`, the monotonic clock,
+  and the published `waiting_cond`/`waiting_lock` pair — is the `SyncHost` seam,
+  so "a signal arrives during the wait" is a scripted event rather than a race.
+* **A lock guard instead of a `lock_t *`.** C's `wait_for` takes a mutex pointer
+  that pthread unlocks and relocks around the wait. The port takes the
+  `LockGuard` by value and hands it back, which keeps the two C invariants that
+  matter: the mutex is held before and after the wait, and `lock->owner` stays
+  set for the whole wait (C's `signal.c` probe would otherwise see a clear
+  owner mid-wait).
+* **`sigunwind_start` cannot `longjmp`.** Rust has no safe way to jump back
+  into a frame the caller has left, so `sigusr1_handler` records the request and
+  `sigunwind_start` reports it as `Unwind::Unwound` — the observable equivalent
+  of the C `sigsetjmp` returning 1. The one corpus path that depends on `-O0`
+  versus `-O2` codegen is excluded and documented in the generator.
+* **Deadline arithmetic is C's, quirk included.** `now + timeout` shifts the
+  nanosecond carry only when the sum is *strictly greater* than `1000000000`, so
+  a sum of exactly one second reaches pthread unnormalized. The port computes
+  the same value and its parker answers `EINVAL` for it, which is why the
+  fixture contains a wait that both "failed" and "succeeded".
 * **Generated op tables, not hand-copied ones.** `emu/vec.h` declares 166
   functions in 30 signatures. Both the C driver's table and the Rust dispatch
   match come from `tools/gen_vec_ops.py`, so the two sides cannot drift and
