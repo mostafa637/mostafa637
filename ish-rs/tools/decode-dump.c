@@ -37,6 +37,8 @@
 #define FAKE_BYTES (FAKE_PAGES << PAGE_BITS)
 #define UNMAPPED_PAGE 8
 #define BASE_IP 0x400
+// 8 memory classes + 64 register classes; see class_of below
+#define NCLASS (8 + 64)
 #define FILL_MUL 7
 #define FILL_ADD 3
 
@@ -315,9 +317,54 @@ static int decode_step32(struct decode_state *state, struct tlb *tlb);
 static const unsigned char filler[8] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 };
 static long classes_checked;
 static long classes_excepted;
-static unsigned char except_map[5][256];
+// The eight opcode maps emu/decode.h reaches: the base map, the two-byte map
+// behind 0x0f, the lock map behind 0xf0 and its own two-byte map, and the two
+// scalar maps behind 0xf2/0xf3 with theirs.
+#define NMAP 8
+static const unsigned char map_prefix[NMAP][2] = {
+    { 0, 0 }, { 0x0f, 0 }, { 0xf0, 0 }, { 0xf0, 0x0f },
+    { 0xf2, 0 }, { 0xf2, 0x0f }, { 0xf3, 0 }, { 0xf3, 0x0f },
+};
+static const int map_len[NMAP] = { 0, 1, 1, 2, 1, 2, 1, 2 };
+static const char *const map_name[NMAP] = {
+    "base", "0f", "f0", "f0/0f", "f2", "f2/0f", "f3", "f3/0f",
+};
+// maps swept with two classes only; the generator fails if any opcode in them
+// turns out to depend on the class
+static const int map_sse[NMAP] = { 0, 0, 0, 0, 1, 1, 1, 1 };
+
+// The opcodes in each map whose next byte is another opcode (or another
+// instance) rather than a ModRM byte - exactly the sites emu/decode.h reaches
+// with `goto restart` / `goto lockrestart` / `return glue(DECODER_NAME, ...)`,
+// plus the map switches (header lines 643, 648, 685, 704/707, 710, 1110,
+// 1117/1119 and the four nested `case 0x0f:` blocks). The class invariant skips
+// these, and the decoder drives them itself instead of through the table.
+#define MAXPFX 9
+static const unsigned char map_pfx_ops[NMAP][MAXPFX] = {
+    { 0x0f, 0x2e, 0x3e, 0x65, 0x66, 0x67, 0xf0, 0xf2, 0xf3 }, // base
+    { 0 },                                                    // 0f
+    { 0x0f, 0x65, 0x66 },                                     // f0
+    { 0 },                                                    // f0/0f
+    { 0x0f },                                                 // f2
+    { 0 },                                                    // f2/0f
+    { 0x0f },                                                 // f3
+    { 0 },                                                    // f3/0f
+};
+static const int map_npfx[NMAP] = { 9, 0, 3, 0, 1, 0, 1, 0 };
+
+static unsigned char except_map[NMAP][256];
 static struct { int map, op; } exceptions[64];
 static int nexceptions;
+static unsigned long class_traces[NCLASS];
+
+static unsigned long class_hash(const char *s) {
+    unsigned long h = 1469598103934665603UL;
+    for (; *s; s++) {
+        h ^= (unsigned char) *s;
+        h *= 1099511628211UL;
+    }
+    return h;
+}
 
 // ---- the class invariant ----
 // 16 classes: the eight reg fields with a memory operand, and the eight with a
@@ -335,7 +382,6 @@ static char trace_b[1 << 16];
 // also reads the rm field, so the register form gets 8 * 8 classes.
 //   class <  8 : memory operand, class is the reg field
 //   class >= 8 : register operand, class is 8 + reg * 8 + rm
-#define NCLASS (8 + 64)
 
 static int class_of(int modrm_byte) {
     if ((modrm_byte >> 6) == 3)
@@ -385,13 +431,9 @@ static void decode_capture(int size, const unsigned char *b, int n, char *buf, s
 // generated table. Anything else that violates the invariant is a bug in this
 // reasoning, and the check below fails rather than quietly widening the list.
 static int is_prefix_op(int map, int op) {
-    if (map == 0)
-        return op == 0x0f || op == 0x2e || op == 0x3e || op == 0x65 || op == 0x66 ||
-               op == 0x67 || op == 0xf0 || op == 0xf2 || op == 0xf3;
-    if (map == 2)
-        return op == 0x0f || op == 0x65 || op == 0x66;
-    if (map == 3 || map == 4)
-        return op == 0x0f; // both scalar maps have their own two-byte map
+    for (int i = 0; i < map_npfx[map]; i++)
+        if (map_pfx_ops[map][i] == op)
+            return 1;
     return 0;
 }
 
@@ -401,18 +443,27 @@ static void check_classes(void) {
     long excepted = 0;
     for (int pass = 0; pass < 2; pass++) {
         int size = pass ? 16 : 32;
-        const unsigned char maps[5][2] = { { 0, 0 }, { 0x0f, 1 }, { 0xf0, 1 }, { 0xf2, 1 }, { 0xf3, 1 } };
-        for (int mi = 0; mi < 5; mi++) {
-            int np = maps[mi][1];
-            memcpy(b, maps[mi], np);
+        for (int mi = 0; mi < NMAP; mi++) {
+            int np = map_len[mi];
+            memcpy(b, map_prefix[mi], np);
             for (int op = 0; op < 256; op++) {
                 b[np] = (unsigned char) op;
                 int bad = 0;
+                memset(class_traces, 0, sizeof(class_traces));
+                int distinct = 0;
                 for (int cls = 0; cls < NCLASS && !bad; cls++) {
                     b[np + 1] = (unsigned char) class_modrm(cls);
                     memcpy(b + np + 2, filler, 8);
                     decode_capture(size, b, np + 10, trace_a, sizeof(trace_a));
                     size_t ref_len = strlen(trace_a);
+                    int seen = 0;
+                    for (int prev = 0; prev < cls; prev++)
+                        if (class_traces[prev] && class_traces[prev] == class_hash(trace_a))
+                            seen = 1;
+                    if (!seen) {
+                        distinct++;
+                        class_traces[cls] = class_hash(trace_a);
+                    }
                     for (int m2 = 0; m2 < 256; m2++) {
                         if (class_of(m2) != cls)
                             continue;
@@ -425,13 +476,20 @@ static void check_classes(void) {
                         }
                     }
                 }
+                if (map_sse[mi] && distinct > 1 && !is_prefix_op(mi, op)) {
+                    fprintf(stderr,
+                            "opcode %s/%02x depends on the ModRM class (%d variants) but its map "
+                            "is only swept with two classes - widen the corpus\n",
+                            map_name[mi], op, distinct);
+                    exit(1);
+                }
                 if (bad) {
                     except_map[mi][op] = 1;
                     excepted++;
                     if (!is_prefix_op(mi, op)) {
                         fprintf(stderr,
                                 "class invariant violated by a non-prefix opcode: "
-                                "instance %d map %02x opcode %02x\n", size, maps[mi][0], op);
+                                "instance %d map %s opcode %02x\n", size, map_name[mi], op);
                         exit(1);
                     }
                 }
@@ -440,7 +498,7 @@ static void check_classes(void) {
     }
     classes_checked = checked;
     classes_excepted = excepted;
-    for (int mi = 0; mi < 5; mi++)
+    for (int mi = 0; mi < NMAP; mi++)
         for (int op = 0; op < 256; op++)
             if (except_map[mi][op])
                 exceptions[nexceptions].map = mi, exceptions[nexceptions].op = op, nexceptions++;
@@ -495,7 +553,7 @@ static void sweep_x87(int size) {
     }
 }
 
-#define PER_INSTANCE (3 * 256 * 16 + 2 * 256 * 2 + 8 * (NCLASS - 8))
+#define PER_INSTANCE (4 * 256 * 16 + 4 * 256 * 2 + 8 * (NCLASS - 8))
 #define NFAULT 3
 
 int main(void) {
@@ -520,19 +578,14 @@ int main(void) {
     printf("# classes %d (8 memory + 64 register)\n", NCLASS);
     printf("# class_invariant %ld decodes, %d opcodes excepted:", classes_checked, nexceptions);
     for (int i = 0; i < nexceptions; i++)
-        printf(" %d:%02x", exceptions[i].map, exceptions[i].op);
+        printf(" %s:%02x", map_name[exceptions[i].map], exceptions[i].op);
     printf("\n");
     printf("# cases %d\n", 2 * PER_INSTANCE + NFAULT);
 
     for (int pass = 0; pass < 2; pass++) {
         int size = pass ? 16 : 32;
-        unsigned char p_0f[1] = { 0x0f }, p_f0[1] = { 0xf0 }, p_f2[1] = { 0xf2 }, p_f3[1] = { 0xf3 };
-        unsigned char none[1] = { 0 };
-        sweep(size, none, 0, 16);
-        sweep(size, p_0f, 1, 16);
-        sweep(size, p_f0, 1, 16);
-        sweep(size, p_f2, 1, 2);
-        sweep(size, p_f3, 1, 2);
+        for (int mi = 0; mi < NMAP; mi++)
+            sweep(size, map_prefix[mi], map_len[mi], map_sse[mi] ? 2 : 16);
         sweep_x87(size);
     }
 
