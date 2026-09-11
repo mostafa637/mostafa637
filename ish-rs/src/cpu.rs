@@ -92,11 +92,39 @@ pub fn reg32_name(reg: Reg32) -> &'static str {
 pub struct MmReg(pub QwordT);
 
 impl MmReg {
+    pub const ZERO: MmReg = MmReg(0);
+
     pub fn qw(&self) -> QwordT {
         self.0
     }
+    pub fn set_qw(&mut self, v: QwordT) {
+        self.0 = v;
+    }
     pub fn dw(&self, i: usize) -> DwordT {
         ((self.0 >> (32 * i)) & 0xffff_ffff) as DwordT
+    }
+    pub fn set_dw(&mut self, i: usize, v: DwordT) {
+        self.0 = (self.0 & !(0xffff_ffffu64 << (32 * i))) | ((v as u64) << (32 * i));
+    }
+    pub fn bytes(&self) -> [u8; 8] {
+        self.0.to_le_bytes()
+    }
+    pub fn from_bytes(b: [u8; 8]) -> Self {
+        MmReg(u64::from_le_bytes(b))
+    }
+    pub fn u32(&self, i: usize) -> u32 {
+        self.dw(i)
+    }
+    pub fn u16(&self, i: usize) -> u16 {
+        u16::from_le_bytes(self.bytes()[2 * i..2 * i + 2].try_into().unwrap())
+    }
+    pub fn set_u16(&mut self, i: usize, v: u16) {
+        let mut b = self.bytes();
+        b[2 * i..2 * i + 2].copy_from_slice(&v.to_le_bytes());
+        *self = Self::from_bytes(b);
+    }
+    pub fn u8(&self, i: usize) -> u8 {
+        self.bytes()[i]
     }
 }
 
@@ -105,17 +133,61 @@ impl MmReg {
 pub struct XmmReg(pub u128);
 
 impl XmmReg {
+    pub const ZERO: XmmReg = XmmReg(0);
+
+    /// The register as bytes, low byte first. Every element accessor below is
+    /// defined in terms of this, so "little endian" (which `emu/cpu.h` simply
+    /// assumes: "as does literally everything") is stated once, here.
+    pub fn bytes(&self) -> [u8; 16] {
+        self.0.to_le_bytes()
+    }
+    pub fn from_bytes(b: [u8; 16]) -> Self {
+        XmmReg(u128::from_le_bytes(b))
+    }
+
     pub fn qw(&self, i: usize) -> QwordT {
-        ((self.0 >> (64 * i)) & u64::MAX as u128) as QwordT
+        u64::from_le_bytes(self.bytes()[8 * i..8 * i + 8].try_into().unwrap())
+    }
+    pub fn set_qw(&mut self, i: usize, v: QwordT) {
+        let mut b = self.bytes();
+        b[8 * i..8 * i + 8].copy_from_slice(&v.to_le_bytes());
+        *self = Self::from_bytes(b);
     }
     pub fn u32(&self, i: usize) -> u32 {
-        ((self.0 >> (32 * i)) & u32::MAX as u128) as u32
+        u32::from_le_bytes(self.bytes()[4 * i..4 * i + 4].try_into().unwrap())
+    }
+    pub fn set_u32(&mut self, i: usize, v: u32) {
+        let mut b = self.bytes();
+        b[4 * i..4 * i + 4].copy_from_slice(&v.to_le_bytes());
+        *self = Self::from_bytes(b);
     }
     pub fn u16(&self, i: usize) -> u16 {
-        ((self.0 >> (16 * i)) & u16::MAX as u128) as u16
+        u16::from_le_bytes(self.bytes()[2 * i..2 * i + 2].try_into().unwrap())
+    }
+    pub fn set_u16(&mut self, i: usize, v: u16) {
+        let mut b = self.bytes();
+        b[2 * i..2 * i + 2].copy_from_slice(&v.to_le_bytes());
+        *self = Self::from_bytes(b);
     }
     pub fn u8(&self, i: usize) -> u8 {
-        ((self.0 >> (8 * i)) & u8::MAX as u128) as u8
+        self.bytes()[i]
+    }
+    pub fn set_u8(&mut self, i: usize, v: u8) {
+        let mut b = self.bytes();
+        b[i] = v;
+        *self = Self::from_bytes(b);
+    }
+    pub fn f32(&self, i: usize) -> f32 {
+        f32::from_bits(self.u32(i))
+    }
+    pub fn set_f32(&mut self, i: usize, v: f32) {
+        self.set_u32(i, v.to_bits());
+    }
+    pub fn f64(&self, i: usize) -> f64 {
+        f64::from_bits(self.qw(i))
+    }
+    pub fn set_f64(&mut self, i: usize, v: f64) {
+        self.set_qw(i, v.to_bits());
     }
 }
 

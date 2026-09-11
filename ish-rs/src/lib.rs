@@ -14,6 +14,7 @@
 //! | [`fpu`]         | `emu/fpu.h` + `.c`        | ported, full state compared after every op |
 //! | [`mmu`]         | `emu/mmu.h`               | ported, page arithmetic and the translate interface |
 //! | [`tlb`]         | `emu/tlb.h` + `.c`        | ported, cache behaviour compared against the C |
+//! | [`vec`]         | `emu/vec.{h,c}` + `mmx.c` | ported, all 166 operations compared against the C |
 //!
 //! # Provenance and license
 //!
@@ -25,6 +26,7 @@ pub mod float80;
 pub mod fpu;
 pub mod mmu;
 pub mod tlb;
+pub mod vec;
 
 pub use cpu::CpuState;
 pub use float80::Float80;
