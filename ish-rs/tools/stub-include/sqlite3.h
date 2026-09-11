@@ -35,6 +35,7 @@ typedef int (*sqlite3_callback)(void *, int, char **, char **);
 #define SQLITE_MUTEX_FAST 0
 #define SQLITE_TRANSIENT ((sqlite3_destructor_type) -1)
 
+int sqlite3_open(const char *filename, sqlite3 **pp_db);
 int sqlite3_open_v2(const char *filename, sqlite3 **pp_db, int flags,
                     const char *z_vfs);
 int sqlite3_close(sqlite3 *db);
@@ -53,9 +54,12 @@ int sqlite3_finalize(sqlite3_stmt *stmt);
 int sqlite3_bind_blob(sqlite3_stmt *stmt, int index, const void *value, int n,
                       sqlite3_destructor_type destructor);
 int sqlite3_bind_int64(sqlite3_stmt *stmt, int index, int64_t value);
+int sqlite3_column_int(sqlite3_stmt *stmt, int column);
 int64_t sqlite3_column_int64(sqlite3_stmt *stmt, int column);
 const void *sqlite3_column_blob(sqlite3_stmt *stmt, int column);
+const unsigned char *sqlite3_column_text(sqlite3_stmt *stmt, int column);
 int sqlite3_column_bytes(sqlite3_stmt *stmt, int column);
+char *sqlite3_mprintf(const char *format, ...);
 int64_t sqlite3_last_insert_rowid(sqlite3 *db);
 sqlite3_mutex *sqlite3_mutex_alloc(int type);
 void sqlite3_mutex_enter(sqlite3_mutex *mutex);

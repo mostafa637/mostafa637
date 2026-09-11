@@ -1,0 +1,37 @@
+S 1 a4810000e80300006400000000000000
+S 2 41ed0000e80300006400000000000000
+S 3 a4810000e80300006400000000000000
+S 4 a4810000e80300006400000000000000
+S 5 41ed0000e80300006400000000000000
+P 2f61 1
+P 2f62 1
+P 2f63 2
+P 2f632f64 3
+P 2f6d697373696e67 4
+P 2f65 5
+P 2f66 5
+P 2f67 5
+W create 2f61
+W link 2f61 2f62
+W create 2f63
+W create 2f632f64
+W create 2f6d697373696e67
+W create 2f65
+W link 2f65 2f66
+W link 2f65 2f67
+F a 1f5
+F b 1f6
+F c 1f7
+F c/d 1f8
+F e 1f9
+F f 1fa
+F g 1fb
+B 7227d1618dc2509f
+L unlink b
+L link a b
+L unlink f
+L link e f
+L unlink g
+L link e g
+A 5bcbf10b5147f32d
+O index:inode_to_path index:sqlite_autoindex_meta_1 index:sqlite_autoindex_paths_1 table:meta table:paths table:stats

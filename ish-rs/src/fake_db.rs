@@ -20,6 +20,8 @@ use std::rc::Rc;
 
 use graphitesql::{Connection, Value};
 
+use crate::rebuild::{fakefs_rebuild, FakefsHost};
+
 type ConnectionSlot = Rc<RefCell<Option<Connection>>>;
 const SQLITE_SCHEMA_VERSION: u64 = 3;
 
@@ -49,6 +51,15 @@ pub enum FakeDbError {
     /// A caller tried to use the database while an explicit transaction owns
     /// its single SQLite connection.
     TransactionActive,
+    /// The persisted `PRAGMA user_version` was negative. C's migration ladder
+    /// would index `migrations[]` out of bounds; the port reports it instead.
+    NegativeSchemaVersion {
+        /// SQLite `PRAGMA user_version` found in the database file.
+        found: i32,
+    },
+    /// `fake_db_init` could not open the database file. C returns `_EINVAL`
+    /// from that failure.
+    CannotOpen,
     /// A transaction was already committed, rolled back, or otherwise closed.
     TransactionFinished,
     /// SQLite's positive implicit rowid range has been exhausted.
@@ -56,7 +67,7 @@ pub enum FakeDbError {
 }
 
 impl FakeDbError {
-    fn database(error: impl fmt::Display) -> Self {
+    pub(crate) fn database(error: impl fmt::Display) -> Self {
         Self::Database(error.to_string())
     }
 }
@@ -85,6 +96,13 @@ impl fmt::Display for FakeDbError {
             Self::TransactionActive => {
                 formatter.write_str("fakefs database is owned by an active transaction")
             }
+            Self::NegativeSchemaVersion { found } => {
+                write!(
+                    formatter,
+                    "fakefs SQLite schema version {found} is negative"
+                )
+            }
+            Self::CannotOpen => formatter.write_str("fakefs database could not be opened"),
             Self::TransactionFinished => {
                 formatter.write_str("fakefs transaction has already finished")
             }
@@ -148,10 +166,10 @@ pub struct MetadataRow {
 /// Persistent, SQLite-3-file-compatible fake filesystem metadata storage.
 ///
 /// `create` writes a SQLite version-3 database using pure Rust. `open` accepts
-/// an existing version-3 iSH fakefs SQLite file whose current schema version is
-/// supported by this port. The old native-SQLite implementation's filesystem
-/// migration/rebuild callbacks remain integration work for the future fakefs
-/// layer.
+/// an existing version-3 iSH fakefs SQLite file. [`FakeDb::init`] is the
+/// C-compatible entry point: it migrates older schemas through
+/// [`crate::migrate`] and rebuilds the inode map through [`crate::rebuild`]
+/// when the database file has moved, exactly like `fake_db_init`.
 pub struct FakeDb {
     connection: ConnectionSlot,
 }
@@ -197,7 +215,7 @@ impl FakeDb {
         Ok(db)
     }
 
-    fn from_connection(connection: Connection) -> Self {
+    pub(crate) fn from_connection(connection: Connection) -> Self {
         Self {
             connection: Rc::new(RefCell::new(Some(connection))),
         }
@@ -247,6 +265,70 @@ impl FakeDb {
         })
     }
 
+    /// `fake_db_init`: open an existing fakefs database the way `fs/fake.c`
+    /// does, migrating it forward and rebuilding its inode map when the
+    /// database file has moved to a new host inode.
+    ///
+    /// This is the C layer's only entry point. It opens with
+    /// `SQLITE_OPEN_READWRITE` — a missing file is
+    /// [`FakeDbError::CannotOpen`], C's `_EINVAL` — raises the busy timeout,
+    /// runs the migration ladder, compares `meta.db_inode` with the host inode
+    /// of the database file, rebuilds through `host` when they differ, records
+    /// the new inode, and finally drops orphaned stats.
+    ///
+    /// Two C setup steps have no equivalent here: this port has no SQL
+    /// `change_prefix` function (prefix renames are implemented directly in
+    /// [`FakeDb::path_rename`]) and no VFS journal modes, so `pragma
+    /// journal_mode=wal` is not applied. The `PRAGMA foreign_keys=ON` that
+    /// precedes them in C is applied.
+    pub fn init(path: impl AsRef<Path>, host: &dyn FakefsHost) -> Result<Self, FakeDbError> {
+        let path = path.as_ref();
+        let sqlite_path = database_path(path)?;
+        let connection = Connection::open(sqlite_path).map_err(|_| FakeDbError::CannotOpen)?;
+        let db = Self::from_connection(connection);
+        db.with_connection(|connection| {
+            connection
+                .execute_batch("PRAGMA busy_timeout=1000; PRAGMA foreign_keys=ON;")
+                .map_err(FakeDbError::database)
+        })?;
+        db.migrate()?;
+
+        // After the filesystem is compressed, transmitted and uncompressed, the
+        // inode numbers are different. The inode of the database file is stored
+        // inside the database and compared with the actual file inode; when
+        // they disagree, every recorded inode is rebuilt from the host.
+        let database_inode = host
+            .database_inode(path)
+            .ok_or_else(|| FakeDbError::Database("fakefs database stat failed".into()))?;
+        let recorded = db.with_connection(|connection| {
+            first_integer(query_rows(connection, "SELECT db_inode FROM meta")?)
+        })?;
+        if let Some(recorded) = recorded {
+            // C compares `(uint64_t) sqlite3_column_int64(...) != db_inode`.
+            if recorded as u64 != database_inode {
+                fakefs_rebuild(&db, host)?;
+            }
+        }
+
+        db.with_connection(|connection| {
+            execute(
+                connection,
+                &format!(
+                    "UPDATE meta SET db_inode = {}",
+                    sqlite_integer(database_inode)
+                ),
+            )
+        })?;
+
+        db.clear_orphans()?;
+        Ok(db)
+    }
+
+    /// `fakefs_migrate`: run the schema migration ladder in place.
+    pub fn migrate(&self) -> Result<(), FakeDbError> {
+        self.with_connection(crate::migrate::fakefs_migrate)
+    }
+
     fn take_connection(&self) -> Result<Connection, FakeDbError> {
         take_connection(&self.connection)
     }
@@ -255,7 +337,7 @@ impl FakeDb {
         put_connection(&self.connection, connection)
     }
 
-    fn with_connection<T>(
+    pub(crate) fn with_connection<T>(
         &self,
         operation: impl FnOnce(&mut Connection) -> Result<T, FakeDbError>,
     ) -> Result<T, FakeDbError> {
@@ -751,14 +833,20 @@ fn execute(connection: &mut Connection, sql: &str) -> Result<(), FakeDbError> {
         .map_err(FakeDbError::database)
 }
 
-fn query_rows(connection: &Connection, sql: &str) -> Result<Vec<Vec<Value>>, FakeDbError> {
+pub(crate) fn query_rows(
+    connection: &Connection,
+    sql: &str,
+) -> Result<Vec<Vec<Value>>, FakeDbError> {
     connection
         .query(sql)
         .map(|result| result.rows)
         .map_err(FakeDbError::database)
 }
 
-fn scalar_integer(connection: &Connection, sql: &str) -> Result<Option<i64>, FakeDbError> {
+pub(crate) fn scalar_integer(
+    connection: &Connection,
+    sql: &str,
+) -> Result<Option<i64>, FakeDbError> {
     first_integer(query_rows(connection, sql)?)
 }
 
@@ -778,7 +866,7 @@ fn one_column(row: Vec<Value>) -> Result<Value, FakeDbError> {
     }
 }
 
-fn integer_from_value(value: &Value) -> Result<i64, FakeDbError> {
+pub(crate) fn integer_from_value(value: &Value) -> Result<i64, FakeDbError> {
     match value {
         Value::Integer(value) => Ok(*value),
         other => Err(FakeDbError::Database(format!(
@@ -787,7 +875,7 @@ fn integer_from_value(value: &Value) -> Result<i64, FakeDbError> {
     }
 }
 
-fn blob_from_value(value: &Value) -> Result<&[u8], FakeDbError> {
+pub(crate) fn blob_from_value(value: &Value) -> Result<&[u8], FakeDbError> {
     match value {
         Value::Blob(value) => Ok(value),
         other => Err(FakeDbError::Database(format!(
@@ -800,14 +888,14 @@ fn stat_from_value(value: &Value) -> Result<IshStat, FakeDbError> {
     IshStat::from_le_bytes(blob_from_value(value)?)
 }
 
-fn sqlite_integer(value: u64) -> i64 {
+pub(crate) fn sqlite_integer(value: u64) -> i64 {
     // `fake-db.c` passes inode_t through sqlite3_bind_int64. Preserve that C
     // cast for out-of-range caller input even though normal implicit rowids are
     // positive signed SQLite integers.
     value as i64
 }
 
-fn blob_literal(bytes: &[u8]) -> String {
+pub(crate) fn blob_literal(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut literal = String::with_capacity(3 + bytes.len() * 2);
     literal.push_str("X'");
@@ -919,6 +1007,167 @@ mod tests {
         assert_eq!(reopened.path_get_inode(b"/one").unwrap(), 0);
         drop(reopened);
         remove_database_files(&path);
+    }
+
+    /// A host adapter that answers from a fixed map, as `tests/` does.
+    struct TestHost {
+        inodes: std::collections::BTreeMap<Vec<u8>, u64>,
+        database_inode: Option<u64>,
+        log: RefCell<Vec<String>>,
+    }
+
+    impl crate::rebuild::FakefsHost for TestHost {
+        fn file_inode(&self, path: &[u8]) -> Option<u64> {
+            self.inodes.get(path).copied()
+        }
+
+        fn unlink(&self, path: &[u8]) -> bool {
+            self.log
+                .borrow_mut()
+                .push(format!("unlink {}", String::from_utf8_lossy(path)));
+            true
+        }
+
+        fn link(&self, source: &[u8], destination: &[u8]) -> bool {
+            self.log.borrow_mut().push(format!(
+                "link {} {}",
+                String::from_utf8_lossy(source),
+                String::from_utf8_lossy(destination)
+            ));
+            true
+        }
+
+        fn database_inode(&self, _database: &Path) -> Option<u64> {
+            self.database_inode
+        }
+    }
+
+    fn host(inodes: &[(&[u8], u64)], database_inode: Option<u64>) -> TestHost {
+        TestHost {
+            inodes: inodes
+                .iter()
+                .map(|(path, inode)| (path.to_vec(), *inode))
+                .collect(),
+            database_inode,
+            log: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// `fake_db_init` end to end: an old schema is migrated, and a database
+    /// whose file inode changed is rebuilt before the new inode is recorded.
+    #[test]
+    fn init_migrates_and_rebuilds_like_fake_db_init() {
+        let path = temporary_database_path();
+        {
+            // Write a version 0 database: no index, no foreign key, and the
+            // `db_inode` the schema writes on creation.
+            let mut connection = Connection::create(path.to_str().unwrap()).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE meta (id integer unique default 0, db_inode integer);\
+                     INSERT INTO meta (db_inode) VALUES (0);\
+                     CREATE TABLE stats (inode integer primary key, stat blob);\
+                     CREATE TABLE paths (path blob primary key, inode integer);\
+                     PRAGMA user_version = 0;",
+                )
+                .unwrap();
+            drop(connection);
+
+            // The strict `open` path only accepts the current generation, which
+            // is why `init` is the C-compatible entry point.
+            assert_eq!(
+                FakeDb::open(&path).err().unwrap(),
+                FakeDbError::UnsupportedSchemaVersion { found: 0 }
+            );
+
+            let host = host(&[(b"one", 77), (b"two", 78)], Some(0x1234_5678));
+            let db = FakeDb::init(&path, &host).unwrap();
+            // The database was empty, so no host path had to be relinked; the
+            // migration still added the index and the foreign key.
+            assert!(host.log.borrow().is_empty());
+            db.with_connection(|connection| {
+                query_rows(
+                    connection,
+                    "SELECT name FROM sqlite_master WHERE type='index' AND name='inode_to_path'",
+                )
+                .map(|rows| assert_eq!(rows.len(), 1))
+            })
+            .unwrap();
+            // `meta.db_inode` now records the host's inode for the database.
+            assert_eq!(
+                db.with_connection(|connection| scalar_integer(
+                    connection,
+                    "SELECT db_inode FROM meta"
+                ))
+                .unwrap(),
+                Some(0x1234_5678)
+            );
+            // This database carried no rows, so nothing had to be remapped.
+            assert_eq!(db.path_get_inode(b"/one").unwrap(), 0);
+            assert_eq!(db.paths_for_inode(1).unwrap().len(), 0);
+        }
+        remove_database_files(&path);
+    }
+
+    /// A non-empty database with a stale `db_inode` is rebuilt through the
+    /// host: paths follow the host's inodes and orphans are dropped.
+    #[test]
+    fn init_rebuilds_when_the_database_file_moved() {
+        let path = temporary_database_path();
+        {
+            let db = FakeDb::create(&path).unwrap();
+            let transaction = db.begin_write().unwrap();
+            let stat = IshStat {
+                mode: 0o100600,
+                uid: 7,
+                gid: 8,
+                rdev: 0,
+            };
+            transaction.path_create(b"/kept", stat).unwrap();
+            transaction.path_create(b"/gone", stat).unwrap();
+            transaction.path_link(b"/kept", b"/alias").unwrap();
+            transaction.commit().unwrap();
+        }
+
+        // `/kept` and `/alias` were one guest inode, so the rebuild relinks the
+        // alias to the first path; `/gone` is absent from the host and is
+        // dropped from the metadata.
+        let host = host(&[(b"kept", 900), (b"alias", 901)], Some(4242));
+        let db = FakeDb::init(&path, &host).unwrap();
+        assert_eq!(
+            host.log.borrow().as_slice(),
+            ["unlink alias", "link kept alias"]
+        );
+        assert_eq!(db.path_get_inode(b"/kept").unwrap(), 900);
+        // C stats the alias before relinking it, so that pre-link inode is what
+        // the rebuilt table records for it.
+        assert_eq!(db.path_get_inode(b"/alias").unwrap(), 901);
+        assert_eq!(db.path_get_inode(b"/gone").unwrap(), 0);
+        assert_eq!(
+            db.with_connection(|connection| scalar_integer(
+                connection,
+                "SELECT db_inode FROM meta"
+            ))
+            .unwrap(),
+            Some(4242)
+        );
+        drop(db);
+        remove_database_files(&path);
+    }
+
+    /// Opening a database that does not exist is C's `_EINVAL`.
+    #[test]
+    fn init_reports_a_missing_database_file() {
+        let path = temporary_database_path();
+        let host = host(&[], None);
+        assert_eq!(
+            FakeDb::init(&path, &host).err().unwrap(),
+            FakeDbError::CannotOpen
+        );
+        assert_eq!(
+            FakeDb::init(&path, &host).err().unwrap().to_string(),
+            "fakefs database could not be opened"
+        );
     }
 
     fn temporary_database_path() -> std::path::PathBuf {
