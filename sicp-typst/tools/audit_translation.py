@@ -84,6 +84,7 @@ def english_patterns(term: str) -> list[re.Pattern]:
     tags = {"to", "verb", "noun", "adj", "adjective", "adv", "adverb", "s",
             "es", "plural", "singular", "a", "an", "the", "and", "or", "of",
             "in", "as", "e.g", "i.e"}
+    t = re.sub(r"\[[A-Z]+\]", " ", term)  # book-scope tags
     t = re.sub(r"\((s|es)\)", " ", term)
     inner_alts: list[str] = []
 
@@ -137,6 +138,14 @@ def arabic_stems(ar: str) -> set[str]:
                 stems.add(f[:-1] + "ت")
             if f.endswith("ات"):
                 stems.add(f[:-1])
+    # irregular plurals the ة->ات rule cannot produce (and would misreport
+    # as missing glossary compliance): وسيط->وسائط, مهمة->مهام, قوة->قوى
+    for word in list(stems):
+        for singular, plural in (("وسيط", "وسائط"), ("مهمه", "مهام"), ("قوه", "قوى")):
+            if word == singular:
+                stems.add(plural)
+            elif word.endswith(singular):
+                stems.add(word[: -len(singular)] + plural)
     return {s for s in stems if len(s) >= 3}
 
 
@@ -294,6 +303,10 @@ def main() -> int:
             continue
         prose_en[en] = prose(en.read_text(encoding="utf-8"))
         prose_ar[ar] = fold(prose(ar.read_text(encoding="utf-8")))
+
+    # This repo's content is SICP; glossary entries scoped to another book
+    # ([OSTEP]...) are out of context here (editorial rule 6).
+    entries = [e for e in entries if "[OSTEP]" not in e[1]]
 
     latin_only, rows_t = [], []
     for line, term, ar in entries:
