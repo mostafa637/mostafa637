@@ -433,6 +433,7 @@ Run-time Stack                              مكدس وقت التشغيل
 Entry Point                                 نقطة الدخول
 Argument                                    وسيط
 Arguments                                   وسائط
+Operand                                     معمول / معمولات
 File Descriptor                             واصف ملف
 File Descriptors                            واصفات ملفات
 Standard Input                              الإدخال القياسي

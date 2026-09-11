@@ -247,7 +247,7 @@ def make_application(function_expression, argument_expressions):
 والمحدد لجسم تعبير #en[lambda] هو
 #idx("lambdabody")
 #py("lambda_body").
-المحدد للبارامترات، المسمى
+المحدَّد للمعلمات، المسمّى
 #py("lambda_parameter_symbols")،
 يستخرج بالإضافة إلى ذلك الرموز من الأسماء.
 #idx("lambdaparametersymbols", decl: true)
@@ -469,8 +469,8 @@ def function_decl_to_constant_decl(component):
 وبالمثل، نُعرّف
 
 #idx("operator combination", sub: "parsing of")
-تركيبات المعاملات بدلالة تطبيقات الدوال.
-تركيبات المعاملات أحادية أو ثنائية وتحمل رمز معاملها كعنصر ثاني في تمثيل القائمة المُعنونة:
+تركيبات المعمولات بدلالة تطبيقات الدوال.
+تركيبات المعمولات أحادية أو ثنائية وتحمل رمز عاملها كعنصر ثانٍ في تمثيل القائمة المُعنونة:
 
 #syntax($lt.double space$, meta("unary-operator"), " ", meta("expression"), $space gt.double$, " =
      llist(\"unary_operator_combination\",
@@ -515,7 +515,7 @@ def function_decl_to_constant_decl(component):
 #idx("operator combination", sub: "as function application")
 #idx("operator combination", sub: "as derived component")
 #idx("derived components in evaluator", sub: "operator combination")
-تركيبة المعامل إلى تطبيق دالة يكون تعبير دالتها هو اسم المعامل:
+تركيبة المعمول إلى تطبيق دالة يكون تعبير دالتها هو اسم العامل:
 #idx("operatorcombinationtoapplication", decl: true)
 #snippet(```python
 def operator_combination_to_application(component):
@@ -523,7 +523,7 @@ def operator_combination_to_application(component):
     return make_application(make_name(operator), llist(first_operand(component))) if is_unary_operator_combination(component) else make_application(make_name(operator), llist(first_operand(component), second_operand(component)))
 ```)
 
-المكونات (مثل تعاريف الدوال وتركيبات المعاملات) التي نختار تنفيذها كتحويلات نحوية تُسمى
+المكونات (مثل تعاريف الدوال وتركيبات المعمولات) التي نختار تنفيذها كتحويلات نحوية تُسمى
 #idx("derived component")
 #emph[المكونات المشتقة]. وتراكيب التركيب المنطقي هي أيضاً مكونات مشتقة (انظر التمرين @ex:eval-and-or).
 
@@ -541,7 +541,7 @@ def operator_combination_to_application(component):
 #py("unparse"). ويأخذ كوسيط قائمة مُعنونة كما تنتجها #py("parse")
 ويرجع سلسلة نصية تلتزم بـ تدوين Python.
 
-+ اكتب دالة #py("unparse") باتباع هيكل #py("evaluate") (دون وسيط البيئة)، ولكن بإنتاج سلسلة نصية تمثل المكون المعطى، بدلاً من تقييمه. تذكر من القسم @sec:circuit-simulator أن المعامل #py("+") يمكن تطبيقه على سلسلتين نصيتين لربطهما وأن الدالة الأوليّة #py("stringify") تحول القيم مثل 1.5 و صح و #py("None") إلى سلاسل نصية. احرص على احترام أسبقيات المعاملات بـ إحاطة السلاسل النصية الناتجة عن إلغاء إعراب تركيبات المعاملات بالأقواس (دائماً أو عندما يكون ذلك ضرورياً).
++ اكتب دالة #py("unparse") باتباع هيكل #py("evaluate") (دون وسيط البيئة)، ولكن بإنتاج سلسلة نصية تمثل المكون المعطى، بدلاً من تقييمه. تذكر من القسم @sec:circuit-simulator أن العامل #py("+") يمكن تطبيقه على سلسلتين نصيتين لربطهما وأن الدالة الأوليّة #py("stringify") تحول القيم مثل 1.5 و صح و #py("None") إلى سلاسل نصية. احرص على احترام أسبقيات العوامل بإحاطة السلاسل النصية الناتجة عن إلغاء إعراب تركيبات العوامل بالأقواس (دائماً أو عندما يكون ذلك ضرورياً).
 + دالتك #py("unparse") ستكون مفيدة عند حل التمارين اللاحقة في هذا القسم. حسن #py("unparse") بـ إضافة المحارف #py("\" \"") (مسافة) و #py("\"\\n\"") (سطر جديد) إلى السلسلة النصية الناتجة، لاتباع أسلوب المحاذاة #idx("indentation") المستخدَم في برامج Python في هذا الكتاب. وإضافة مثل محارف المسافات البيضاء #idx("whitespace characters") هذه إلى (أو إزالتها من) نص البرنامج لجعل النص أسهل في القراءة تُسمى #idx("pretty-printing") #emph[الطباعة الجميلة].
 ])
 
@@ -582,13 +582,13 @@ def operator_combination_to_application(component):
 ])
 
 #exercise(label-name: <ex:directly>, [
-+ في Python، يجب ألا تحتوي تعبيرات #en[lambda] على #idx("parameters", sub: "duplicate") #idx("duplicate parameters") #idx("metacircular evaluator for Python", sub: "preventing duplicate parameters") بارامترات مكررة. المُقيِّم في القسم @sec:core-of-evaluator لا يفحص ذلك.
++ في Python، يجب ألا تحتوي تعبيرات #en[lambda] على #idx("parameters", sub: "duplicate") #idx("duplicate parameters") #idx("metacircular evaluator for Python", sub: "preventing duplicate parameters") معلمات مكررة. المُقيِّم في القسم @sec:core-of-evaluator لا يفحص ذلك.
 
-  - عدل المُقيِّم بحيث تعطي أي محاولة لتطبيق دالة بـ بارامترات مكررة إشارة خطأ.
-  - نفذ دالة #py("verify") تفحص ما إذا كان أي تعبير #en[lambda] في برنامج معطى يحتوي على بارامترات مكررة. ومع مثل هذه الدالة، يمكننا فحص البرنامج بأكمله قبل أن نمرره إلى #py("evaluate").
+  - عدل المُقيِّم بحيث تعطي أي محاولة لتطبيق دالة بمعلمات مكررة إشارة خطأ.
+  - نفذ دالة #py("verify") تفحص ما إذا كان أي تعبير #en[lambda] في برنامج معطى يحتوي على معلمات مكررة. ومع مثل هذه الدالة، يمكننا فحص البرنامج بأكمله قبل أن نمرره إلى #py("evaluate").
 
   من أجل تنفيذ هذا الفحص في مُقيِّم لـ Python، أي من هاتين المقاربتين تفضل؟ ولماذا؟
-+ في Python، يجب أن تكون بارامترات تعبير #en[lambda] متميزة عن #idx("metacircular evaluator for Python", sub: "parameters distinct from local names") #idx("parameters", sub: "distinct from local names") #idx("internal declaration", sub: "names distinct from parameters") الأسماء Mُعلنة #emph[مباشرة] في كتلة الجسم لتعبير #en[lambda] (عكس الكتلة الداخلية). استخدم مقاربتك المفضلة أعلاه للفحص عن هذا أيضاً.
++ في Python، يجب أن تكون معلمات تعبير #en[lambda] متميزة عن #idx("metacircular evaluator for Python", sub: "parameters distinct from local names") #idx("parameters", sub: "distinct from local names") #idx("internal declaration", sub: "names distinct from parameters") الأسماء Mُعلنة #emph[مباشرة] في كتلة الجسم لتعبير #en[lambda] (عكس الكتلة الداخلية). استخدم مقاربتك المفضلة أعلاه للفحص عن هذا أيضاً.
 ])
 
 #exercise([

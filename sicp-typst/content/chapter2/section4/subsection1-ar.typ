@@ -63,7 +63,7 @@ def div_complex(z1, z2):
 
 $ mat(delim: #none, x, =, r space cos A, , r, =, sqrt(x^(2) +y^(2)); y, =, r space sin A, , A, =, arctan (y,x)) $
 
-والتي تربط الأجزاء الحقيقية والتخيلية ($x$, $y$) بالسعة والزاوية $(r, A)$.#footnote[دالة الظل العكسي (#idx("arctangent") #idx("mathatan2 (primitive function)")) المعشار إليها هنا، والمحسوبة بوساطة دالة #en[Python] #py("math_atan2")، معرّفة بحيث تأخذ معاملين $y$ و $x$ وترجع الزاوية التي ظلها $y/x$. وتحدد إشارات المعاملات ربع الزاوية.]
+والتي تربط الأجزاء الحقيقية والتخيلية ($x$, $y$) بالسعة والزاوية $(r, A)$.#footnote[دالة الظل العكسي (#idx("arctangent") #idx("mathatan2 (primitive function)")) المعشار إليها هنا، والمحسوبة بوساطة دالة #en[Python] #py("math_atan2")، معرّفة بحيث تأخذ وسيطين $y$ و $x$ وترجع الزاوية التي ظلها $y/x$. وتحدد إشارات الوسيطين ربع الزاوية.]
 وبالتالي يُعطى تمثيل #en[Ben] بوساطة محددات الاختيارات والبواني التالية:
 #idx("realpart", sub: "rectangular representation", decl: true)#idx("imagpart", sub: "rectangular representation", decl: true)#idx("magnitude", sub: "rectangular representation", decl: true)#idx("angle", sub: "rectangular representation", decl: true)#idx("makefromrealimag", sub: "rectangular representation", decl: true)#idx("makefrommagang", sub: "rectangular representation", decl: true)
 #snippet(```python

@@ -267,7 +267,7 @@ def label_exp_label(exp):
     return head(tail(exp))
 ```)
 
-قد تتضمن التعليمات #py("assign") و #py("perform") و #py("test") تطبيق عملية آلة (محددة بواسطة تعبير #idx("op (in register machine)", sub: "simulating") #py("op")) على بعض المعاملات (المحددة بواسطة تعبيرات #py("reg") و #py("constant")). تُنتج الدالة التالية دالة تنفيذ لـ "تعبير عملية"—قائمة تحتوي على تعبيرات العملية والمعاملات من التعليمة:
+قد تتضمن التعليمات #py("assign") و #py("perform") و #py("test") تطبيق عملية آلة (محددة بواسطة تعبير #idx("op (in register machine)", sub: "simulating") #py("op")) على بعض المعمولات (المحدَّدة بتعبيرات #py("reg") و #py("constant")). تُنتج الدالة التالية دالة تنفيذ لـ "تعبير عملية"—قائمة تحتوي على تعبيرات العملية والمعمولات من التعليمة:
 #idx("makeoperationexpef", decl: true)
 #snippet(```python
 def make_operation_exp_ef(exp, machine, labels, operations):
@@ -293,8 +293,8 @@ def operation_exp_operands(op_exp):
     return tail(op_exp)
 ```)
 
-لاحظ أن التعامل مع تعبيرات العمليات يشبه إلى حد كبير التعامل مع تطبيقات الدوال بواسطة الدالة #py("analyze_application") في مُقيِّم القسم @sec:separating-analysis من حيث أننا نولد دالة تنفيذ لكل معامل.
-في وقت المحاكاة، نستدعي دوال المعاملات ونطبق دالة #en[Python] التي تحاكي العملية على القيم الناتجة.
+لاحظ أن التعامل مع تعبيرات العمليات يشبه إلى حد كبير التعامل مع تطبيقات الدوال بواسطة الدالة #py("analyze_application") في مُقيِّم القسم @sec:separating-analysis من حيث أننا نولّد دالة تنفيذ لكل معمول.
+في وقت المحاكاة، نستدعي دوال تعبيرات المعمولات ونطبق دالة #en[Python] التي تحاكي العملية على القيم الناتجة.
 
 نحن نستخدم الدالة #py("apply_in_underlying_python")، كما فعلنا في #py("apply_primitive_function") في القسم @sec:running-eval. هذا مطلوب لتطبيق #py("op") على جميع عناصر قائمة الوسائط #py("afuns") الناتجة عن الـ #py("map") الأولى، كما لو كانت وسائط منفصلة لـ #py("op"). بدون هذا، ستكون #py("op") مقيدة بأن تكون دالة أحادية.
 

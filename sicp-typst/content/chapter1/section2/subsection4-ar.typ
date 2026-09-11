@@ -46,7 +46,7 @@ $ mat(delim: #none, b^(2), =, b dot.op b; b^(4), =, b^(2) dot.op b^(2); b^(8), =
 
 $ mat(delim: #none, b^(n), =, (b^(n/2))^(2), thin upright("إذا كان") space n space upright("زوجياً"); b^(n), =, b dot.op b^(n-1), upright("إذا كان") space n space upright("فردياً")) $
 
-يمكننا التعبير عن هذه الطريقة كدالة، حيث يمثل المعامل #idx("integer division") #idx("// (integer division operator)") #py("//") #emph[القسمة الصحيحة]، والتي تتجاهل أي جزء كسرى من ناتج القسمة:
+يمكننا التعبير عن هذه الطريقة كدالة، حيث يمثل العامل #idx("integer division") #idx("// (integer division operator)") #py("//") #emph[القسمة الصحيحة]، والتي تتجاهل أي جزء كسرى من ناتج القسمة:
 #idx("fastexpt", decl: true)
 #snippet(```python
 def fast_expt(b, n):
@@ -55,7 +55,7 @@ def fast_expt(b, n):
             else b * fast_expt(b, n - 1))
 ```)
 
-حيث المحمول للاختبار ما إذا كان العدد الصحيح زوجياً مُحدَّد بدلالة معامل
+حيث المحمول للاختبار ما إذا كان العدد الصحيح زوجياً مُحدَّد بدلالة عامل
 #idx("remainder", sub: "after integer division") #idx("\"% (remainder operator)", sort: "///") الباقي #py("%")، الذي يحسب باقي القسمة الصحيحة، بوساطة:
 #idx("iseven", decl: true)
 #snippet(```python

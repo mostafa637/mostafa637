@@ -77,7 +77,7 @@ def make_from_mag_ang_polar(r, a):
 
 #idx("selector", sub: "generic")
 #idx("generic function", sub: "generic selector")
-يُنفذ كل محدد اختيارات عام كدالة تفحص وسم معاملها وتستدعي الدالة المناسبة للتعامل مع البيانات من ذلك النوع. فعلى سبيل المثال، للحصول على الجزء الحقيقي لعدد مركب، يفحص #py("real_part") الوسم لتحديد ما إذا كان سيستخدم #py("real_part_rectangular") لـ #en[Ben] أم #py("real_part_polar") لـ #en[Alyssa]. وفي كلا الحالتين، نستخدم #py("contents") لاستخراج البيانات المجرّدة غير الموسومة وإرسالها إلى الدالة المستطيلية أو القطبية حسب المطلوب:
+يُنفذ كل محدد اختيارات عام كدالة تفحص وسم وسيطها وتستدعي الدالة المناسبة للتعامل مع البيانات من ذلك النوع. فعلى سبيل المثال، للحصول على الجزء الحقيقي لعدد مركب، يفحص #py("real_part") الوسم لتحديد ما إذا كان سيستخدم #py("real_part_rectangular") لـ #en[Ben] أم #py("real_part_polar") لـ #en[Alyssa]. وفي كلا الحالتين، نستخدم #py("contents") لاستخراج البيانات المجرّدة غير الموسومة وإرسالها إلى الدالة المستطيلية أو القطبية حسب المطلوب:
 #idx("realpart", sub: "with tagged data", decl: true)#idx("imagpart", sub: "with tagged data", decl: true)#idx("magnitude", sub: "with tagged data", decl: true)#idx("angle", sub: "with tagged data", decl: true)
 #snippet(```python
 def real_part(z):

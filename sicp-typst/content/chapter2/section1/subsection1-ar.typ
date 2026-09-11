@@ -140,7 +140,7 @@ def denom(x): return tail(x)
 طباعة الأعداد الناطقة بطباعة البسط، ثم خط مائل، ثم المقام.
 ونستخدم الدالة الأولية
 #idx("str (primitive function)")
-#py("str") لتحويل أي قيمة (هنا عدد) إلى سلسلة نصية. والمعامل
+#py("str") لتحويل أي قيمة (هنا عدد) إلى سلسلة نصية. والعامل
 #idx("string(s)", sub: "concatenation")
 #idx("concatenating strings")
 #idx("+", sub: "as string concatenation operator")
