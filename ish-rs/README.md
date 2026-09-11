@@ -30,6 +30,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `resource.rs` | `kernel/resource.{h,c}` | 265   | **done** — `rlimit`/`rusage` guest ABIs, resource-limit rules, affinity bitmap, and scheduler/priority compatibility calls; 51 deterministic C operations and 52 full state snapshots verified against unmodified C |
 | `random.rs`  | `kernel/random.{h,c}` | 35      | **done** — bounded `getrandom`, host-failure mapping, output fault ordering, and explicit iOS/Linux entropy adapter; 9 deterministic C operations verified byte-for-byte |
 | `uname.rs`   | `kernel/uname.c`      | 81      | **done** — guest `uname`/`sysinfo` layouts, C string/truncation behavior, and explicit hostname/uptime/memory host data; 10 deterministic C operations verified byte-for-byte |
+| `ipc.rs`     | `kernel/ipc.c`        | 6       | **done** — the complete legacy System V IPC multiplexor `_ENOSYS` compatibility stub; 5 raw C calls verified |
 | `task.rs`    | `kernel/task.{h,c}`   | 346     | **foundation ported** — PID table, parent/child links, task creation/destruction, mm attachment, task credentials/names, thread-group topology, zombie visibility and explicit current-task selection |
 | `group.rs`   | `kernel/group.c`      | 131     | **done** — `setpgid`/`getpgid`, `setsid`/`getsid`, session and process-group membership rules |
 | `getset.rs`  | `kernel/getset.c`     | 202     | **done** — PID/UID/GID getters and setters, supplementary groups, capability stubs and personality |
@@ -62,7 +63,8 @@ running 2 tests    (tests/vec_differential.rs)     ->   9,794 vec/mmx results
 running 1 test     (tests/resource_differential.rs)->      51 resource operations + 52 full state snapshots
 running 1 test     (tests/random_differential.rs)  ->       9 getrandom operations
 running 1 test     (tests/uname_differential.rs)   ->      10 uname/sysinfo operations
-test result: ok. 211 passed
+running 1 test     (tests/ipc_differential.rs)     ->       5 legacy IPC operations
+test result: ok. 213 passed
 $ cargo clippy --all-targets                   # clean, no warnings
 ```
 
@@ -659,6 +661,18 @@ $ cargo test --test uname_differential
 … 10 uname/sysinfo operations and all C-derived guest bytes matched exactly
 ```
 
+`ipc.rs` completes iSH's six-line legacy System V IPC multiplexor: every raw
+selector and argument combination returns `_ENOSYS`, exactly as the original
+C stub does. Its C-derived corpus intentionally includes signed, unsigned, and
+pointer high-bit values even though the result is constant.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_ipc_reference.sh
+wrote tests/fixtures/ipc_reference.txt: 12 lines, 5 C operations
+$ cargo test --test ipc_differential
+… 5 raw ipc calls matched unmodified C exactly
+```
+
 The host thread launcher in `task.c` and signal/tty/filesystem pointers in the
 rest of `struct task` remain later engine/kernel ports; they are intentionally
 not represented as fake implementations. The new `iSH Rust Core` workflow runs
@@ -688,6 +702,7 @@ ish-rs/
 │   ├── mmap.rs                 # kernel/mmap.c + kernel/mm.h
 │   ├── errno.rs                # kernel/errno.{h,c}
 │   ├── errno_table.rs          # generated host->guest errno table (do not edit)
+│   ├── ipc.rs                  # kernel/ipc.c
 │   ├── resource.rs             # kernel/resource.{h,c}
 │   ├── random.rs               # kernel/random.{h,c}
 │   ├── uname.rs                # kernel/uname.c
@@ -710,6 +725,7 @@ ish-rs/
 │   ├── resource_differential.rs # state-exact replay of the resource reference
 │   ├── random_differential.rs  # byte-exact replay of the random reference
 │   ├── uname_differential.rs   # byte-exact replay of the uname/sysinfo reference
+│   ├── ipc_differential.rs     # raw-argument replay of the IPC stub reference
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -723,7 +739,8 @@ ish-rs/
 │       ├── vec_reference.txt   # 9.8k vec/mmx results from the C
 │       ├── resource_reference.txt # 51 deterministic resource calls from the C
 │       ├── random_reference.txt # 9 deterministic getrandom calls from the C
-│       └── uname_reference.txt # 10 deterministic uname/sysinfo calls from the C
+│       ├── uname_reference.txt # 10 deterministic uname/sysinfo calls from the C
+│       └── ipc_reference.txt   # 5 raw legacy IPC calls from the C
 └── tools/
     ├── f80-dump.c              # float80 reference generator (not part of iSH)
     ├── fpu-dump.c              # cpu/fpu reference generator
@@ -738,6 +755,7 @@ ish-rs/
     ├── resource-dump.c         # deterministic resource.c reference generator
     ├── random-dump.c           # deterministic random.c reference generator
     ├── uname-dump.c            # deterministic uname.c reference generator
+    ├── ipc-dump.c              # deterministic ipc.c reference generator
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -753,6 +771,7 @@ ish-rs/
     ├── gen_resource_reference.sh
     ├── gen_random_reference.sh
     ├── gen_uname_reference.sh
+    ├── gen_ipc_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
