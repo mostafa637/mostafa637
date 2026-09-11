@@ -159,7 +159,7 @@ put("magnitude", llist("complex"), magnitude)
 print(put("angle", llist("complex"), angle))
 ```)
 
-صف بالتفصيل سبب عمل هذا. وكأمثلة، تتبع عبر جميع الدوال المستدعاة في تقييم التعبير #py("magnitude(z)") حيث #py("z") هو الكائن الموضح في الشكل @fig:complex-number-structure. وعلى وجه الخصوص، كم مرة تُستدعى #py("apply_generic")؟ وإلى أي دالة يتم الإرسال في كل حالة؟
+صف بالتفصيل سبب عمل هذا. وكأمثلة، تتبع عبر جميع الدوال المستدعاة في تقييم التعبير #py("magnitude(z)") حيث #py("z") هو الكائن الموضح في الشكل @fig:complex-number-structure. وعلى وجه الخصوص، كم مرة تُستدعى #py("apply_generic")؟ وإلى أي دالة يُرسَل في كل حالة؟
 ])
 
 #exercise(label-name: <ex:internal-type-system>, [
@@ -167,11 +167,11 @@ print(put("angle", llist("complex"), angle))
 ])
 
 #exercise(label-name: <ex:equ->, [
-عرف محمول مساوة عاماً #idx("isequal (generic predicate)") #idx("equality", sub: "in generic arithmetic system") #py("is_equal") يفحص مساواة عددين، وثبته في حزمة الحساب العام. وينبغي أن تعمل هذه العملية للأعداد العادية والأعداد الكسرية والأعداد المركبة.
+عرِّف محمول مساوة عاماً #idx("isequal (generic predicate)") #idx("equality", sub: "in generic arithmetic system") #py("is_equal") يفحص مساواة عددين، وثبته في حزمة الحساب العام. وينبغي أن تعمل هذه العملية للأعداد العادية والأعداد الكسرية والأعداد المركبة.
 ])
 
 #exercise(label-name: <ex:-zero->, [
-عرف محمولاً عاماً #idx("isequaltozero (generic)") #idx("zero test (generic)") #py("is_equal_to_zero") يفحص ما إذا كان وسيطه صفرًا، وثبته في حزمة الحساب العام. وينبغي أن تعمل هذه العملية للأعداد العادية والأعداد الكسرية والأعداد المركبة.
+عرِّف محمولاً عاماً #idx("isequaltozero (generic)") #idx("zero test (generic)") #py("is_equal_to_zero") يفحص ما إذا كان وسيطه صفرًا، وثبته في حزمة الحساب العام. وينبغي أن تعمل هذه العملية للأعداد العادية والأعداد الكسرية والأعداد المركبة.
 ])
 
 #idx("generic arithmetic operations")

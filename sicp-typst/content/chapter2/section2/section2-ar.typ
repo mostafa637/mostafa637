@@ -11,7 +11,7 @@
 
 وفي هذا التمثيل، الذي يُسمّى
 #idx("box-and-pointer notation")
-#emph[ترميز الصندوق والمؤشر (#en[box-and-pointer notation])]\، يُعرَض كل كائن مركب كـ
+#emph[ترميز الصندوق والمؤشر (#en[box-and-pointer notation])]\، يُعرَض كل كائن مركب كالتالي:
 #idx("pointer", sub: "in box-and-pointer notation")
 #emph[مؤشر (#en[pointer])] إلى صندوق. ويكون لصندوق الزوج جزءان، الجزء الأيسر يحتوي على رأس الزوج والجزء الأيمن يحتوي على الذيل.
 

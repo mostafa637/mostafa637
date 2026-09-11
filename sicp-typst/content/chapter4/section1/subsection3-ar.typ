@@ -48,13 +48,13 @@ def is_falsy(x):
 
 #subheading([تمثيل الدوال])
 
-للتعامل مع الدوال الأوليّة، نفترض أن لدينا الدوال التالية متاحة:
+للتعامل مع الدوال الأولية، نفترض أن لدينا الدوال التالية متاحة:
 #idx("metacircular evaluator for Python", sub: "representation of functions")
 
-- #py("apply_primitive_function(")#meta("fun")#py(",") #meta("args")#py(")") #idx("applyprimitivefunction") تطبق الدالة الأوليّة المعطاة على قيم الوسائط في القائمة #meta("args") وترجع نتيجة التطبيق.
-- #py("is_primitive_function(")#meta("fun")#py(")") #idx("isprimitivefunction") تختبر ما إذا كانت #meta("fun") دالة أوليّة.
+- #py("apply_primitive_function(")#meta("fun")#py(",") #meta("args")#py(")") #idx("applyprimitivefunction") تطبق الدالة الأولية المعطاة على قيم الوسائط في القائمة #meta("args") وترجع نتيجة التطبيق.
+- #py("is_primitive_function(")#meta("fun")#py(")") #idx("isprimitivefunction") تختبر ما إذا كانت #meta("fun") دالة أولية.
 
-وهذه الآليات للتعامل مع الدوال الأوليّة موصوفة بشكل أكبر في القسم @sec:running-eval.
+وهذه الآليات للتعامل مع الدوال الأولية موصوفة بشكل أكبر في القسم @sec:running-eval.
 
 الدوال المركبة تُبنى من البارامترات، وأجسام الدوال، والبيئات باستخدام المنشئ #py("make_function"):
 #idx("makefunction", decl: true)#idx("iscompoundfunction", decl: true)#idx("functionparameters", decl: true)#idx("functionbody", decl: true)#idx("functionenvironment", decl: true)
@@ -184,7 +184,7 @@ def assign_symbol_value(symbol, val, env):
 
 #exercise(label-name: <ex:4_10>, [
 يمكن التعبير عن الدوال #py("lookup_symbol_value") و #py("assign_symbol_value") بدلالة دالة أكثر تجريداً للمرور عبر هيكل البيئة.
-عرف تجريداً يلتقط النمط المشترك وأعد تعريف الدالتين بدلالة هذا التجريد.
+عرِّف تجريداً يلتقط النمط المشترك وأعد تعريف الدالتين بدلالة هذا التجريد.
 ])
 
 #exercise(label-name: <ex:mutable>, [

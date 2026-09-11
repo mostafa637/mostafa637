@@ -77,7 +77,7 @@ pair(", meta("a"), $""_(1)$, ", pair(", meta("a"), $""_(2)$, ", pair(", $dots.h$
 #idx("notation in this book", sub: "box notation for data")
 نتيجة #py("pair(1, 2)")
 تُطبع ك#py("[1, 2]")، وكائن البيانات في الشكل @fig:sequence-of-pairs
-يُطبع كـ
+يُطبع كالتالي:
 #py("[1, [2, [3, [4, None]]]]"):
 
 #snippet(```python
@@ -286,7 +286,7 @@ print_llist(append(odds, squares))
 print_llist(append(odds, squares))
 ```)
 
-يتم تنفيذ الدالة #py("append") أيضاً باستخدام خطة تعاودية.
+تُنفَّذ الدالة #py("append") أيضًا باستخدام خطة تعاودية.
 لإلحاق القائمتين المترابطتين #py("list1") و #py("list2")، افعل ما يلي:
 
 - إذا كانت #py("list1") هي القائمة المترابطة الفارغة، فإن النتيجة هي فقط #py("list2").
@@ -300,7 +300,7 @@ def append(list1, list2):
 ```)
 
 #exercise(label-name: <ex:last>, [
-عرف دالة
+عرِّف دالة
 #idx("lastpair")
 #idx("linked list", sub: "last pair of")
 #py("last_pair")
@@ -316,7 +316,7 @@ print_llist(last_pair(llist(23, 72, 149, 34)))
 ])
 
 #exercise(label-name: <ex:reverse>, [
-عرف دالة
+عرِّف دالة
 #idx("reverse")
 #idx("linked list", sub: "reversing")
 #py("reverse")
@@ -366,7 +366,7 @@ def cc(amount, coin_values):
                  cc(amount - first_denomination(coin_values), coin_values))
 ```)
 
-عرف الدوال #py("first_denomination")، و #py("except_first_denomination")، و #py("no_more") بدلالة العمليات الأولية على بنى القوائم المترابطة. هل يؤثر ترتيب القائمة المترابطة #py("coin_values") على النتيجة التي ينتجها #py("cc")؟ ولماذا أو لمَ لا؟
+عرِّف الدوال #py("first_denomination")، و #py("except_first_denomination")، و #py("no_more") بدلالة العمليات الأولية على بنى القوائم المترابطة. هل يؤثر ترتيب القائمة المترابطة #py("coin_values") على النتيجة التي ينتجها #py("cc")؟ ولماذا أو لمَ لا؟
 ])
 
 #exercise(label-name: <ex:2_20>, [

@@ -206,7 +206,7 @@ s = pair(1, lambda: add_streams(s, s))
 ])
 
 #exercise(label-name: <ex:element_wise_product>, [
-عرف دالة
+عرِّف دالة
 #idx("mulstreams")
 #idx("infinite stream(s)", sub: "of factorials")
 #idx("factorial", sub: "infinite stream")
@@ -219,7 +219,7 @@ factorials = pair(1, lambda: mul_streams(", metaphrase[??], ", ", metaphrase[??]
 ])
 
 #exercise(label-name: <ex:partial-sums>, [
-عرف دالة
+عرِّف دالة
 #idx("partialsums")
 #py("partial_sums")
 تأخذ كوسيطة تدفقاً $S$ وترجع التدفق الذي عناصره هي
@@ -307,7 +307,7 @@ $a_(0), a_(1), a_(2), a_(3),$ ….
 
 + تكامل
 #idx("integral", sub: "of a power series") #idx("power series, as stream", sub: "integrating")
-المتسلسلة $a_(0) + a_(1) x + a_(2) x^(2) + a_(3) x^(3) + dots.c$ هو المتسلسلة $ c + a_(0) x + frac(1, 2)a_(1) x^(2) + frac(1, 3)a_(2) x^(3) + frac(1, 4)a_(3) x^(4) + dots.c $ حيث $c$ هو أي ثابت. عرف دالة #idx("integrateseries") #py("integrate_series") تأخذ كدخل تدفقاً $a_(0), a_(1), a_(2), dots.h$ يمثل متسلسلة قوى وترجع التدفق $a_(0), frac(1, 2)a_(1), frac(1, 3)a_(2), dots.h$ لمعاملات الحدود غير الثابتة لتكامل المتسلسلة. (بما أن النتيجة ليس لها حد ثابت، فإنها لا تمثل متسلسلة قوى؛ وعندما نستخدم #py("integrate_series")، سنستخدم #py("pair") لربط الثابت المناسب ببداية التدفق.)
+المتسلسلة $a_(0) + a_(1) x + a_(2) x^(2) + a_(3) x^(3) + dots.c$ هو المتسلسلة $ c + a_(0) x + frac(1, 2)a_(1) x^(2) + frac(1, 3)a_(2) x^(3) + frac(1, 4)a_(3) x^(4) + dots.c $ حيث $c$ هو أي ثابت. عرِّف دالة #idx("integrateseries") #py("integrate_series") تأخذ كدخل تدفقاً $a_(0), a_(1), a_(2), dots.h$ يمثل متسلسلة قوى وترجع التدفق $a_(0), frac(1, 2)a_(1), frac(1, 3)a_(2), dots.h$ لمعاملات الحدود غير الثابتة لتكامل المتسلسلة. (بما أن النتيجة ليس لها حد ثابت، فإنها لا تمثل متسلسلة قوى؛ وعندما نستخدم #py("integrate_series")، سنستخدم #py("pair") لربط الثابت المناسب ببداية التدفق.)
 + الدالة $x arrow.r.bar e^(x)$ هي المشتقة الخاصة بها. هذا يعني أن $e^(x)$ وتكامل $e^(x)$ هما المتسلسلة نفسها، باستثناء الحد الثابت، وهو $e^(0) = 1$. وبناءً على ذلك، يمكننا توليد متسلسلة $e^(x)$ ك#snippet(```python exp_series = pair(1, lambda: integrate_series(exp_series)) ```) بين كيفية توليد المتسلسلة لـ الجيب وجيب التمام، بدءاً من الحقائق أن مشتقة الجيب هي جيب التمام ومشتقة جيب التمام هي سالب الجيب: #syntax(" cosine_series = pair(1, ", metaphrase[??], ") sine_series = pair(0, ", metaphrase[??], ") ")
 ])
 

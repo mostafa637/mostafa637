@@ -418,7 +418,7 @@ print(propagate())
 #idx("half-adder", sub: "simulation of")
 
 #exercise(label-name: <ex:accept-action>, [
-تحدد الدالة الداخلية #py("accept_action_function") المعرفة في #idx("makewire") #py("make_wire") أنه عند إضافة دالة فعل جديدة إلى سلك، تُشغل الدالة فوراً. اشرح سبب ضرورة هذه التهيئة. وبشكل خاص، تتبع مثال جامع النصف في الفقرات أعلاه واذكر كيف كانت ستختلف استجابة النظام إذا كنا قد عرفنا #py("accept_action_function") كـ
+تحدد الدالة الداخلية #py("accept_action_function") المعرفة في #idx("makewire") #py("make_wire") أنه عند إضافة دالة فعل جديدة إلى سلك، تُشغل الدالة فوراً. اشرح سبب ضرورة هذه التهيئة. وبشكل خاص، تتبع مثال جامع النصف في الفقرات أعلاه واذكر كيف كانت ستختلف استجابة النظام إذا كنا قد عرفنا #py("accept_action_function") كالتالي:
 
 #snippet(```python
 def accept_action_function(fun):

@@ -500,7 +500,7 @@ def make_new_variable(variable, rule_application_id):
 #idx("تمثيل خاص بلغة الاستعلام", sub: "تحويل بناء جملة بايثون إلى")
 تمثيل بناء جملة #en[Python] إلى التمثيل الخاص بلغة الاستعلام عن طريق تبسيط التقريرات الجازمة والقواعد والاستعلامات بحيث يصبح رمز الاسم في تعبير الدالة لتطبيق ما وسمًا، باستثناء أنه إذا كان الرمز هو #py("\"pair\"") أو #py("\"list\"")، فإن زوج أو قائمة #en[Python] (بدون وسم) يُبْنَى. وهذا يعني أن #py("convert_to_query_syntax") تُفَسِّر تطبيقات مُنْشِئات #py("pair") و#py("list") أثناء التحويل، ودوال المعالجة مثل #py("pattern_match") في القسم @sec:query-match و#py("unify_match") في القسم @sec:query-unify يمكنها العمل مباشرة على الأزواج والقوائم المقصودة بدلاً من العمل على تمثيل بناء الجملة المتولد بواسطة المحلل.
 وقائمة «الوسائط» (من عنصر واحد) لـ #py("javascript_predicate") تظل غير معالجة، كما هو موضح أدناه.
-والمتغير يظل دون تغيير، والتعبير الحرفي يُبَسَّط إلى القيمة الأوليّة التي يحتوي عليها.
+والمتغير يظل دون تغيير، والتعبير الحرفي يُبَسَّط إلى القيمة الأولية التي يحتوي عليها.
 #idx("converttoquerysyntax", decl: true)
 #snippet(```python
 def convert_to_query_syntax(exp):
@@ -531,7 +531,7 @@ and(salary($person, $amount), javascript_predicate($amount > 50000))
 and(salary($person, $amount), javascript_predicate($amount > 50000))
 ```)
 
-ومن أجل تقييم التعبير الفرعي #py("javascript_predicate") لذلك الاستعلام المعالج، تدعو الدالة #py("javascript_predicate") في القسم @sec:query-eval الدالة #py("instantiate_expression") (أدناه) على تمثيل بناء جملة #en[Python] المدمج لـ #py("$amount > 50000") لاستبدال المتغير #py("list(\"name\", \"$amount\")") بـ تعبير حرفي، على سبيل المثال #py("list(\"literal\", 70000)")، يمثل القيمة الأوليّة التي تُربَط بها #py("$amount")، هنا 70000.
+ومن أجل تقييم التعبير الفرعي #py("javascript_predicate") لذلك الاستعلام المعالج، تدعو الدالة #py("javascript_predicate") في القسم @sec:query-eval الدالة #py("instantiate_expression") (أدناه) على تمثيل بناء جملة #en[Python] المدمج لـ #py("$amount > 50000") لاستبدال المتغير #py("list(\"name\", \"$amount\")") بـ تعبير حرفي، على سبيل المثال #py("list(\"literal\", 70000)")، يمثل القيمة الأولية التي تُربَط بها #py("$amount")، هنا 70000.
 ومُقَيِّم #en[Python] يمكنه تقييم المحمول المُجَسَّد، الذي يمثل الآن #py("70000 > 50000").
 
 #subheading([تجسيد تعبير])
@@ -546,7 +546,7 @@ def instantiate_expression(expression, frame):
     return convert(instantiate_term(expression, frame)) if is_variable(expression) else pair(instantiate_expression(head(expression), frame), instantiate_expression(tail(expression), frame)) if is_pair(expression) else expression
 ```)
 
-وتأخذ الدالة #py("instantiate_term") متغيرًا، أو زوجًا، أو قيمة أوليّة كوسيط أول وإطارًا كوسيط ثانٍ وتستبدل عوديًا المتغيرات في الوسيط الأول بقيمها في الإطار حتى يتم الوصول إلى قيمة أوليّة أو متغير غير مرتبط.
+وتأخذ الدالة #py("instantiate_term") متغيرًا، أو زوجًا، أو قيمة أولية كوسيط أول وإطارًا كوسيط ثانٍ وتستبدل عوديًا المتغيرات في الوسيط الأول بقيمها في الإطار حتى يتم الوصول إلى قيمة أولية أو متغير غير مرتبط.
 وعندما تواجه العملية زوجًا، يُبْنَى زوج جديد تكون أجزاؤه هي النسخ المُجَسَّدة للأجزاء الأصلية.
 على سبيل المثال، إذا كانت #py("$x") مرتبطة بالزوج $[mono("$y"), 5]$ في إطار $f$ كنتيجة للتوحيد، وكانت #py("$y") مرتبطة بدورها بـ 3، فإن نتيجة تطبيق #py("instantiate_term") على #py("list(\"name\", \"$x\")") و$f$ هي الزوج $[3, 5]$.
 #idx("instantiateterm", decl: true)
@@ -561,8 +561,8 @@ def instantiate_term(term, frame):
         return term
 ")
 
-وتُبْنِي الدالة #py("convert") تمثيل بناء جملة #en[Python] لمتغير، أو زوج، أو قيمة أوليّة مرجعة بواسطة #py("instantiate_term").
-والزوج في الأصل يصبح تطبيقًا لـ مُنْشِئ الأزواج في #en[Python] والقيمة الأوليّة تصبح تعبيرًا حرفيًا.
+وتُبْنِي الدالة #py("convert") تمثيل بناء جملة #en[Python] لمتغير، أو زوج، أو قيمة أولية مرجعة بواسطة #py("instantiate_term").
+والزوج في الأصل يصبح تطبيقًا لـ مُنْشِئ الأزواج في #en[Python] والقيمة الأولية تصبح تعبيرًا حرفيًا.
 #idx("convert", decl: true)
 #syntax("
 def convert(term):
@@ -600,7 +600,7 @@ job($x, llist("computer", "wizard"))
 job($x, llist("computer", "wizard"))
 ```)
 
-وتلغي حلقة المحرك الفهرسة النحوية لهذا التمثيل وتعرضه كـ:
+وتلغي حلقة المحرك الفهرسة النحوية لهذا التمثيل وتعرضه كالتالي:
 
 #output(```python
 job($x, llist("computer", "wizard"))

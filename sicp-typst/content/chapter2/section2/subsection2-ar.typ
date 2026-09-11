@@ -232,7 +232,7 @@ def make_mobile(left, right):
     return llist(left, right)
 ```)
 
-يتم بناء الفرع من طول (#py("length")) (يجب أن يكون رقماً) جنباً إلى جنب مع بنية (#py("structure"))، والتي قد تكون إما رقماً (يمثل وزناً بسيطاً) أو منشأ معلقاً آخر:
+يُبنى الفرع من طول (#py("length")) (يجب أن يكون رقماً) جنباً إلى جنب مع بنية (#py("structure"))، والتي قد تكون إما رقماً (يمثل وزناً بسيطاً) أو منشأ معلقاً آخر:
 
 #snippet(```python
 def make_branch(length, structure):
@@ -240,7 +240,7 @@ def make_branch(length, structure):
 ```)
 
 + اكتب دوال الاختيار المقابلة #py("left_branch") و #py("right_branch")، والتي ترجع فروع المنشأ المعلق، و #py("branch_length") و #py("branch_structure")، والتي ترجع مكونات الفرع.
-+ باستخدام دوال الاختيار الخاصة بك، عرف دالة #py("total_weight") ترجع الوزن الإجمالي للمنشأ المعلق.
++ باستخدام دوال الاختيار الخاصة بك، عرِّف دالة #py("total_weight") ترجع الوزن الإجمالي للمنشأ المعلق.
 + يُقال عن المنشأ المعلق إنه #idx("balanced mobile") #emph[متوازن] إذا كان عزم الدوران الناتِج عن فرعه العلوي الأيسر يساوي عزم الدوران الناتِج عن فرعه العلوي الأيمن (أي إذا كان طول القضيب الأيسر مضروباً في الوزن المعلق منه يساوي الجداء المقابل للجانب الأيمن) وكان كل من المناشئ المعلقة الفرعية المعلقة من فروعه متوازناً. صمم محمولاً يفحص ما إذا كان المنشأ المعلق الثنائي متوازناً.
 + نفترض أننا غيرنا تمثيل المناشئ المعلقة بحيث تكون البواني: #snippet(```python def make_mobile(left, right): return pair(left, right) def make_branch(length, structure): return pair(length, structure) ```) كم يتوجب عليك تغيير برامجك للتحويل إلى التمثيل الجديد؟
 ])
@@ -322,7 +322,7 @@ print_llist(square_tree(llist(1,
 جرد إجابتك للتمرين @ex:square-tree لإنتاج دالة
 #idx("treemap")
 #py("tree_map")
-بخاصية تسمح بالإعلان عن #py("square_tree") كـ:
+بخاصية تسمح بالإعلان عن #py("square_tree") كالتالي:
 
 #snippet(```python
 def square_tree(tree): return tree_map(square, tree)

@@ -274,7 +274,7 @@ $ a_(n) x^(n) +a_(n-1)x^(n-1)+ dots.c + a_(1) x+a_(0) $
 باستخدام خوارزمية معروفة تسمى
 #idx("polynomial(s)", sub: "evaluating with Horner's rule")
 #idx("Horner's rule")
-#emph[قاعدة هورنر] (#en[Horner's rule])، والتي تبني الحساب كـ:
+#emph[قاعدة هورنر] (#en[Horner's rule])، والتي تبني الحساب كالتالي:
 
 $ lr(( dots.c (a_(n) x+a_(n-1))x+ dots.c +a_(1) )) x+a_(0) $
 
@@ -353,7 +353,7 @@ llist(llist(1, 2, 3, 4),
 
 #sicp-table(columns: 2, [#py("dot_product(")$v$#py(",")$w$#py(")")], [ترجع المجموع $sum_(i)v_(i) w_(i)$؛], [#py("matrix_times_vector(")$m$#py(",")$v$#py(")")], [ترجع المتجه $t$، حيث $t_(i) =sum_(j)m_(i j)v_(j)$؛], [#py("matrix_times_matrix(")$m$#py(",")$n$#py(")")], [ترجع المصفوفة $p$، حيث $p_(i j)=sum_(k) m_(i k)n_(k j)$؛], [#py("transpose(")$m$#py(")")], [ترجع المصفوفة $n$، حيث $n_(i j)=m_(j i)$.])
 
-يمكننا تعريف الجداء السلمي كـ:#footnote[يستخدم هذا التعريف الدالة #py("reduce_n") من التمرين @ex:accumulate-n.]
+يمكننا تعريف الجداء السلمي كالتالي:#footnote[يستخدم هذا التعريف الدالة #py("reduce_n") من التمرين @ex:accumulate-n.]
 #idx("dotproduct", decl: true)
 #snippet(```python
 def dot_product(v, w):
@@ -374,7 +374,7 @@ def matrix_times_matrix(m, n):
 ])
 
 #exercise(label-name: <ex:fold-right-left>, [
-تُعرف دالة #py("reduce") (#idx("reduce", sub: "same as foldright") #idx("foldright")) أيضاً باسم #py("fold_right")، لأنها تدمج العنصر الأول من المتتالية مع نتيجة دمج جميع العناصر على اليمين. وهناك أيضاً دالة #py("fold_left")، والتي تشبه #py("fold_right")، باستثناء أنها تدمج العناصر في الاتجاه المعاكس:
+تُعرِّف دالة #py("reduce") (#idx("reduce", sub: "same as foldright") #idx("foldright")) أيضاً باسم #py("fold_right")، لأنها تدمج العنصر الأول من المتتالية مع نتيجة دمج جميع العناصر على اليمين. وهناك أيضاً دالة #py("fold_left")، والتي تشبه #py("fold_right")، باستثناء أنها تدمج العناصر في الاتجاه المعاكس:
 #idx("foldleft", decl: true)
 #snippet(```python
 def fold_left(op, initial, sequence):
@@ -455,7 +455,7 @@ def flatmap(f, seq):
     return reduce(append, None, map(f, seq))
 ```)
 
-الآن رشح متتالية الأزواج هذه للعثور على الأزواج التي يكون مجموعها أولياً. يتم استدعاء محمول المرشح لكل عنصر في المتتالية؛ وسيطه زوج ويجب عليه استخراج الأعداد الصحيحة من الزوج. وبالتالي، فإن المحمول المراد تطبيقه على كل عنصر في المتتالية هو:
+الآن رشح متتالية الأزواج هذه للعثور على الأزواج التي يكون مجموعها أولياً. يُستدعى محمول المرشِّح لكل عنصر في المتتالية؛ وسيطه زوج ويجب عليه استخراج الأعداد الصحيحة من الزوج. وبالتالي، فإن المحمول المراد تطبيقه على كل عنصر في المتتالية هو:
 
 #snippet(```python
 def is_prime_sum(pair):
@@ -541,7 +541,7 @@ def queens(board_size):
 ])
 
 #exercise(label-name: <ex:2_43>, [
-يواجه #en[Louis Reasoner] وقتاً عصيباً في أداء التمرين @ex:8queens. تبدو دالته #py("queens") تعمل، لكنها تعمل ببطء شديد. (لا ينجح #en[Louis] أبداً في الانتظار لفترة كافية لحل حتى حالة $6 times 6$). وعندما يطلب #en[Louis] المساعدة من #en[Eva Lu Ator]، تشير إلى أنه قد بادَل ترتيب التطبيقات الخرائطية المتداخلة في #py("flatmap")، كاتباً إياها كـ:
+يواجه #en[Louis Reasoner] وقتاً عصيباً في أداء التمرين @ex:8queens. تبدو دالته #py("queens") تعمل، لكنها تعمل ببطء شديد. (لا ينجح #en[Louis] أبداً في الانتظار لفترة كافية لحل حتى حالة $6 times 6$). وعندما يطلب #en[Louis] المساعدة من #en[Eva Lu Ator]، تشير إلى أنه قد بادَل ترتيب التطبيقات الخرائطية المتداخلة في #py("flatmap")، كاتباً إياها كالتالي:
 
 #snippet(```python
 flatmap(lambda new_row:

@@ -41,7 +41,7 @@
 #emph[البناء النحوي التجريدي]
 يجعل من السهل رؤية كيف يمكننا تغيير البناء النحوي للغة باستخدام المُقيِّم نفسه، ولكن مع مجموعة مختلفة من الدوال النحوية.
 
-#subsubheading([التعبيرات الأوليّة])
+#subsubheading([التعبيرات الأولية])
 
 - بالنسبة لـ #idx("expression", sub: "literal") #idx("literal expression") التعبيرات الحرفية، مثل الأعداد، ترجع #py("evaluate") قيمتها.
 - يجب على الدالة #py("evaluate") البحث عن الأسماء في البيئة للعثور على قيمها.
@@ -97,7 +97,7 @@ def evaluate(component, env):
 
 للتوضيح،
 تُمّ تنفيذ #py("evaluate")
-كـ
+كالتالي:
 #idx("data-directed programming", sub: "case analysis vs.")
 #idx("case analysis", sub: "data-directed programming vs.")
 تحليل حالات باستخدام
@@ -133,7 +133,7 @@ def evaluate(component, env):
 إلى نوعين: حيث تستدعي
 #idx("applyprimitivefunction")
 #py("apply_primitive_function")
-لتطبيق الدوال الأوليّة؛ وتطبق الدوال
+لتطبيق الدوال الأولية؛ وتطبق الدوال
 المركبة
 بتقييم جسم الدالة.
 والبيئة لتقييم جسم دالة

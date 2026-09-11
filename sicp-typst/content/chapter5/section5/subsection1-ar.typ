@@ -154,7 +154,7 @@ function make_instruction_sequence(needs, modifies, instructions) {
 ```)
 
 على سبيل المثال، فإن تسلسل التعليمات المكون من تعليمتين والذي يبحث عن قيمة الرمز #py("\"x\"") في البيئة الحالية، ويسند النتيجة إلى #py("val")، ثم يواصل إلى المواصلة، يتطلب تهيئة المسجّلين #py("env") و #py("continue")، ويعدل المسجّل #py("val").
-وبالتالي يُبنى هذا التسلسل كـ:
+وبالتالي يُبنى هذا التسلسل كالتالي:
 
 #snippet(```python
 make_instruction_sequence(list("env", "continue"), list("val"),

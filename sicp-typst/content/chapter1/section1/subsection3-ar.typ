@@ -53,8 +53,8 @@
 #sicp-figure(image("/images/img_javascript/ch1-Z-G-1.svg", width: 70%), caption: [تمثيل شجري يُظهر قيمة كل تعبير فرعي.], label-name: <fig:tree-comb>)
 
 تالياً، لاحظ أنّ التطبيق المتكرر للخطوة الأولى يوصلنا إلى النقطة التي نحتاج
-فيها لتقييم تعبيرات أوّلية وليس تركيبات — مثل الأرقام أو الأسماء. نعالج
-الحالات الأوّلية
+فيها لتقييم تعبيرات أولية وليس تركيبات — مثل الأرقام أو الأسماء. نعالج
+الحالات الأولية
 #idx("primitive expression", sub: "evaluation of")
 #idx("evaluation", sub: "of primitive expression")
 بالنص على أنّ:
