@@ -23,6 +23,7 @@
 //! | [`mmap`]        | `kernel/mmap.c` + `mm.h`  | ported, the address-space syscalls on top of `memory` |
 //! | [`resource`]    | `kernel/resource.{h,c}`   | ported, limits, rusage ABI, affinity, and scheduler compatibility calls |
 //! | [`random`]      | `kernel/random.{h,c}`     | ported, bounded guest getrandom over an explicit platform entropy source |
+//! | [`uname`]       | `kernel/uname.c`          | ported, guest uname/sysinfo layouts over explicit platform data |
 //! | [`task`]        | `kernel/task.{h,c}`       | ported state/PID-table foundation; host execution waits for the engine |
 //! | [`group`]       | `kernel/group.c`          | ported, sessions and process groups |
 //! | [`getset`]      | `kernel/getset.c`         | ported, identity and credential syscalls |
@@ -57,6 +58,7 @@ pub mod resource;
 pub mod task;
 pub mod tlb;
 pub mod tls;
+pub mod uname;
 pub mod user;
 pub mod vec;
 

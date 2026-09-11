@@ -29,6 +29,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `user.rs`    | `kernel/user.c`       | 97      | **done** — the guest↔kernel byte copies (`user_read`/`user_write`/`user_write_task_ptrace`/`user_read_string`/`user_write_string`); 52 operations, 77 guest pages and 192,937 bytes verified against the C |
 | `resource.rs` | `kernel/resource.{h,c}` | 265   | **done** — `rlimit`/`rusage` guest ABIs, resource-limit rules, affinity bitmap, and scheduler/priority compatibility calls; 51 deterministic C operations and 52 full state snapshots verified against unmodified C |
 | `random.rs`  | `kernel/random.{h,c}` | 35      | **done** — bounded `getrandom`, host-failure mapping, output fault ordering, and explicit iOS/Linux entropy adapter; 9 deterministic C operations verified byte-for-byte |
+| `uname.rs`   | `kernel/uname.c`      | 81      | **done** — guest `uname`/`sysinfo` layouts, C string/truncation behavior, and explicit hostname/uptime/memory host data; 10 deterministic C operations verified byte-for-byte |
 | `task.rs`    | `kernel/task.{h,c}`   | 346     | **foundation ported** — PID table, parent/child links, task creation/destruction, mm attachment, task credentials/names, thread-group topology, zombie visibility and explicit current-task selection |
 | `group.rs`   | `kernel/group.c`      | 131     | **done** — `setpgid`/`getpgid`, `setsid`/`getsid`, session and process-group membership rules |
 | `getset.rs`  | `kernel/getset.c`     | 202     | **done** — PID/UID/GID getters and setters, supplementary groups, capability stubs and personality |
@@ -60,7 +61,8 @@ running 2 tests    (tests/tlb_differential.rs)     -> 172,312 tlb state words
 running 2 tests    (tests/vec_differential.rs)     ->   9,794 vec/mmx results
 running 1 test     (tests/resource_differential.rs)->      51 resource operations + 52 full state snapshots
 running 1 test     (tests/random_differential.rs)  ->       9 getrandom operations
-test result: ok. 209 passed
+running 1 test     (tests/uname_differential.rs)   ->      10 uname/sysinfo operations
+test result: ok. 211 passed
 $ cargo clippy --all-targets                   # clean, no warnings
 ```
 
@@ -641,6 +643,22 @@ $ cargo test --test random_differential
 … 9 getrandom operations and every deterministic output byte matched C
 ```
 
+`uname.rs` ports `kernel/uname.c`'s fixed 390-byte `uname` and 60-byte
+`sys_info` guest ABIs. `SystemInfoHost` supplies native hostname, uptime/load,
+and memory values while `UnameConfig` represents C's two mutable identity
+globals and compile-time version suffix. The direct C fixture fixes
+`SOURCE_DATE_EPOCH=0`, wraps host `uname`/`sysinfo`, and supplies `get_uptime`;
+it verifies the string fields, the 64→32-bit truncations, zeroed `bufferram` and
+padding, host calls before guest faults, override precedence, and `snprintf`
+truncation.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_uname_reference.sh
+wrote tests/fixtures/uname_reference.txt: 50 lines, 10 C operations, 11 snapshots
+$ cargo test --test uname_differential
+… 10 uname/sysinfo operations and all C-derived guest bytes matched exactly
+```
+
 The host thread launcher in `task.c` and signal/tty/filesystem pointers in the
 rest of `struct task` remain later engine/kernel ports; they are intentionally
 not represented as fake implementations. The new `iSH Rust Core` workflow runs
@@ -672,6 +690,7 @@ ish-rs/
 │   ├── errno_table.rs          # generated host->guest errno table (do not edit)
 │   ├── resource.rs             # kernel/resource.{h,c}
 │   ├── random.rs               # kernel/random.{h,c}
+│   ├── uname.rs                # kernel/uname.c
 │   ├── task.rs                 # kernel/task.{h,c} state and PID table
 │   ├── group.rs                # kernel/group.c
 │   ├── getset.rs               # kernel/getset.c
@@ -690,6 +709,7 @@ ish-rs/
 │   ├── vec_differential.rs     # word-exact replay of the vec/mmx reference
 │   ├── resource_differential.rs # state-exact replay of the resource reference
 │   ├── random_differential.rs  # byte-exact replay of the random reference
+│   ├── uname_differential.rs   # byte-exact replay of the uname/sysinfo reference
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -702,7 +722,8 @@ ish-rs/
 │       ├── tlb_reference.txt   # 56 full struct tlb dumps from the C
 │       ├── vec_reference.txt   # 9.8k vec/mmx results from the C
 │       ├── resource_reference.txt # 51 deterministic resource calls from the C
-│       └── random_reference.txt # 9 deterministic getrandom calls from the C
+│       ├── random_reference.txt # 9 deterministic getrandom calls from the C
+│       └── uname_reference.txt # 10 deterministic uname/sysinfo calls from the C
 └── tools/
     ├── f80-dump.c              # float80 reference generator (not part of iSH)
     ├── fpu-dump.c              # cpu/fpu reference generator
@@ -716,6 +737,7 @@ ish-rs/
     ├── mmap-dump.c             # mmap reference generator (links mmap.c)
     ├── resource-dump.c         # deterministic resource.c reference generator
     ├── random-dump.c           # deterministic random.c reference generator
+    ├── uname-dump.c            # deterministic uname.c reference generator
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -730,6 +752,7 @@ ish-rs/
     ├── gen_mmap_reference.sh
     ├── gen_resource_reference.sh
     ├── gen_random_reference.sh
+    ├── gen_uname_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
