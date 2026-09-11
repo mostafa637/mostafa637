@@ -28,6 +28,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `errno.rs`   | `kernel/errno.{h,c}`  | 105     | **done** — host→guest errno translation; 4,216 `err_map` inputs and all 10 `errno_map` probes verified against the C, table generated from the host headers |
 | `user.rs`    | `kernel/user.c`       | 97      | **done** — the guest↔kernel byte copies (`user_read`/`user_write`/`user_write_task_ptrace`/`user_read_string`/`user_write_string`); 52 operations, 77 guest pages and 192,937 bytes verified against the C |
 | `resource.rs` | `kernel/resource.{h,c}` | 265   | **done** — `rlimit`/`rusage` guest ABIs, resource-limit rules, affinity bitmap, and scheduler/priority compatibility calls; 51 deterministic C operations and 52 full state snapshots verified against unmodified C |
+| `random.rs`  | `kernel/random.{h,c}` | 35      | **done** — bounded `getrandom`, host-failure mapping, output fault ordering, and explicit iOS/Linux entropy adapter; 9 deterministic C operations verified byte-for-byte |
 | `task.rs`    | `kernel/task.{h,c}`   | 346     | **foundation ported** — PID table, parent/child links, task creation/destruction, mm attachment, task credentials/names, thread-group topology, zombie visibility and explicit current-task selection |
 | `group.rs`   | `kernel/group.c`      | 131     | **done** — `setpgid`/`getpgid`, `setsid`/`getsid`, session and process-group membership rules |
 | `getset.rs`  | `kernel/getset.c`     | 202     | **done** — PID/UID/GID getters and setters, supplementary groups, capability stubs and personality |
@@ -58,7 +59,8 @@ running 3 tests    (tests/modrm_differential.rs)   ->  10,264 decode fields
 running 2 tests    (tests/tlb_differential.rs)     -> 172,312 tlb state words
 running 2 tests    (tests/vec_differential.rs)     ->   9,794 vec/mmx results
 running 1 test     (tests/resource_differential.rs)->      51 resource operations + 52 full state snapshots
-test result: ok. 207 passed
+running 1 test     (tests/random_differential.rs)  ->       9 getrandom operations
+test result: ok. 209 passed
 $ cargo clippy --all-targets                   # clean, no warnings
 ```
 
@@ -624,6 +626,21 @@ $ cargo test --test resource_differential
 … 51 resource operations and 52 full C-state snapshots matched exactly
 ```
 
+`random.rs` ports `kernel/random.c` with a `RandomSource` host boundary, so an
+iOS embedding can use `CCRandomGenerateBytes` and a Linux embedding can use its
+native `getrandom` implementation without the portable core inventing entropy.
+`tests/random_differential.rs` links the unmodified C file and wraps only its
+Linux `syscall(SYS_getrandom, …)` boundary with deterministic bytes. Its nine
+records verify the one-MiB limit, zero-length call, ignored flags, host failure,
+guest-output fault ordering, and every byte written on successful calls.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_random_reference.sh
+wrote tests/fixtures/random_reference.txt: 34 lines, 9 C operations
+$ cargo test --test random_differential
+… 9 getrandom operations and every deterministic output byte matched C
+```
+
 The host thread launcher in `task.c` and signal/tty/filesystem pointers in the
 rest of `struct task` remain later engine/kernel ports; they are intentionally
 not represented as fake implementations. The new `iSH Rust Core` workflow runs
@@ -654,6 +671,7 @@ ish-rs/
 │   ├── errno.rs                # kernel/errno.{h,c}
 │   ├── errno_table.rs          # generated host->guest errno table (do not edit)
 │   ├── resource.rs             # kernel/resource.{h,c}
+│   ├── random.rs               # kernel/random.{h,c}
 │   ├── task.rs                 # kernel/task.{h,c} state and PID table
 │   ├── group.rs                # kernel/group.c
 │   ├── getset.rs               # kernel/getset.c
@@ -671,6 +689,7 @@ ish-rs/
 │   ├── tlb_differential.rs     # word-exact replay of the tlb reference
 │   ├── vec_differential.rs     # word-exact replay of the vec/mmx reference
 │   ├── resource_differential.rs # state-exact replay of the resource reference
+│   ├── random_differential.rs  # byte-exact replay of the random reference
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -682,7 +701,8 @@ ish-rs/
 │       ├── mmap_reference.txt  # 51 mmap ops + the whole page table after each
 │       ├── tlb_reference.txt   # 56 full struct tlb dumps from the C
 │       ├── vec_reference.txt   # 9.8k vec/mmx results from the C
-│       └── resource_reference.txt # 51 deterministic resource calls from the C
+│       ├── resource_reference.txt # 51 deterministic resource calls from the C
+│       └── random_reference.txt # 9 deterministic getrandom calls from the C
 └── tools/
     ├── f80-dump.c              # float80 reference generator (not part of iSH)
     ├── fpu-dump.c              # cpu/fpu reference generator
@@ -695,6 +715,7 @@ ish-rs/
     ├── errno-dump.c            # errno reference generator (links errno.c)
     ├── mmap-dump.c             # mmap reference generator (links mmap.c)
     ├── resource-dump.c         # deterministic resource.c reference generator
+    ├── random-dump.c           # deterministic random.c reference generator
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -708,6 +729,7 @@ ish-rs/
     ├── gen_errno_reference.sh
     ├── gen_mmap_reference.sh
     ├── gen_resource_reference.sh
+    ├── gen_random_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
