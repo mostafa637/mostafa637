@@ -16,6 +16,7 @@
 //! | [`tlb`]         | `emu/tlb.h` + `.c`        | ported, cache behaviour compared against the C |
 //! | [`vec`]         | `emu/vec.{h,c}` + `mmx.c` | ported, all 166 operations compared against the C |
 //! | [`modrm`]       | `emu/modrm.h`             | ported, decode results compared against the C |
+//! | [`decode`]      | `emu/decode.h`            | ported dispatch, opcode table generated from the C |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -26,6 +27,8 @@
 
 pub mod cpu;
 pub mod cpuid;
+pub mod decode;
+pub mod decode_table;
 pub mod float80;
 pub mod fpu;
 pub mod interrupt;

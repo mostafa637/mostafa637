@@ -22,7 +22,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `modrm.rs`   | `emu/modrm.h`         | 106     | **done** — ModRM/SIB decoder; 1,283 decodings (10,264 fields) verified against the C |
 | `cpuid.rs`   | `emu/cpuid.h`         | 29      | **done** — `do_cpuid` leaves 0/1 and the `CPUID_EDX_*` bits |
 | `interrupt.rs` | `emu/interrupt.h`   | 15      | **done** — the 13 `INT_*` vector numbers |
-| `decode.rs`  | `emu/decode.h`        | 1,416   | reference harness + 27,651-case corpus landed; the Rust decoder is next |
+| `decode.rs`  | `emu/decode.h`        | 1,416   | **dispatch ported** — 8 opcode maps × 2 operand sizes; 140,289 events over 37,891 decodings verified against the C. The opcode table is generated from the header |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -36,13 +36,14 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --tests
-running 79 tests   (unit tests in src/)
-running 2 tests    (tests/differential.rs)       -> 125,612 float80 results
-running 4 tests    (tests/fpu_differential.rs)   -> 502,552 cpu_state words
-running 3 tests    (tests/modrm_differential.rs) ->  10,264 decode fields
-running 2 tests    (tests/tlb_differential.rs)   -> 172,312 tlb state words
-running 2 tests    (tests/vec_differential.rs)   ->   9,794 vec/mmx results
-test result: ok. 92 passed
+running 90 tests   (unit tests in src/)
+running 2 tests    (tests/differential.rs)        -> 125,612 float80 results
+running 4 tests    (tests/fpu_differential.rs)    -> 502,552 cpu_state words
+running 3 tests    (tests/decode_differential.rs) -> 140,289 decoder events
+running 3 tests    (tests/modrm_differential.rs)  ->  10,264 decode fields
+running 2 tests    (tests/tlb_differential.rs)    -> 172,312 tlb state words
+running 2 tests    (tests/vec_differential.rs)    ->   9,794 vec/mmx results
+test result: ok. 106 passed
 $ cargo clippy --all-targets                   # clean, no warnings
 ```
 
@@ -212,6 +213,80 @@ specifies, leaf 1 and the `default:` case both return
 `fpu | cmov | mmx | sse2` (bit 25, plain SSE, is deliberately absent), and the
 13 `INT_*` vectors are the constants `kernel/` raises.
 
+### decode
+
+`emu/decode.h` is the one module here that is not a library. It is a 1,416-line
+template that `asbestos/gen.c` includes twice — once with `OP_SIZE` 32, once
+with 16 — supplying ~150 macros that turn each decoded instruction into gadget
+emissions. So it was split by what each part is:
+
+* the **dispatch** — prefix handling, the eight opcode maps, the ModRM and
+  immediate reads, the GRP groups, the x87 split, where an instruction ends a
+  block — is translated by hand into `src/decode.rs`;
+* the **semantics** — what `ADD` or `CVTSS2SD` does — live in the gadget
+  backends and are *not* ported. The decoder's job ends at naming the operation
+  (`Op`, one variant per macro the header invokes) and its operands, which stay
+  as the C's own tokens so nothing is lost or invented.
+
+`tools/decode-dump.c` supplies the same ~150 macros as recorders — each one
+stringifies its arguments instead of generating anything — and includes the
+header unmodified, both instances. It compiles `-Wall -Wextra` clean, which is
+itself a check that the macro contract was read correctly.
+
+The per-opcode step lists in `src/decode_table.rs` are generated from that
+reference run rather than transcribed. What makes that sound rather than
+circular is a property the generator *proves*: that once the ModRM byte is
+consumed, the dispatch depends on it only through a 72-value class function (8
+memory classes + 64 register). It checks this by decoding all 256 ModRM bytes
+for every opcode of every map in both operand sizes — **1,042,066 decodes** —
+and fails if any class disagrees with itself.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_decode_reference.sh
+wrote tests/fixtures/decode_reference.txt: 216076 lines, 37891 cases
+# class_invariant 1042066 decodes, 14 opcodes excepted: base:0f base:2e ...
+$ python3 ./tools/gen_decode_table.py
+wrote src/decode_table.rs: 4068 opcodes (114 class-dependent), 789 distinct step lists
+```
+
+That check falsified the obvious 16-class version of the rule on its first run.
+The x87 opcodes fall through to
+
+```c
+switch (insn << 8 | modrm.opcode << 4 | modrm.rm_opcode)
+```
+
+in their register form, so they read the `rm` field as well — `d9 e0` is `fchs`
+and `d9 e1` is `fabs`, same opcode, same reg field. Hence 8 × 8 register
+classes. A second guard, asserting that no opcode in a narrowly-swept map
+depends on the class, caught a stale map index in the prefix table.
+
+The 14 excepted opcodes are printed into the fixture rather than hidden in the
+generator: they are exactly the `goto restart` / `goto lockrestart` /
+operand-size-switch / nested-`0x0f` sites, and the decoder drives them itself.
+A unit test checks both halves of that coupling — every other opcode has a
+table entry, every prefix opcode is intercepted — which is what makes the
+lookup's empty-slot arm unreachable.
+
+`tests/decode_differential.rs` replays all 37,891 corpus cases through the Rust
+decoder: **140,289 events** match, in order, plus the result code and the final
+instruction pointer. A third test drives the same instructions with ModRM bytes
+the corpus never contained — `mod=01` and `mod=10` forms, SIB, disp32-with-no-base
+— and requires the same operation out, which is what tests the class abstraction
+rather than the corpus.
+
+Mutation-checked: 14 of 15 targeted breakages of `src/decode.rs` were caught,
+including a `0x66` that stops switching operand size, the locked `0x66` losing
+its `RESTORE_IP` rewind, a class function that forgets the `rm` field, an
+immediate read taking its bit count as a byte count, and a read that only
+advances the instruction pointer when it succeeds. The survivor edits the
+lookup's empty-slot arm, which the coupling test above proves unreachable.
+
+One upstream quirk is reproduced rather than fixed. `lock 0x66` in 32-bit mode
+does `RESTORE_IP` — rewinds to the start of the instruction — and hands it to
+the 16-bit decoder, prefixes and all. The C comments this "I didn't think this
+through"; the port does the same thing, and the corpus covers it.
+
 ### What the differential test caught
 
 Two genuine translation bugs, both caused by flattening the C union/bitfield
@@ -267,6 +342,8 @@ ish-rs/
 │   ├── float80.rs              # emu/float80.{h,c}
 │   ├── fpu.rs                  # emu/fpu.{h,c}
 │   ├── mmu.rs                  # emu/mmu.h
+│   ├── decode.rs               # emu/decode.h dispatch
+│   ├── decode_table.rs         # generated opcode table (do not edit)
 │   ├── modrm.rs                # emu/modrm.h
 │   ├── cpuid.rs                # emu/cpuid.h
 │   ├── interrupt.rs            # emu/interrupt.h
@@ -275,12 +352,14 @@ ish-rs/
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
+│   ├── decode_differential.rs  # event-exact replay of the decoder reference
 │   ├── modrm_differential.rs   # field-exact replay of the ModRM/SIB reference
 │   ├── tlb_differential.rs     # word-exact replay of the tlb reference
 │   ├── vec_differential.rs     # word-exact replay of the vec/mmx reference
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
+│       ├── decode_reference.txt# 37.9k instruction decodings from the C
 │       ├── modrm_reference.txt # 1283 ModRM/SIB decodings from the C
 │       ├── tlb_reference.txt   # 56 full struct tlb dumps from the C
 │       └── vec_reference.txt   # 9.8k vec/mmx results from the C
@@ -288,12 +367,15 @@ ish-rs/
     ├── f80-dump.c              # float80 reference generator (not part of iSH)
     ├── fpu-dump.c              # cpu/fpu reference generator
     ├── tlb-dump.c              # mmu/tlb reference generator
+    ├── decode-dump.c           # decoder reference generator (drives decode.h)
+    ├── gen_decode_table.py     # derives src/decode_table.rs from the fixture
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
     ├── gen_vec_ops.py          # derives both op tables from emu/vec.h
     ├── vec-ops.inc             # generated C op table (166 entries)
     ├── gen_f80_reference.sh
     ├── gen_fpu_reference.sh
+    ├── gen_decode_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh

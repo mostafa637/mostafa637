@@ -592,8 +592,12 @@ int main(void) {
     // faults: the modrm byte itself unmapped, a disp32 straddling into the
     // unmapped page, and an immediate doing the same
     {
-        unsigned char b[2] = { 0x8b, 0b00000110 }; // mov eax, [esi] with a disp32
-        emit_case(32, UNMAPPED_PAGE * PAGE_SIZE - 3, b, 1);
+        // mod=00 rm=101 is the disp32-with-no-base form; rm=110 would be a plain
+        // [esi] with no displacement and would not fault at all
+        unsigned char b[2] = { 0x8b, 0b00000101 }; // mov eax, [disp32]
+        // two bytes, so the ModRM byte really is the disp32 form and the
+        // displacement is what runs into the unmapped page
+        emit_case(32, UNMAPPED_PAGE * PAGE_SIZE - 3, b, 2);
         emit_case(32, UNMAPPED_PAGE * PAGE_SIZE - 1, b, 1);
         emit_case(32, UNMAPPED_PAGE * PAGE_SIZE, b, 1);
     }
