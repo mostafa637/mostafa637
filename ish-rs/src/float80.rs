@@ -95,7 +95,7 @@ fn u128_clz(x: Float128) -> i32 {
 }
 
 impl Float80 {
-    pub fn new(signif: u64, sign_exp: u16) -> Self {
+    pub const fn new(signif: u64, sign_exp: u16) -> Self {
         Float80 { signif, sign_exp }
     }
 
