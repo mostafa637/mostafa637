@@ -32,8 +32,8 @@ against the compiled C original**, not just against hand-written expectations.
 | `uname.rs`   | `kernel/uname.c`      | 81      | **done** — guest `uname`/`sysinfo` layouts, C string/truncation behavior, and explicit hostname/uptime/memory host data; 10 deterministic C operations verified byte-for-byte |
 | `ipc.rs`     | `kernel/ipc.c`        | 6       | **done** — the complete legacy System V IPC multiplexor `_ENOSYS` compatibility stub; 5 raw C calls verified |
 | `log.rs`     | `kernel/log.c` + `util/fifo.c` | 250 | **done** — one-MiB printk FIFO, complete-line host sink, and old `sys_syslog` ABI; 31 C operations and all defined outputs verified |
-| `fake_db.rs` | `fs/fake-db.c` + `fs/fake-migrate.c` | 351 | **metadata API + schema migration ported** — vendored pure-Rust SQLite-3-compatible `graphitesql`; 40 C/SQLite operations, 41 snapshots, and all v0–v2 migrations verified |
-| `fake_rebuild.rs` | `fs/fake-rebuild.c` | 122 | **host-inode rebuild ported** — explicit byte-path host adapter, hard-link repair, and C's pre-relink-inode behavior verified against a deterministic C host oracle |
+| `fake_db.rs` | `fs/fake-db.c` + `fs/fake-migrate.c` | 351 | **metadata API, schema migration, and host-inode initialization ported** — vendored pure-Rust SQLite-3-compatible `graphitesql`; C metadata/migration coverage plus an unmodified-C `fake_db_init` host-rebuild oracle |
+| `fake_rebuild.rs` | `fs/fake-rebuild.c` | 122 | **host-inode rebuild ported** — explicit byte-path host adapter, hard-link repair, and C's pre-relink-inode behavior verified against deterministic C host oracles |
 | `task.rs`    | `kernel/task.{h,c}`   | 346     | **foundation ported** — PID table, parent/child links, task creation/destruction, mm attachment, task credentials/names, thread-group topology, zombie visibility and explicit current-task selection |
 | `group.rs`   | `kernel/group.c`      | 131     | **done** — `setpgid`/`getpgid`, `setsid`/`getsid`, session and process-group membership rules |
 | `getset.rs`  | `kernel/getset.c`     | 202     | **done** — PID/UID/GID getters and setters, supplementary groups, capability stubs and personality |
@@ -52,7 +52,7 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --all-targets
-running 190 tests  (unit tests in src/)
+running 192 tests  (unit tests in src/)
 running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
 running 3 tests    (tests/errno_differential.rs)   ->   4,216 err_map inputs
 running 2 tests    (tests/mmap_differential.rs)    ->      51 mmap operations
@@ -69,9 +69,10 @@ running 1 test     (tests/uname_differential.rs)   ->      10 uname/sysinfo oper
 running 1 test     (tests/ipc_differential.rs)     ->       5 legacy IPC operations
 running 1 test     (tests/log_differential.rs)          ->      31 log/syslog operations
 running 1 test     (tests/fake_db_differential.rs)      ->      40 C/SQLite metadata operations + 41 snapshots
+running 1 test     (tests/fake_db_init_differential.rs) ->       C fake_db_init host-inode/rebuild integration
 running 1 test     (tests/fake_migrate_differential.rs) ->       3 historical C schema migrations + v2 unlink
 running 1 test     (tests/fake_rebuild_differential.rs) ->       7-path C host-inode/hard-link rebuild
-test result: ok. 223 passed
+test result: ok. 225 passed
 $ cargo clippy --all-targets -- -D warnings       # clean, no warnings
 ```
 
@@ -720,10 +721,14 @@ missing-path zero/error behavior, `path_from_inode`, rollback, and cleanup.
 `fake_rebuild.rs` ports `fs/fake-rebuild.c` through `FakeDb::rebuild_with_host`.
 Its `RebuildHost` boundary receives the same `fix_path`-normalized byte paths
 as C's `fstatat`/`unlinkat`/`linkat` calls, and `RootedHostFs` provides a
-standard-library Unix/iOS adapter. The conversion deliberately retains the C
-ordering quirk: a repaired hard link is stored under the destination inode
-observed **before** unlinking and re-linking it. Full VFS syscall integration in
-`fs/fake.c` remains a later filesystem-layer port.
+standard-library Unix/iOS adapter. `FakeDb::initialize_with_host_inode` now
+reproduces the host-coupled `fake_db_init` ordering: compare `meta.db_inode`,
+rebuild only for a differing existing meta row, save the current inode, then
+remove orphans. Unix `FakeDb::open_for_root` samples the database inode after
+open/migration and performs that sequence with `RootedHostFs`. The conversion
+deliberately retains the C ordering quirk: a repaired hard link is stored under
+the destination inode observed **before** unlinking and re-linking it. Full VFS
+syscall integration in `fs/fake.c` remains a later filesystem-layer port.
 
 The C oracle still uses the original C SQLite implementation **only locally**
 to establish compatibility. `tools/fake-db-dump.c` compiles unmodified
@@ -749,15 +754,20 @@ removed `delete_path` trigger. `tools/fake-rebuild-dump.c` links unmodified
 `fs/fake-rebuild.c` to the same local C SQLite oracle while substituting a
 deterministic host for `fstatat`/`unlinkat`/`linkat`. Its Rust replay compares
 the rebuilt metadata, host hard-link topology, syscall counts, and cleanup of
-the temporary tables.
+the temporary tables. `tools/fake-db-init-dump.c` drives the unmodified C
+`fake_db_init` across all three C fakefs database files; the corresponding Rust
+replay verifies the automatic inode-mismatch rebuild, post-rebuild orphan
+cleanup, saved `meta.db_inode`, and no-rebuild match path.
 
 ```console
 $ ISH_SRC=/path/to/ish ./tools/gen_fake_migrate_reference.sh
 wrote tests/fixtures/fake_migrate_reference.txt: 7 lines, 3 C migrations, 1 v2 unlink
 $ ISH_SRC=/path/to/ish ./tools/gen_fake_rebuild_reference.sh
 wrote tests/fixtures/fake_rebuild_reference.txt: 9 lines from unmodified C rebuild
-$ cargo test --test fake_migrate_differential --test fake_rebuild_differential
-… pure-Rust migration and rebuild behavior matched unmodified C
+$ ISH_SRC=/path/to/ish ./tools/gen_fake_db_init_reference.sh
+wrote tests/fixtures/fake_db_init_reference.txt: 11 lines from unmodified C fake_db_init
+$ cargo test --test fake_migrate_differential --test fake_rebuild_differential --test fake_db_init_differential
+… pure-Rust migration, rebuild, and fake_db_init behavior matched unmodified C
 ```
 
 The host thread launcher in `task.c` and signal/tty/filesystem pointers in the
@@ -818,6 +828,7 @@ ish-rs/
 │   ├── ipc_differential.rs     # raw-argument replay of the IPC stub reference
 │   ├── log_differential.rs     # output/state replay of the log/syslog reference
 │   ├── fake_db_differential.rs # pure-Rust replay of the C SQLite metadata reference
+│   ├── fake_db_init_differential.rs # C-derived fake_db_init host-inode integration replay
 │   ├── fake_migrate_differential.rs # C-derived v0–v2 schema migration replay
 │   ├── fake_rebuild_differential.rs # C-derived host-inode rebuild replay
 │   └── fixtures/
@@ -837,6 +848,7 @@ ish-rs/
 │       ├── ipc_reference.txt   # 5 raw legacy IPC calls from the C
 │       ├── log_reference.txt   # 31 log/syslog operations from the C
 │       ├── fake_db_reference.txt # 40 fake-db operations + table states from C
+│       ├── fake_db_init_reference.txt # fake_db_init metadata/host state from C
 │       ├── fake_migrate_reference.txt # v0–v2 fakefs migration states from C
 │       └── fake_rebuild_reference.txt # fakefs host-inode rebuild state from C
 ├── vendor/
@@ -858,6 +870,7 @@ ish-rs/
     ├── ipc-dump.c              # deterministic ipc.c reference generator
     ├── log-dump.c              # deterministic log.c/fifo.c reference generator
     ├── fake-db-dump.c          # C/SQLite fake-db behavioral-oracle generator
+    ├── fake-db-init-dump.c     # C/SQLite fake_db_init host-inode oracle
     ├── fake-migrate-dump.c     # C/SQLite fake-schema-migration oracle
     ├── fake-rebuild-dump.c     # C/SQLite deterministic-host rebuild oracle
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
@@ -878,6 +891,7 @@ ish-rs/
     ├── gen_ipc_reference.sh
     ├── gen_log_reference.sh
     ├── gen_fake_db_reference.sh
+    ├── gen_fake_db_init_reference.sh
     ├── gen_fake_migrate_reference.sh
     ├── gen_fake_rebuild_reference.sh
     ├── gen_modrm_reference.sh

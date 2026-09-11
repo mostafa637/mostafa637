@@ -54,6 +54,8 @@ pub enum FakeDbError {
     /// A filesystem path could not be represented by the SQLite library's
     /// UTF-8 file-VFS API.
     NonUtf8DatabasePath,
+    /// The host filesystem could not inspect the metadata database file.
+    HostFilesystem(String),
     /// A metadata record was not the 16-byte `struct ish_stat` layout.
     InvalidStatBlob {
         /// Actual record length.
@@ -89,6 +91,9 @@ impl fmt::Display for FakeDbError {
             Self::InteriorNulPath => formatter.write_str("fakefs path contains an interior NUL"),
             Self::NonUtf8DatabasePath => {
                 formatter.write_str("fakefs database path is not valid UTF-8")
+            }
+            Self::HostFilesystem(message) => {
+                write!(formatter, "fakefs host filesystem error: {message}")
             }
             Self::InvalidStatBlob { len } => {
                 write!(
@@ -166,13 +171,24 @@ pub struct MetadataRow {
     pub stat: IshStat,
 }
 
+/// Result details from the host-coupled fakefs initialization sequence.
+///
+/// `fake_db_init` in upstream C rebuilds metadata only when the host inode of
+/// the metadata database changed. This value makes that otherwise implicit
+/// decision observable to Rust callers and tests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FakeDbInitialization {
+    /// Report from the host-inode rebuild, or `None` when no rebuild was due.
+    pub rebuild: Option<crate::fake_rebuild::RebuildReport>,
+}
+
 /// Persistent, SQLite-3-file-compatible fake filesystem metadata storage.
 ///
 /// `create` writes a SQLite version-3 database using pure Rust. `open` also
 /// upgrades compatible historical iSH metadata schemas v0–v2 through the same
-/// durable v3 state as upstream `fakefs_migrate`. The host-inode rebuild is
-/// available through [`Self::rebuild_with_host`]; full fakefs integration
-/// remains separate conversion work.
+/// durable v3 state as upstream `fakefs_migrate`. Call
+/// [`Self::initialize_with_host_inode`] (or Unix [`Self::open_for_root`]) to
+/// complete C's host-inode rebuild and orphan-cleanup initialization sequence.
 pub struct FakeDb {
     connection: ConnectionSlot,
 }
@@ -183,33 +199,99 @@ impl FakeDb {
     pub fn create(path: impl AsRef<Path>) -> Result<Self, FakeDbError> {
         let path = path.as_ref();
         let sqlite_path = database_path(path)?;
-        let exists = path.exists();
-        let connection = if exists {
-            Connection::open(sqlite_path)
-        } else {
-            Connection::create(sqlite_path)
+        if path.exists() {
+            let db = Self::open_existing(path)?;
+            db.clear_orphans()?;
+            return Ok(db);
         }
-        .map_err(FakeDbError::database)?;
+
+        let connection = Connection::create(sqlite_path).map_err(FakeDbError::database)?;
         let db = Self::from_connection(connection);
-        if exists {
-            db.migrate_schema()?;
-            db.validate_schema()?;
-        } else {
-            db.initialize_schema()?;
-        }
+        db.initialize_schema()?;
         db.clear_orphans()?;
         Ok(db)
     }
 
     /// Open an existing SQLite-backed fakefs metadata database.
+    ///
+    /// This preserves the historical standalone behavior of opening, migrating,
+    /// validating, and deleting orphaned stats. Mount-style callers that also
+    /// have a host root should use [`Self::open_for_root`] on Unix or open the
+    /// database and call [`Self::initialize_with_host_inode`] after sampling the
+    /// database file inode.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, FakeDbError> {
-        let connection =
-            Connection::open(database_path(path.as_ref())?).map_err(FakeDbError::database)?;
+        let db = Self::open_existing(path.as_ref())?;
+        db.clear_orphans()?;
+        Ok(db)
+    }
+
+    /// Open, migrate, and validate an existing metadata database without doing
+    /// the final orphan cleanup from C's `fake_db_init`.
+    fn open_existing(path: &Path) -> Result<Self, FakeDbError> {
+        let connection = Connection::open(database_path(path)?).map_err(FakeDbError::database)?;
         let db = Self::from_connection(connection);
         db.migrate_schema()?;
         db.validate_schema()?;
-        db.clear_orphans()?;
         Ok(db)
+    }
+
+    /// Open a metadata database and run the host-coupled portion of upstream
+    /// `fake_db_init` with a caller-supplied, already-sampled database inode.
+    ///
+    /// The supplied `database_inode` must identify the database file *after*
+    /// this method's open/migration work, as C samples it after
+    /// `fakefs_migrate`. Generic host adapters can use this entry point; Unix
+    /// callers normally want [`Self::open_for_root`], which samples the inode
+    /// in the required place automatically.
+    pub fn open_with_host_inode<H: crate::fake_rebuild::RebuildHost>(
+        path: impl AsRef<Path>,
+        database_inode: u64,
+        host: &mut H,
+    ) -> Result<(Self, FakeDbInitialization), FakeDbError> {
+        let db = Self::open_existing(path.as_ref())?;
+        let initialization = db.initialize_with_host_inode(database_inode, host)?;
+        Ok((db, initialization))
+    }
+
+    /// Complete C `fake_db_init` after opening/migrating this database.
+    ///
+    /// It compares the `meta.db_inode` value with `database_inode`, runs the
+    /// transactional host-inode rebuild when they differ, stores the new value,
+    /// and only then removes orphan stats. That ordering is deliberate: rebuild
+    /// needs the pre-cleanup metadata snapshot just as `fake-rebuild.c` does.
+    pub fn initialize_with_host_inode<H: crate::fake_rebuild::RebuildHost>(
+        &self,
+        database_inode: u64,
+        host: &mut H,
+    ) -> Result<FakeDbInitialization, FakeDbError> {
+        let rebuild = match self.stored_database_inode()? {
+            Some(stored_inode) if stored_inode != database_inode => {
+                Some(self.rebuild_with_host(host)?)
+            }
+            Some(_) | None => None,
+        };
+        self.store_database_inode(database_inode)?;
+        self.clear_orphans()?;
+        Ok(FakeDbInitialization { rebuild })
+    }
+
+    /// Open and initialize metadata exactly as C `fake_db_init` does for a
+    /// directory-backed Unix fakefs root.
+    #[cfg(unix)]
+    pub fn open_for_root(
+        path: impl AsRef<Path>,
+        root: impl AsRef<Path>,
+    ) -> Result<(Self, FakeDbInitialization), FakeDbError> {
+        use std::os::unix::fs::MetadataExt as _;
+
+        let path = path.as_ref();
+        let db = Self::open_existing(path)?;
+        let database_inode = std::fs::metadata(path)
+            .map_err(|error| FakeDbError::HostFilesystem(error.to_string()))?
+            .ino();
+        let mut host = crate::fake_rebuild::RootedHostFs::new(root);
+        let initialization = db.initialize_with_host_inode(database_inode, &mut host)?;
+        Ok((db, initialization))
     }
 
     /// Create an in-memory pure-Rust SQLite database for a caller or
@@ -224,6 +306,40 @@ impl FakeDb {
         Self {
             connection: Rc::new(RefCell::new(Some(connection))),
         }
+    }
+
+    /// Read the first `meta.db_inode` row as `sqlite3_column_int64` does in C.
+    fn stored_database_inode(&self) -> Result<Option<u64>, FakeDbError> {
+        self.with_connection(|connection| {
+            let Some(row) = query_rows(connection, "SELECT CAST(db_inode AS INTEGER) FROM meta")?
+                .into_iter()
+                .next()
+            else {
+                return Ok(None);
+            };
+            let value = one_column(row)?;
+            match value {
+                // SQLite's C integer accessor turns SQL NULL into zero.
+                Value::Null => Ok(Some(0)),
+                Value::Integer(value) => Ok(Some(value as u64)),
+                other => Err(FakeDbError::Database(format!(
+                    "SQLite metadata db_inode had unexpected value {other:?}"
+                ))),
+            }
+        })
+    }
+
+    /// Persist the database file inode with C's signed SQLite binding cast.
+    fn store_database_inode(&self, database_inode: u64) -> Result<(), FakeDbError> {
+        self.with_connection(|connection| {
+            execute(
+                connection,
+                &format!(
+                    "UPDATE meta SET db_inode={}",
+                    sqlite_integer(database_inode)
+                ),
+            )
+        })
     }
 
     fn initialize_schema(&self) -> Result<(), FakeDbError> {
@@ -1014,6 +1130,62 @@ mod tests {
         assert_eq!(reopened.path_get_inode(b"/one").unwrap(), 0);
         drop(reopened);
         remove_database_files(&path);
+    }
+
+    #[derive(Default)]
+    struct NoRebuildHost {
+        calls: usize,
+    }
+
+    impl crate::fake_rebuild::RebuildHost for NoRebuildHost {
+        type Error = ();
+
+        fn inode_for_path(&mut self, _path: &[u8]) -> Result<u64, Self::Error> {
+            self.calls += 1;
+            Err(())
+        }
+
+        fn unlink_path(&mut self, _path: &[u8]) -> Result<(), Self::Error> {
+            self.calls += 1;
+            Err(())
+        }
+
+        fn link_path(&mut self, _source: &[u8], _destination: &[u8]) -> Result<(), Self::Error> {
+            self.calls += 1;
+            Err(())
+        }
+    }
+
+    #[test]
+    fn initialization_follows_c_meta_row_and_null_inode_rules() {
+        let db = FakeDb::open_in_memory().unwrap();
+        let mut host = NoRebuildHost::default();
+
+        // C only enters its comparison/rebuild branch after sqlite3_step()
+        // produces a meta row. UPDATE then remains a no-op for an empty table.
+        db.with_connection(|connection| execute(connection, "DELETE FROM meta"))
+            .unwrap();
+        assert!(db
+            .initialize_with_host_inode(123, &mut host)
+            .unwrap()
+            .rebuild
+            .is_none());
+        assert_eq!(db.stored_database_inode().unwrap(), None);
+        assert_eq!(host.calls, 0);
+
+        // sqlite3_column_int64(NULL) is zero. A zero current inode therefore
+        // matches a NULL stored value rather than asking the host to rebuild.
+        db.with_connection(|connection| {
+            execute(connection, "INSERT INTO meta (db_inode) VALUES (NULL)")
+        })
+        .unwrap();
+        assert!(db
+            .initialize_with_host_inode(0, &mut host)
+            .unwrap()
+            .rebuild
+            .is_none());
+        assert_eq!(db.stored_database_inode().unwrap(), Some(0));
+        assert_eq!(host.calls, 0);
     }
 
     fn temporary_database_path() -> std::path::PathBuf {

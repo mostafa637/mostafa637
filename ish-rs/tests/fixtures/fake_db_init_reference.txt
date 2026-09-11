@@ -1,0 +1,11 @@
+# fake-db-init reference, generated from unmodified iSH fake-db/migrate/rebuild C
+# D initialized logical stats-and-paths hash
+# H initialized mock-host hash
+# C mismatched-inode fstatat unlinkat linkat call counts
+# N matching-inode fstatat unlinkat linkat call counts
+# M meta.db_inode equals the actual database file inode
+D 2173d109a302f1ab
+H e25950f5366a622c
+C 7 3 3
+N 0 0 0
+M 1

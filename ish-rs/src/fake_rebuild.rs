@@ -310,8 +310,11 @@ mod tests {
         let db = FakeDb::create(&database_path).unwrap();
         db.path_create(b"/a", stat).unwrap();
         db.path_link(b"/a", b"/b").unwrap();
-        let mut host = RootedHostFs::new(&root);
-        let report = db.rebuild_with_host(&mut host).unwrap();
+        drop(db);
+        let (db, initialization) = FakeDb::open_for_root(&database_path, &root).unwrap();
+        let report = initialization
+            .rebuild
+            .expect("new database metadata inode requires a rebuild");
 
         assert_eq!(
             std::fs::metadata(root.join("a")).unwrap().ino(),
@@ -337,6 +340,13 @@ mod tests {
                 metadata_paths_written: 2,
             }
         );
+        drop(db);
+
+        // `open_for_root` samples the on-disk database inode after opening.
+        // A second mount therefore follows C's matching-inode path and leaves
+        // the already-repaired host topology untouched.
+        let (db, unchanged_initialization) = FakeDb::open_for_root(&database_path, &root).unwrap();
+        assert!(unchanged_initialization.rebuild.is_none());
         drop(db);
         remove_database_files(&database_path);
         std::fs::remove_dir_all(root).unwrap();
