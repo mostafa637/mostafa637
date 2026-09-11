@@ -1,0 +1,19 @@
+[package]
+name = "ish-emu"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+license = "GPL-2.0-or-later"
+description = "Rust port of the iSH emulator core (emu/), starting with the 80-bit extended-precision FPU (emu/float80.c)"
+repository = "https://github.com/ish-app/ish"
+readme = "README.md"
+
+[lib]
+name = "ish_emu"
+path = "src/lib.rs"
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+debug = true
