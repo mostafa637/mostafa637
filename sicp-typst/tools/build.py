@@ -8,6 +8,7 @@ Requires: pip install typst==0.15.0  and the calepin 0.1.0 package under
 ~/.local/share/typst/packages/preview/ (the committed .calepin bootstrap
 facade re-exports it, so plain `typst compile` works on a fresh checkout).
 """
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -24,11 +25,21 @@ BOOKS = [
 def main() -> int:
     out_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "dist"
     out_dir.mkdir(parents=True, exist_ok=True)
+    here = Path(__file__).resolve().parent
     failed = False
     for src, name in BOOKS:
         out = out_dir / name
         started = time.time()
         try:
+            # Calepin semantics without the Calepin CLI: replay the book's
+            # snippets/transcripts in one persistent session and publish the
+            # captured outputs through the runtime module that lib/code.typ
+            # imports. One book at a time — the runtime path is shared.
+            subprocess.run(
+                [sys.executable, str(here / "execute_transcripts.py"), str(ROOT / src),
+                 "--out", str(ROOT / ".calepin" / "calepin.typ")],
+                check=True,
+            )
             typst.compile(str(ROOT / src), output=str(out))
             size_mb = out.stat().st_size / 1e6
             print(f"OK   {src} -> {out} ({size_mb:.1f} MB, {time.time() - started:.0f}s)")

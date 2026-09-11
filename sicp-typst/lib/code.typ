@@ -41,9 +41,14 @@
 // string to the book's own listings engine, which typesets it with the same
 // machinery as every other code block. Plain `typst compile` cannot execute
 // code, so transcripts render empty on a fresh clone and after any prose
-// edit, until Calepin runs again. The facade in /.calepin/ is the generated
-// runtime once Calepin has run, and a thin shim re-exporting the published
-// compatibility package until then.
+// edit, until transcripts are executed again. The facade in /.calepin/ is
+// the generated runtime once they have run, and a thin shim re-exporting the
+// published compatibility package until then. Regenerate it with
+//   python3 tools/execute_transcripts.py book-ar.typ   (or book.typ)
+// which replays the book in one persistent session and captures interpreter
+// responses — Calepin semantics without the Calepin CLI (its binary cannot
+// be downloaded in sandboxes; `calepin compile` does the same job where a
+// Rust toolchain is available).
 #import "/.calepin/calepin.typ" as calepin
 #import "listings.typ": listings
 
@@ -60,10 +65,11 @@
 }
 
 // One store key (and engine variable) per transcript, numbered in document
-// order. The state advances identically in Calepin's query pass — which turns
-// each chunk into an execution spec — and the render pass, so key N names the
-// same transcript in both.
-#let _transcript-index = state("sicp-transcript", 0)
+// order. A counter (not a state) drives the numbering: counter steps are
+// ordinary flow content, so the numbering survives page breaks and repeated
+// layout passes — state updates inside context blocks stalled after a few
+// boxes in plain typst compiles.
+#let _transcript-counter = counter("sicp-transcript")
 
 /// The code Calepin executes for one interpreter transcript: the snippet runs
 /// under `exec` (script semantics, exactly as the book narrates), so only
@@ -105,32 +111,34 @@
 /// output through the store; `calepin compile` fills it in, and the output is
 /// typeset here by listings. Silence — no box at all — when the snippet
 /// prints nothing (or nothing is stored yet).
-#let output(code) = context {
-  let n = _transcript-index.get()
-  let step = _transcript-index.update(n + 1)
-  let var = "_sicp_t" + str(n)
+#let output(code) = {
   let text-code = if type(code) == str { code } else { code.text }
   [
-    #step
-    #calepin.chunk(
-      "python",
-      raw(transcript-source(text-code, var), lang: "python", block: true),
-      echo: false,
-      results: "hide",
-      warning: false,
-      message: false,
-      error: false,
-      ..(("store-set": var,)),
-    )
-    #context {
-      let stored = _store-get(var)
-      let out = if type(stored) == str { stored } else { "" }
-      if out != "" {
-        listings(out, options: transcript-options)
+    #_transcript-counter.step()
+    #context [
+      #let n = _transcript-counter.get().first() - 1
+      #let var = "_sicp_t" + str(n)
+      #calepin.chunk(
+        "python",
+        raw(transcript-source(text-code, var), lang: "python", block: true),
+        echo: false,
+        results: "hide",
+        warning: false,
+        message: false,
+        error: false,
+        ..(("store-set": var,)),
+      )
+      #context {
+        let stored = _store-get(var)
+        let out = if type(stored) == str { stored } else { "" }
+        if out != "" {
+          listings(out, options: transcript-options)
+        }
       }
-    }
+    ]
   ]
 }
+
 
 /// A Python program fragment that displays code using listings.
 #let snippet(code) = {
@@ -142,9 +150,9 @@
 /// sequence of strings (literal code) and content (already-typeset
 /// meta-variables), so it cannot go through the syntax highlighter.
 #let syntax(..parts) = code-block(fill: luma(252))[
-  #set text(font: code-font, size: code-size)
+  #set text(font: code-font, size: code-size, dir: ltr)
   #set par(justify: false, leading: 0.55em)
-  #parts.pos().join()
+  #align(left, parts.pos().join())
 ]
 
 /// Inline code inside running prose.
