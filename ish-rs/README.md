@@ -23,6 +23,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `cpuid.rs`   | `emu/cpuid.h`         | 29      | **done** — `do_cpuid` leaves 0/1 and the `CPUID_EDX_*` bits |
 | `interrupt.rs` | `emu/interrupt.h`   | 15      | **done** — the 13 `INT_*` vector numbers |
 | `decode.rs`  | `emu/decode.h`        | 1,416   | **dispatch ported** — 8 opcode maps × 2 operand sizes; 140,289 events over 37,891 decodings verified against the C. The opcode table is generated from the header |
+| `memory.rs`  | `kernel/memory.{h,c}` | 346     | **done** — the guest address space: two-level page table, `pt_map`/`pt_unmap`/`pt_set_flags`/`pt_copy_on_write`/`mem_ptr`/`pt_find_hole`; 428 operations and 395 page records verified against the C |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -36,14 +37,15 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --tests
-running 90 tests   (unit tests in src/)
-running 2 tests    (tests/differential.rs)        -> 125,612 float80 results
-running 4 tests    (tests/fpu_differential.rs)    -> 502,552 cpu_state words
-running 3 tests    (tests/decode_differential.rs) -> 140,289 decoder events
-running 3 tests    (tests/modrm_differential.rs)  ->  10,264 decode fields
-running 2 tests    (tests/tlb_differential.rs)    -> 172,312 tlb state words
-running 2 tests    (tests/vec_differential.rs)    ->   9,794 vec/mmx results
-test result: ok. 106 passed
+running 107 tests  (unit tests in src/)
+running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
+running 2 tests    (tests/differential.rs)         -> 125,612 float80 results
+running 4 tests    (tests/fpu_differential.rs)     -> 502,552 cpu_state words
+running 2 tests    (tests/memory_differential.rs)  ->     428 page-table operations
+running 3 tests    (tests/modrm_differential.rs)   ->  10,264 decode fields
+running 2 tests    (tests/tlb_differential.rs)     -> 172,312 tlb state words
+running 2 tests    (tests/vec_differential.rs)     ->   9,794 vec/mmx results
+test result: ok. 125 passed
 $ cargo clippy --all-targets                   # clean, no warnings
 ```
 
@@ -331,6 +333,79 @@ places where the C original is itself awkward, so a future cleanup cannot drift:
   exponent is left at `exp - 128`. The port uses `wrapping_shl` to reproduce it
   exactly rather than "fixing" it.
 
+### memory
+
+`kernel/memory.c` is the first module ported from outside `emu/`: it is the
+guest address space that `mmu.rs` and `tlb.rs` sit on top of. Everything in the
+C file is here — the two-level table (`pgdir[1024]` → 1024 `pt_entry`), the
+reference-counted `struct data`, and `pt_map`, `pt_map_nothing`, `pt_unmap`,
+`pt_unmap_always`, `pt_set_flags`, `pt_copy_on_write`, `pt_find_hole`,
+`pt_is_hole`, `mem_next_page`, `mem_ptr`, `mem_ptr_nofault`, `mem_segv_reason`
+and `mem_changed`.
+
+Three things are deliberately different, each documented at the point it bites:
+
+* **There is no host mapping.** The C keeps a real `mmap`ed region per
+  `struct data` and calls `mprotect` in `pt_set_flags`. Here the bytes are owned
+  by a `Box<[u8]>`, so `pt_set_flags` cannot fail on the host side — its
+  `_ENOMEM` (`-12`, `kernel/errno.h:19`) is only reachable from the "not mapped"
+  check, and protection is enforced by the guest-side tests in `Mem::ptr`. The
+  reference still exercises both `pt_set_flags` outcomes (`R -12` on a hole,
+  `R 0` on a mapping).
+* **`pt_entry::blocks[2]` is gone.** Those are the asbestos JIT's per-page block
+  lists. The JIT is not ported, so `asbestos_invalidate_page` is a counter; the
+  fixture records it (`asbestos_invalidations 32`) and the test compares it, so
+  invalidation still happens at exactly the same points.
+* **`container_of` is a trait impl.** `struct mem` embeds `struct mmu` and
+  `mem_mmu_ops.translate` recovers the outer struct by pointer arithmetic. In
+  Rust `Mem` implements `MmuOps` directly, keeps its own `changes`, and
+  `Mmu::sync_changes()` reconciles the two.
+
+`data->refcount` is not hand-maintained: one `Rc<Data>` per mapped page makes
+`Rc::strong_count` *be* the C's refcount, and the fixture prints it. That is what
+catches a mapping that fails to drop its predecessor, which a flags-only
+comparison would not see.
+
+The reference generator links the real `kernel/memory.c`, so it needs
+`tools/stub-include/sqlite3.h`: `memory.c` → `fs/fd.h` → `fs/fake-db.h` →
+`<sqlite3.h>`, and those three types are only ever used as pointers. It also
+links the real `kernel/errno.c` (whose `EPIPE` path pulls in `current` and
+`send_signal`, stubbed with counters) rather than faking the host→guest errno
+table. The generator refuses to emit a fixture unless both counters are still
+zero, i.e. unless every stub stayed off the path.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_memory_reference.sh
+wrote tests/fixtures/memory_reference.txt: 1268 lines, 428 operations
+# asbestos_invalidations 32 fd_closes 0 signals_sent 0
+```
+
+Host pointers never enter the fixture: each backing object gets a small integer
+identity in first-appearance page order, so "these two pages share one object"
+survives the trip and the addresses do not. Per mapped page the test compares
+flags, offset into the backing object, that identity and the reference count;
+plus `pgdir_used` and the change count after every operation.
+
+The corpus is a printed script — fixed corner cases (partial unmap,
+`pt_set_flags` on a hole, a write to a read-only page, CoW across a fork, a
+ptrace write, grow-down, `pt_find_hole`, `mem_next_page`, re-mapping over a
+mapping, a mapping with a non-zero offset) followed by a 400-step deterministic
+LCG walk — so the Rust test replays operations rather than duplicating tables.
+
+27 mutations of `src/memory.rs` were injected; **26 were caught**. The survivor
+is `hole_end - page == size` → `>= size` in `pt_find_hole`, and it is not a
+coverage gap: while the downward scan stays inside a hole that expression grows
+by exactly one per page, so it cannot step over `size` without landing on it.
+The two forms are the same function; the comment in the source says so.
+
+The sweep earned its keep. `Mem::ptr`'s copy-on-write break passed the page's
+old `offset` to `pt_map`, where the C passes `0` because the copy is a fresh
+single-page object. Two unit tests had it wrong the other way round, and one
+assertion in the corpus (`main page 600: offset`) is what pinned it down. A
+fixture field was wrong too: the generator printed the `pt_map` offset as
+hard-coded decimal text in a line where every other page-number field is hex,
+so the script contradicted the call it described. It now prints the value.
+
 ## Layout
 
 ```
@@ -348,11 +423,13 @@ ish-rs/
 │   ├── cpuid.rs                # emu/cpuid.h
 │   ├── interrupt.rs            # emu/interrupt.h
 │   ├── tlb.rs                  # emu/tlb.{h,c}
-│   └── vec.rs                  # emu/vec.{h,c} + emu/mmx.c
+│   ├── vec.rs                  # emu/vec.{h,c} + emu/mmx.c
+│   └── memory.rs               # kernel/memory.{h,c}
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
 │   ├── decode_differential.rs  # event-exact replay of the decoder reference
+│   ├── memory_differential.rs  # operation-exact replay of the page-table reference
 │   ├── modrm_differential.rs   # field-exact replay of the ModRM/SIB reference
 │   ├── tlb_differential.rs     # word-exact replay of the tlb reference
 │   ├── vec_differential.rs     # word-exact replay of the vec/mmx reference
@@ -360,6 +437,7 @@ ish-rs/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
 │       ├── decode_reference.txt# 37.9k instruction decodings from the C
+│       ├── memory_reference.txt# 428 page-table operations from the C
 │       ├── modrm_reference.txt # 1283 ModRM/SIB decodings from the C
 │       ├── tlb_reference.txt   # 56 full struct tlb dumps from the C
 │       └── vec_reference.txt   # 9.8k vec/mmx results from the C
@@ -369,6 +447,8 @@ ish-rs/
     ├── tlb-dump.c              # mmu/tlb reference generator
     ├── decode-dump.c           # decoder reference generator (drives decode.h)
     ├── gen_decode_table.py     # derives src/decode_table.rs from the fixture
+    ├── memory-dump.c           # page-table reference generator (links memory.c)
+    ├── stub-include/sqlite3.h  # three opaque typedefs memory.c reaches via fd.h
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
     ├── gen_vec_ops.py          # derives both op tables from emu/vec.h
@@ -376,6 +456,7 @@ ish-rs/
     ├── gen_f80_reference.sh
     ├── gen_fpu_reference.sh
     ├── gen_decode_reference.sh
+    ├── gen_memory_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh

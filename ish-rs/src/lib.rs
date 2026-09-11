@@ -17,6 +17,7 @@
 //! | [`vec`]         | `emu/vec.{h,c}` + `mmx.c` | ported, all 166 operations compared against the C |
 //! | [`modrm`]       | `emu/modrm.h`             | ported, decode results compared against the C |
 //! | [`decode`]      | `emu/decode.h`            | ported dispatch, opcode table generated from the C |
+//! | [`memory`]      | `kernel/memory.{h,c}`     | ported, the guest address space behind `mmu`/`tlb` |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -32,6 +33,7 @@ pub mod decode_table;
 pub mod float80;
 pub mod fpu;
 pub mod interrupt;
+pub mod memory;
 pub mod mmu;
 pub mod modrm;
 pub mod tlb;

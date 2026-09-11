@@ -63,6 +63,17 @@ pub trait MmuOps {
     /// Map the guest page containing `addr`, returning a host pointer to its
     /// start, or `None` if the access should fault.
     fn translate(&mut self, addr: AddrT, type_: MemType) -> Option<NonNull<u8>>;
+
+    /// How many times this backend's mappings have changed.
+    ///
+    /// In the C this counter lives inside `struct mmu` itself
+    /// (`mem->mmu.changes`), because the backend *is* the mmu's container. Here
+    /// the backend owns its own state, so [`Mmu::sync_changes`] reconciles the
+    /// two. The default suits backends that never change - the fake mmus the
+    /// tests use.
+    fn changes(&self) -> u64 {
+        0
+    }
 }
 
 /// `struct mmu`.
@@ -85,6 +96,12 @@ impl<'a> Mmu<'a> {
     /// `mmu_translate`
     pub fn translate(&mut self, addr: AddrT, type_: MemType) -> Option<NonNull<u8>> {
         self.ops.translate(addr, type_)
+    }
+
+    /// Adopt the backend's change count, so a [`Tlb`](crate::tlb::Tlb) flushes
+    /// when mappings moved. See [`MmuOps::changes`].
+    pub fn sync_changes(&mut self) {
+        self.changes = self.ops.changes();
     }
 }
 
