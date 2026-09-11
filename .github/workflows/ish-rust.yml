@@ -32,6 +32,6 @@ jobs:
       # visit the generated output.
       - run: >-
           rustfmt --check --edition 2021
-          src/cpu.rs src/user.rs src/task.rs src/group.rs src/getset.rs src/tls.rs src/misc.rs src/ipc.rs src/log.rs src/fake_db.rs src/migrate.rs src/rebuild.rs src/resource.rs src/random.rs src/uname.rs src/sync.rs src/timer.rs src/futex.rs tests/fpu_differential.rs tests/fake_db_migrate_differential.rs tests/fake_db_rebuild_differential.rs tests/sync_differential.rs tests/timer_differential.rs tests/futex_differential.rs
+          src/cpu.rs src/user.rs src/task.rs src/group.rs src/getset.rs src/tls.rs src/misc.rs src/ipc.rs src/log.rs src/fake_db.rs src/migrate.rs src/rebuild.rs src/resource.rs src/random.rs src/uname.rs src/sync.rs src/timer.rs src/futex.rs src/fchdir.rs tests/fpu_differential.rs tests/fake_db_migrate_differential.rs tests/fake_db_rebuild_differential.rs tests/sync_differential.rs tests/timer_differential.rs tests/futex_differential.rs tests/fchdir_differential.rs
       - run: cargo test --all-targets
       - run: cargo clippy --all-targets -- -D warnings

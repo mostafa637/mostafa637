@@ -1,0 +1,14 @@
+# fchdir reference, generated from unmodified util/fchdir.c
+G dirfds 3 4
+T probe-before held=0
+T self fd=3 rc=0 owner=1
+T self released held=0
+T self fd=-1 rc=-1 owner=1
+T self released held=0
+T w1 in fd=3 held=1
+T w2 blocked calls=3
+T w1 done rc=0
+T w2 in fd=4 held=1
+T w2 done rc=0
+T end held=0
+T calls 4

@@ -32,6 +32,10 @@
 //! | [`getset`]      | `kernel/getset.c`         | ported, identity and credential syscalls |
 //! | [`tls`]         | `kernel/tls.c`            | ported, i386 TLS descriptor calls |
 //! | [`misc`]        | `kernel/misc.c`           | ported, prctl and host-safe reboot policy |
+//! | [`sync`]        | `util/sync.{h,c}`         | ported, `lock_t`/`cond_t`/`wrlock_t`, the wait contract and the unwind flag |
+//! | [`fchdir`]      | `util/fchdir.{h,c}`       | ported, the process-wide lock around a working-directory change |
+//! | [`timer`]       | `util/timer.{h,c}`        | ported, timespec helpers and the interruptible timer thread |
+//! | [`futex`]       | `kernel/futex.{h,c}`      | ported, refcounted wait queues with wake/requeue and the robust-list calls |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -46,6 +50,7 @@ pub mod decode;
 pub mod decode_table;
 pub mod errno;
 pub mod errno_table;
+pub mod fchdir;
 pub mod fake_db;
 pub mod futex;
 pub mod float80;

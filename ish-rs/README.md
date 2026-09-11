@@ -43,6 +43,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `sync.rs`    | `util/sync.{h,c}`     | 307     | **done** — `lock_t`/`cond_t`/`wrlock_t`, `wait_for`'s two `EINTR` checks and timeout mapping, the published waiter, and the explicit unwind flag; 46 C records replayed, deadline arithmetic included |
 | `timer.rs`   | `util/timer.{h,c}`    | 163     | **done** — the timespec helpers (single-subtract carry included) and the interruptible timer thread with its reload and free-ownership rules; 58 C records replayed against a scripted clock |
 | `futex.rs`   | `kernel/futex.{h,c}`  | 217     | **done** — the refcounted `(mem, addr)` hash table, wake/requeue with their reference transfers, the `wait_for` wait contract, and the two robust-list calls; 82 C records replayed over hand-built queues |
+| `fchdir.rs`  | `util/fchdir.{h,c}`   | 12      | **done** — one process-wide lock taken around the host's `fchdir`, held across the relative-path work that follows; 12 C records replayed with two workers contending for it |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -56,7 +57,7 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --all-targets
-running 227 tests  (unit tests in src/)
+running 232 tests  (unit tests in src/)
 running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
 running 3 tests    (tests/errno_differential.rs)   ->   4,216 err_map inputs
 running 2 tests    (tests/mmap_differential.rs)    ->      51 mmap operations
@@ -78,7 +79,8 @@ running 2 tests    (tests/fake_db_rebuild_differential.rs) -> scripted-host rebu
 running 2 tests    (tests/sync_differential.rs)    ->      46 waiting/notify/lock records
 running 2 tests    (tests/timer_differential.rs)   ->      58 timer records from a scripted clock
 running 2 tests    (tests/futex_differential.rs)   ->      82 futex records from hand-built queues
-test result: ok. 268 passed
+running 2 tests    (tests/fchdir_differential.rs)  ->      12 fchdir records from two contending workers
+test result: ok. 275 passed
 $ cargo clippy --all-targets -- -D warnings       # clean, no warnings
 ```
 
@@ -915,6 +917,46 @@ show up in the transcript: the waiter holds a `Weak` reference to its futex
 where C keeps a raw pointer (the same bug becomes a missing notify instead of a
 use-after-free), and `STRACE` is not ported, so only return values survive.
 
+### The working-directory lock
+
+`util/fchdir.{h,c}` is twelve lines and exists because a working directory is
+process-global. iOS has no `mknodat`, so `fs/real.c` creates a FIFO with
+`mkfifo(path)` — a relative name — after `fchdir(mount->root_fd)`; anything else
+in the process using a relative path at that moment would be working in the
+wrong directory. Two things about the file matter, and the corpus pins both:
+
+* **The host call is inside the lock.** `lock_fchdir` takes the lock and only
+  then calls `fchdir`, so the `mkfifo` that follows happens in the locked
+  directory. Swapping those two lines is the kind of bug that only shows under
+  contention: the transcript records `held=1` at the moment of the call, and the
+  same record turns into `held=0` if the order is reversed.
+* **A failing `fchdir` is invisible.** The call returns `void`, the result and
+  `errno` both go nowhere, and the lock is still held and still released by the
+  same `unlock_fchdir`. `fchdir(-1)` in the corpus is exactly that case.
+
+Two worker threads contend for the lock in the C oracle: they never print, they
+set flags, and the wrapped `fchdir` records the descriptor it was handed and
+pauses inside the call until the driver lets it continue. The transcript is
+therefore ordered by the driver, not by the scheduler, except for the one record
+that is meant to be time-dependent — `T w2 blocked calls=3`, printed after a
+100 ms pause, where a lock that is not really held would have let the second
+worker's call (the fourth) through.
+
+```
+$ ISH_SRC=/path/to/ish ./tools/gen_fchdir_reference.sh
+wrote tests/fixtures/fchdir_reference.txt: 14 lines, 12 transcript records, 2 contending workers
+$ cargo test --test fchdir_differential
+… both workers' descriptors, the held state at every call, the owner field and the call count matched the C
+```
+
+The port keeps C's shape and makes two things explicit: the held state is a
+returned `LockGuard` instead of a convention (released by
+`unlock_fchdir`, the same explicit call C makes), and the host call sits behind
+`FchdirHost` — with `UnixFchdirHost` as the production one, and a scripted host
+in the corpus because a test may not change the test process's working
+directory. `process_lock()` is the crate's stand-in for C's file-scope static; a
+second `FchdirLock` would be a second lock, and therefore no lock at all.
+
 ## Layout
 
 ```
@@ -953,7 +995,8 @@ ish-rs/
 │   ├── misc.rs                 # kernel/misc.c
 │   ├── sync.rs                 # util/sync.{h,c} locks, waits, unwind flag
 │   ├── timer.rs                # util/timer.{h,c} timespec helpers + timer thread
-│   └── futex.rs                # kernel/futex.{h,c} refcounted wait queues
+│   ├── futex.rs                # kernel/futex.{h,c} refcounted wait queues
+│   └── fchdir.rs               # util/fchdir.{h,c} the working-directory lock
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
@@ -976,6 +1019,7 @@ ish-rs/
 │   ├── sync_differential.rs    # C wait/notify/lock corpus replayed
 │   ├── timer_differential.rs   # C timer corpus replayed on a scripted clock
 │   ├── futex_differential.rs   # C futex corpus replayed over hand-built queues
+│   ├── fchdir_differential.rs  # C fchdir corpus replayed with two workers
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -997,7 +1041,8 @@ ish-rs/
 │       ├── fake_db_rebuild_reference.txt # scripted-host rebuild corpus + host ops
 │       ├── sync_reference.txt  # 46 waiting/notify/unwind/lock records from the C
 │       ├── timer_reference.txt # 58 timer records, scripted clock and sleeps
-│       └── futex_reference.txt # 82 futex records, hand-built queues and parks
+│       ├── futex_reference.txt # 82 futex records, hand-built queues and parks
+│       └── fchdir_reference.txt# 12 fchdir records, two workers and a wrapped call
 ├── vendor/
 │   └── graphitesql/            # v0.1.7 pure-Rust SQLite-3-compatible library
 └── tools/
@@ -1022,6 +1067,7 @@ ish-rs/
     ├── sync-dump.c             # wait/notify oracle (wraps pthread_cond_*)
     ├── timer-dump.c            # timer oracle (scripted clock, sleeps and free)
     ├── futex-dump.c            # futex oracle (hand-built queues, scripted parks)
+    ├── fchdir-dump.c           # fchdir oracle (wraps fchdir, two contending workers)
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -1045,6 +1091,7 @@ ish-rs/
     ├── gen_sync_reference.sh
     ├── gen_timer_reference.sh
     ├── gen_futex_reference.sh
+    ├── gen_fchdir_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
