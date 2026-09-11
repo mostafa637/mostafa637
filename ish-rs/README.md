@@ -24,6 +24,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `interrupt.rs` | `emu/interrupt.h`   | 15      | **done** — the 13 `INT_*` vector numbers |
 | `decode.rs`  | `emu/decode.h`        | 1,416   | **dispatch ported** — 8 opcode maps × 2 operand sizes; 140,289 events over 37,891 decodings verified against the C. The opcode table is generated from the header |
 | `memory.rs`  | `kernel/memory.{h,c}` | 346     | **done** — the guest address space: two-level page table, `pt_map`/`pt_unmap`/`pt_set_flags`/`pt_copy_on_write`/`mem_ptr`/`pt_find_hole`; 428 operations and 395 page records verified against the C |
+| `errno.rs`   | `kernel/errno.{h,c}`  | 105     | **done** — host→guest errno translation; 4,216 `err_map` inputs and all 10 `errno_map` probes verified against the C, table generated from the host headers |
 | `user.rs`    | `kernel/user.c`       | 97      | **done** — the guest↔kernel byte copies (`user_read`/`user_write`/`user_write_task_ptrace`/`user_read_string`/`user_write_string`); 52 operations, 77 guest pages and 192,937 bytes verified against the C |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
@@ -38,8 +39,9 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --tests
-running 124 tests  (unit tests in src/)
+running 129 tests  (unit tests in src/)
 running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
+running 3 tests    (tests/errno_differential.rs)   ->   4,216 err_map inputs
 running 2 tests    (tests/differential.rs)         -> 125,612 float80 results
 running 4 tests    (tests/fpu_differential.rs)     -> 502,552 cpu_state words
 running 2 tests    (tests/memory_differential.rs)  ->     428 page-table operations
@@ -47,7 +49,7 @@ running 1 test     (tests/user_differential.rs)    ->     192,937 guest+host byt
 running 3 tests    (tests/modrm_differential.rs)   ->  10,264 decode fields
 running 2 tests    (tests/tlb_differential.rs)     -> 172,312 tlb state words
 running 2 tests    (tests/vec_differential.rs)     ->   9,794 vec/mmx results
-test result: ok. 143 passed
+test result: ok. 151 passed
 $ cargo clippy --all-targets                   # clean, no warnings
 ```
 
@@ -465,6 +467,45 @@ one printed byte counts in hex while every other count was decimal, and the test
 read them as decimal — a fixture field that silently changes base is worse than
 a missing one.
 
+### errno
+
+`kernel/errno.c` is one switch and one side effect, but it has a wrinkle that
+makes transcription a bad idea: the *guest* numbers are the i386 Linux ABI, fixed
+by `kernel/errno.h`, while the *host* numbers are whatever the compiling platform
+calls them. The C gets the second half from `<errno.h>` at build time, so the
+port asks for it the same way — `tools/gen_errno_table.py` emits a C program that
+prints each `ERRCASE` name with its host value, runs it, and joins the result
+against the guest values.
+
+On this Linux host all 82 entries come out as the identity (`host == -guest`),
+which is exactly why the mapping looks pointless here and is not: on a Darwin
+host `EAGAIN` is 35, not 11. Regenerating on another host produces that host's
+table, as the C would.
+
+What is left is the fallback, and it is most of the behaviour: an errno the C
+does not know becomes `-(err | 0x1000)`. The corpus runs `err_map` over -16 to
+4199, so 4,134 of 4,216 inputs take that path. Two properties fall out and are
+both pinned:
+
+* it is an **or**, not an add, so an input with bit 12 already set comes back
+  unchanged apart from the sign;
+* for a negative input that means a *positive* result — `err_map(-16) == 16` —
+  which is what the C does.
+
+The fixture carries the host's own numbers, so a table generated on one platform
+and tested on another fails on the host-number assertions rather than silently
+comparing the wrong half of the mapping. It also counts the C's
+`printk("unknown error")` calls, and the test's count of unknown inputs has to
+match — including the two unknown probes among the ten `errno_map` cases.
+
+`errno_map`'s SIGPIPE delivery is returned rather than performed, because signal
+delivery is not ported: `Mapped { guest, sigpipe }` says exactly what the C would
+have done.
+
+14 mutations were injected, spanning both `src/errno.rs` and the generated table
+(a stale `HOST_EPIPE`, a wrong guest number, a dropped entry); **all 14 were
+caught**.
+
 ## Layout
 
 ```
@@ -484,7 +525,9 @@ ish-rs/
 │   ├── tlb.rs                  # emu/tlb.{h,c}
 │   ├── vec.rs                  # emu/vec.{h,c} + emu/mmx.c
 │   ├── memory.rs               # kernel/memory.{h,c}
-│   └── user.rs                 # kernel/user.c
+│   ├── user.rs                 # kernel/user.c
+│   ├── errno.rs                # kernel/errno.{h,c}
+│   └── errno_table.rs          # generated host->guest errno table (do not edit)
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
@@ -492,6 +535,7 @@ ish-rs/
 │   ├── memory_differential.rs  # operation-exact replay of the page-table reference
 │   ├── modrm_differential.rs   # field-exact replay of the ModRM/SIB reference
 │   ├── user_differential.rs    # byte-exact replay of the user-memory reference
+│   ├── errno_differential.rs   # value-exact replay of the errno reference
 │   ├── tlb_differential.rs     # word-exact replay of the tlb reference
 │   ├── vec_differential.rs     # word-exact replay of the vec/mmx reference
 │   └── fixtures/
@@ -501,6 +545,7 @@ ish-rs/
 │       ├── memory_reference.txt# 428 page-table operations from the C
 │       ├── modrm_reference.txt # 1283 ModRM/SIB decodings from the C
 │       ├── user_reference.txt  # 52 user-memory ops, guest+host bytes from the C
+│       ├── errno_reference.txt # 4216 err_map inputs + host errno numbers
 │       ├── tlb_reference.txt   # 56 full struct tlb dumps from the C
 │       └── vec_reference.txt   # 9.8k vec/mmx results from the C
 └── tools/
@@ -512,6 +557,8 @@ ish-rs/
     ├── memory-dump.c           # page-table reference generator (links memory.c)
     ├── stub-include/sqlite3.h  # three opaque typedefs memory.c reaches via fd.h
     ├── user-dump.c             # user-memory reference generator (links user.c)
+    ├── errno-dump.c            # errno reference generator (links errno.c)
+    ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
     ├── gen_vec_ops.py          # derives both op tables from emu/vec.h
@@ -521,6 +568,7 @@ ish-rs/
     ├── gen_decode_reference.sh
     ├── gen_memory_reference.sh
     ├── gen_user_reference.sh
+    ├── gen_errno_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh

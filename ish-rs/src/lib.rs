@@ -19,6 +19,7 @@
 //! | [`decode`]      | `emu/decode.h`            | ported dispatch, opcode table generated from the C |
 //! | [`memory`]      | `kernel/memory.{h,c}`     | ported, the guest address space behind `mmu`/`tlb` |
 //! | [`user`]        | `kernel/user.c`           | ported, the guest<->kernel byte copies, faults included |
+//! | [`errno`]       | `kernel/errno.{h,c}`      | ported, host to guest errno translation, table generated |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -30,6 +31,8 @@
 pub mod cpu;
 pub mod cpuid;
 pub mod decode;
+pub mod errno;
+pub mod errno_table;
 pub mod decode_table;
 pub mod float80;
 pub mod fpu;
