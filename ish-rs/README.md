@@ -16,7 +16,8 @@ against the compiled C original**, not just against hand-written expectations.
 | `float80.rs` | `emu/float80.{h,c}`   | 652     | **done** — 125,612 results verified bit-exact against the C reference |
 | `cpu.rs`     | `emu/cpu.h`           | 235     | **done** — register file, lazy EFLAGS, `fsw`/`fcw`, flag macros, `collapse_flags`/`expand_flags` |
 | `fpu.rs`     | `emu/fpu.{h,c}`       | 506     | **done** — all 78 x87 operations, whole `cpu_state` compared after each one |
-| `mmu.rs`     | `emu/mmu.h`, `tlb.{h,c}` | 184  | not started (4 GiB address space, TLB) |
+| `mmu.rs`     | `emu/mmu.h`           | 40      | **done** — page arithmetic, `MEM_*` types, the `mmu_ops` translate interface |
+| `tlb.rs`     | `emu/tlb.{h,c}`       | 144     | **done** — the 1024-entry software TLB; 172,312 state words verified against the C |
 | `decode.rs`  | `emu/decode.h`, `modrm.h` | 1,522 | not started (x86 decoder + instruction semantics) |
 | `vec.rs`     | `emu/vec.{h,c}`       | 817     | not started (SSE) |
 | `mmx.rs`     | `emu/mmx.c`           | 180     | not started (MMX) |
@@ -33,10 +34,11 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --tests
-running 40 tests   (unit tests in src/)
+running 51 tests   (unit tests in src/)
 running 2 tests    (tests/differential.rs)      -> 125,612 float80 results
 running 4 tests    (tests/fpu_differential.rs)  -> 502,552 cpu_state words
-test result: ok
+running 2 tests    (tests/tlb_differential.rs)  -> 172,312 tlb state words
+test result: ok. 59 passed
 $ cargo clippy --all-targets                   # clean, no warnings
 ```
 
@@ -89,6 +91,47 @@ and 7 mismatched words respectively).
 through Rust's `f64` methods and the fixture confirms the results are identical
 bit for bit.
 
+### mmu + tlb
+
+`tests/tlb_differential.rs` is the same idea applied to the memory path.
+`tools/tlb-dump.c` compiles the **unmodified** `emu/tlb.c` and runs a
+56-step access sequence against a fake `mmu_ops` backend (16 aliased pages with
+read-only and unmapped masks). After every step it dumps the observable result
+*and* the whole `struct tlb`: all 1024 entries with their `page`,
+`page_if_writable` and presence, plus `dirty_page`, `segfault_addr`,
+`mem_changes` and a running count of `translate` calls.
+
+That call count is what makes this a test of the *cache* and not just of the
+page walker — a port that translated on every access would still return the
+right bytes and would fail here at once. The sequence covers cache hits and
+misses, cross-page reads and writes in both directions, a fault on the *second*
+page of a cross-page access, read-only and unmapped faults, two guest addresses
+4 MiB apart that collide in one TLB slot and evict each other, `tlb_refresh`
+as both a flush and a no-op, an access on the last mapped page (whose next page
+aliases back to the first one in the fake backend), and an access larger than a
+page (where the C's unsigned `PAGE_SIZE - size` wraps and takes the fast path
+instead of crossing pages).
+
+Raw host pointers are never compared — they differ between processes — so the
+fixture records guest-observable state plus an FNV-1a hash of the backing
+store, which catches any stray write.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_tlb_reference.sh
+wrote tests/fixtures/tlb_reference.txt: 58 lines, 56 steps
+```
+
+The test was mutation-checked: 17 targeted breakages of `tlb.rs` — dropping the
+high-bit xor from `TLB_INDEX`, making `read_ptr`/`write_ptr` always miss,
+marking read entries writable, not resyncing `mem_changes` on flush, not
+flushing on refresh, using a saturating instead of a wrapping `PAGE_SIZE -
+size`, not setting `dirty_page` on a write hit, splitting a cross-page copy one
+byte off, translating the wrong page, and more — were each caught. One ordering
+is *not* covered and is documented as such in the test header: `tlb_handle_miss`
+translates first and checks `mmu->changes` afterwards, which only matters for a
+backend that remaps from inside `translate` (the real `kernel/memory.c` does),
+and the fake backend cannot reach `mmu.changes` to reproduce it.
+
 ### What the differential test caught
 
 Two genuine translation bugs, both caused by flattening the C union/bitfield
@@ -131,18 +174,24 @@ ish-rs/
 │   ├── lib.rs
 │   ├── cpu.rs                  # emu/cpu.h
 │   ├── float80.rs              # emu/float80.{h,c}
-│   └── fpu.rs                  # emu/fpu.{h,c}
+│   ├── fpu.rs                  # emu/fpu.{h,c}
+│   ├── mmu.rs                  # emu/mmu.h
+│   └── tlb.rs                  # emu/tlb.{h,c}
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
+│   ├── tlb_differential.rs     # word-exact replay of the tlb reference
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
-│       └── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
+│       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
+│       └── tlb_reference.txt   # 56 full struct tlb dumps from the C
 └── tools/
     ├── f80-dump.c              # float80 reference generator (not part of iSH)
     ├── fpu-dump.c              # cpu/fpu reference generator
+    ├── tlb-dump.c              # mmu/tlb reference generator
     ├── gen_f80_reference.sh
-    └── gen_fpu_reference.sh
+    ├── gen_fpu_reference.sh
+    └── gen_tlb_reference.sh
 ```
 
 ## Design notes
@@ -168,6 +217,23 @@ ish-rs/
   stack-fault bit, `fpu_stm32` narrows through `f64`, and the conditional moves
   read the materialised `cf` byte and the packed `zf`/`pf` bits instead of the
   lazy `ZF`/`PF` macros. All three are pinned by tests.
+* **The TLB borrows the MMU instead of owning it.** In C, `struct tlb` holds a
+  `struct mmu *` and `tlb_flush` reads `tlb->mmu->changes` through it. Here
+  every TLB call takes `&mut Mmu`, and the TLB keeps only an identity token
+  (`mmu_id: *const ()`, compared with `ptr::eq`) so `refresh` can still tell
+  "same address space" from "a different one". This is what lets a backend
+  change mappings between two operations without unsafe aliasing.
+* **`data_minus_addr` → `Option<NonNull<u8>>`.** The C caches
+  `host_ptr - guest_page` so the gadgets get a byte pointer with one add; the
+  port stores the page base and reconstructs the C value in
+  `TlbEntry::data_minus_addr()`. `None` is the C's post-flush zero.
+* **Unsigned wraps kept.** `PGOFFSET(addr) > PAGE_SIZE - size` wraps when
+  `size` exceeds a page, which sends oversized accesses down the *fast* path;
+  `page_round_up(0)` is 0, not 1; and `(PAGE(addr) + 1) << PAGE_BITS` wraps to 0
+  for the last guest page. Each is pinned by the differential corpus.
+* **`MEM_WRITE_PTRACE` is not `MEM_WRITE`.** The backends compare
+  `type == MEM_WRITE` exactly, so a ptrace write bypasses write protection
+  (`kernel/user.c` relies on this). The discriminants are reproduced and tested.
 * **`debug_assert`-free.** The C assertions are debug-build checks over an
   upstream edge case; the Rust port returns the same bits instead of panicking.
 

@@ -12,6 +12,8 @@
 //! | [`float80`]     | `emu/float80.h` + `.c`    | ported, bit-exact against the C reference |
 //! | [`cpu`]         | `emu/cpu.h`               | ported, flag logic checked against the C macros |
 //! | [`fpu`]         | `emu/fpu.h` + `.c`        | ported, full state compared after every op |
+//! | [`mmu`]         | `emu/mmu.h`               | ported, page arithmetic and the translate interface |
+//! | [`tlb`]         | `emu/tlb.h` + `.c`        | ported, cache behaviour compared against the C |
 //!
 //! # Provenance and license
 //!
@@ -21,6 +23,8 @@
 pub mod cpu;
 pub mod float80;
 pub mod fpu;
+pub mod mmu;
+pub mod tlb;
 
 pub use cpu::CpuState;
 pub use float80::Float80;
