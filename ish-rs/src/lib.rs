@@ -47,6 +47,7 @@ pub mod decode_table;
 pub mod errno;
 pub mod errno_table;
 pub mod fake_db;
+pub mod futex;
 pub mod float80;
 pub mod fpu;
 pub mod getset;

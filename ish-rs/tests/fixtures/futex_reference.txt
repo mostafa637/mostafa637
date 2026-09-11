@@ -1,0 +1,82 @@
+# futex reference, generated from unmodified iSH kernel/futex.c
+G dword=7 mapped_pages=1
+W unmapped addr=0x200000 val=7 timeout=0 park=0 pending_before=0 blocked_before=0
+W unmapped rc=-14 pending_after=0
+W mismatch addr=0x100000 val=8 timeout=0 park=0 pending_before=0 blocked_before=0
+W mismatch rc=-11 pending_after=0
+W woken addr=0x100000 val=7 timeout=0 park=0 pending_before=0 blocked_before=0
+P wait - rc=0 pending_after=0
+W woken rc=0 pending_after=0
+W timeout addr=0x100000 val=7 timeout=1 park=110 pending_before=0 blocked_before=0
+P timedwait 101.500000000 rc=110 pending_after=0
+W timeout rc=-110 pending_after=0
+W timeout-error addr=0x100000 val=7 timeout=1 park=22 pending_before=0 blocked_before=0
+P timedwait 101.500000000 rc=22 pending_after=0
+W timeout-error rc=0 pending_after=0
+W pending-before addr=0x100000 val=7 timeout=0 park=0 pending_before=16 blocked_before=0
+W pending-before rc=-4 pending_after=16
+W pending-masked addr=0x100000 val=7 timeout=0 park=0 pending_before=16 blocked_before=16
+P wait - rc=0 pending_after=0
+W pending-masked rc=0 pending_after=16
+W pending-during addr=0x100000 val=7 timeout=1 park=0 pending_before=0 blocked_before=0
+P timedwait 101.500000000 rc=0 pending_after=1
+W pending-during rc=-4 pending_after=1
+W timeout-fault addr=0x100000 val=7 timeout=2 park=0 pending_before=0 blocked_before=0
+W timeout-fault rc=-14 pending_after=0
+H after-waits entries=0
+H three-one addr=0x100000 refs=3 queue=3
+H three-one addr=0x140000 refs=1 queue=1
+H three-one entries=2
+K wake0 rc=0
+N broadcast=w1
+N broadcast=w2
+K wake2 rc=2
+H after-wake2 addr=0x100000 refs=3 queue=1
+H after-wake2 addr=0x140000 refs=1 queue=1
+H after-wake2 entries=2
+Q after-wake2 id=1 futex=0x100000 queued=0
+Q after-wake2 id=2 futex=0x100000 queued=0
+Q after-wake2 id=3 futex=0x100000 queued=1
+Q after-wake2 id=4 futex=0x140000 queued=1
+H after-wake2-returns addr=0x100000 refs=1 queue=1
+H after-wake2-returns addr=0x140000 refs=1 queue=1
+H after-wake2-returns entries=2
+N broadcast=w3
+K wake5 rc=1
+H after-wake5 addr=0x140000 refs=1 queue=1
+H after-wake5 entries=1
+H requeue-before addr=0x100000 refs=3 queue=3
+H requeue-before addr=0x140000 refs=1 queue=1
+H requeue-before entries=2
+N broadcast=w5
+K requeue rc=3
+H requeue-after addr=0x100000 refs=1 queue=0
+H requeue-after addr=0x140000 refs=3 queue=3
+H requeue-after entries=2
+Q requeue-after id=5 futex=0x100000 queued=0
+Q requeue-after id=6 futex=0x140000 queued=1
+Q requeue-after id=7 futex=0x140000 queued=1
+Q requeue-after id=4 futex=0x140000 queued=1
+K wake-rest rc=0
+N broadcast=w4
+N broadcast=w6
+N broadcast=w7
+K wake-target rc=3
+H drained entries=0
+K private-wake rc=0
+K unsupported rc=-38
+K sys-requeue rc=2
+H after-sys-requeue addr=0x140000 refs=2 queue=2
+H after-sys-requeue entries=1
+Q after-sys-requeue id=1 futex=0x140000 queued=1
+Q after-sys-requeue id=2 futex=0x140000 queued=1
+N broadcast=w1
+N broadcast=w2
+K wake-target2 rc=2
+H end entries=0
+L set-len8 rc=-22 robust=0
+L set-len12 rc=0 robust=0x1000
+L get-self rc=0 list=0x1000 len=12
+L get-other rc=-1
+L set-null rc=0 robust=0
+# asbestos_invalidations 2 fd_closes 0 signals_sent 0 broadcasts 2 signals 0

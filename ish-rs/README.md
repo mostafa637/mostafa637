@@ -42,6 +42,7 @@ against the compiled C original**, not just against hand-written expectations.
 | `misc.rs`    | `kernel/misc.c`       | 59      | **done** — `prctl`, `arch_prctl` and the host-safe reboot policy |
 | `sync.rs`    | `util/sync.{h,c}`     | 307     | **done** — `lock_t`/`cond_t`/`wrlock_t`, `wait_for`'s two `EINTR` checks and timeout mapping, the published waiter, and the explicit unwind flag; 46 C records replayed, deadline arithmetic included |
 | `timer.rs`   | `util/timer.{h,c}`    | 163     | **done** — the timespec helpers (single-subtract carry included) and the interruptible timer thread with its reload and free-ownership rules; 58 C records replayed against a scripted clock |
+| `futex.rs`   | `kernel/futex.{h,c}`  | 217     | **done** — the refcounted `(mem, addr)` hash table, wake/requeue with their reference transfers, the `wait_for` wait contract, and the two robust-list calls; 82 C records replayed over hand-built queues |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -55,7 +56,7 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --all-targets
-running 190 tests  (unit tests in src/)
+running 227 tests  (unit tests in src/)
 running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
 running 3 tests    (tests/errno_differential.rs)   ->   4,216 err_map inputs
 running 2 tests    (tests/mmap_differential.rs)    ->      51 mmap operations
@@ -76,7 +77,8 @@ running 3 tests    (tests/fake_db_migrate_differential.rs) -> 3 migrations x 5 h
 running 2 tests    (tests/fake_db_rebuild_differential.rs) -> scripted-host rebuild: 6 host ops + 2 rebuilt tables
 running 2 tests    (tests/sync_differential.rs)    ->      46 waiting/notify/lock records
 running 2 tests    (tests/timer_differential.rs)   ->      58 timer records from a scripted clock
-test result: ok. 260 passed
+running 2 tests    (tests/futex_differential.rs)   ->      82 futex records from hand-built queues
+test result: ok. 268 passed
 $ cargo clippy --all-targets -- -D warnings       # clean, no warnings
 ```
 
@@ -860,6 +862,59 @@ uninitialized, so the only spec a first `timer_set` can report is whatever
 happens to be in that allocation — the port zero-initializes them and the
 corpus passes `NULL` for those first sets, exactly as a caller must.
 
+### Futexes
+
+`kernel/futex.c` is the kernel's answer to "sleep until someone changes this
+word": one refcounted queue object per `(address space, address)`, hashed into
+4096 buckets, with waiters parked on their own condition variable. Four things
+in it are load-bearing:
+
+* **The reference count is what keeps a queue alive, and the *waiter* holds
+  one.** `futex_wait` takes a reference before it sleeps and puts it back when it
+  returns — not when it is woken. A wake therefore leaves an entry in the table
+  whose queue is empty (`refs=1 queue=0` in the corpus), and the port keeps that
+  ordering, assert included: a futex is only freed once its queue is empty.
+* **A requeue moves references, not just waiters.** Each waiter moved to the
+  target address decrements the source's count and increments the target's, and
+  is re-pointed so it knows where to put the reference back. C's comment for the
+  dance is "sketchy as hell"; the port performs the same steps in the same order.
+* **The wait contract is `wait_for`'s, not futex's.** An unreadable word is
+  `EFAULT`, a word that does not match is `EAGAIN`, a pending signal is `EINTR`
+  before *and* after the park, and every park failure that is not `ETIMEDOUT` is
+  reported as success — so a wait interrupted for another reason returns 0.
+* **`sys_set_robust_list` only checks the length.** The address is stored and
+  never validated (a NULL one with length 12 succeeds), and
+  `sys_get_robust_list` compares the looked-up task against `current`, so another
+  pid — or a pid that does not exist — is `EPERM`.
+
+The corpus drives the queue algebra with no threads at all. `tools/futex-dump.c`
+includes the real C file, builds waiters by hand the way `futex_wait` does inside
+its locked section, runs wakes and requeues over those queues, and dumps the
+table after every step; the wrapped `pthread_cond_wait` /
+`pthread_cond_timedwait` script every park, and `current` is a real task over a
+real address space whose page 0x100 holds the futex dword while page 0x200 stays
+unmapped. The Rust replay transacts the same queues through
+`FutexTable::lock` / `get_unlocked` / `enqueue` / `dequeue` / `put_unlocked`, so
+each hand-built waiter holds exactly the one reference the C one holds.
+
+```
+$ ISH_SRC=/path/to/ish ./tools/gen_futex_reference.sh
+wrote tests/fixtures/futex_reference.txt: 82 lines, 18 wait records, 10 wakes, 22 table records
+$ cargo test --test futex_differential
+… every wait, wake, requeue, waiter, table dump and robust-list result matched the C
+```
+
+One record is not directly observable from Rust: `N broadcast=wN`, the waiter a
+`notify` reached. C saw it by wrapping the condvar's broadcast; the port's `Cond`
+is a plain condition variable with no notification hook, so the replay derives
+it from the queue order it reads out of the port (`FutexTable::queue_of`, the
+same order the `H` and `Q` records pin) and the rule that a wake takes from the
+head. A queue in the wrong order — the first thing the mutation checks change —
+still fails the comparison. Two further differences are deliberate and do not
+show up in the transcript: the waiter holds a `Weak` reference to its futex
+where C keeps a raw pointer (the same bug becomes a missing notify instead of a
+use-after-free), and `STRACE` is not ported, so only return values survive.
+
 ## Layout
 
 ```
@@ -897,7 +952,8 @@ ish-rs/
 │   ├── tls.rs                  # kernel/tls.c
 │   ├── misc.rs                 # kernel/misc.c
 │   ├── sync.rs                 # util/sync.{h,c} locks, waits, unwind flag
-│   └── timer.rs                # util/timer.{h,c} timespec helpers + timer thread
+│   ├── timer.rs                # util/timer.{h,c} timespec helpers + timer thread
+│   └── futex.rs                # kernel/futex.{h,c} refcounted wait queues
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
@@ -919,6 +975,7 @@ ish-rs/
 │   ├── fake_db_rebuild_differential.rs # C rebuild replayed against a scripted host
 │   ├── sync_differential.rs    # C wait/notify/lock corpus replayed
 │   ├── timer_differential.rs   # C timer corpus replayed on a scripted clock
+│   ├── futex_differential.rs   # C futex corpus replayed over hand-built queues
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -939,7 +996,8 @@ ish-rs/
 │       ├── fake_db_migrate_reference.txt # 3 C migrations x 5 schema generations
 │       ├── fake_db_rebuild_reference.txt # scripted-host rebuild corpus + host ops
 │       ├── sync_reference.txt  # 46 waiting/notify/unwind/lock records from the C
-│       └── timer_reference.txt # 58 timer records, scripted clock and sleeps
+│       ├── timer_reference.txt # 58 timer records, scripted clock and sleeps
+│       └── futex_reference.txt # 82 futex records, hand-built queues and parks
 ├── vendor/
 │   └── graphitesql/            # v0.1.7 pure-Rust SQLite-3-compatible library
 └── tools/
@@ -963,6 +1021,7 @@ ish-rs/
     ├── fake-db-rebuild-dump.c  # rebuild oracle (wraps fstatat/unlinkat/linkat)
     ├── sync-dump.c             # wait/notify oracle (wraps pthread_cond_*)
     ├── timer-dump.c            # timer oracle (scripted clock, sleeps and free)
+    ├── futex-dump.c            # futex oracle (hand-built queues, scripted parks)
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -985,6 +1044,7 @@ ish-rs/
     ├── gen_fake_db_rebuild_reference.sh
     ├── gen_sync_reference.sh
     ├── gen_timer_reference.sh
+    ├── gen_futex_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh
