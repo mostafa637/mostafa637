@@ -17,6 +17,7 @@
 //! | [`vec`]         | `emu/vec.{h,c}` + `mmx.c` | ported, all 166 operations compared against the C |
 //! | [`modrm`]       | `emu/modrm.h`             | ported, decode results compared against the C |
 //! | [`decode`]      | `emu/decode.h`            | ported dispatch, opcode table generated from the C |
+//! | [`dev`]         | `fs/dev.h` + `fs/devices.h` | ported, the 32-bit device-number encoding and the device constants |
 //! | [`memory`]      | `kernel/memory.{h,c}`     | ported, the guest address space behind `mmu`/`tlb` |
 //! | [`user`]        | `kernel/user.c`           | ported, the guest<->kernel byte copies, faults included |
 //! | [`errno`]       | `kernel/errno.{h,c}`      | ported, host to guest errno translation, table generated |
@@ -37,6 +38,7 @@
 //! | [`timer`]       | `util/timer.{h,c}`        | ported, timespec helpers and the interruptible timer thread |
 //! | [`futex`]       | `kernel/futex.{h,c}`      | ported, refcounted wait queues with wake/requeue and the robust-list calls |
 //! | [`stat`]        | `fs/stat.{h,c}`           | ported, the guest stat layouts and `stat_convert_newstat64` |
+//! | [`path`]        | `fs/path.{h,c}`           | ported, the normalization predicate and the component walk; the normalizers wait on mounts |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -49,6 +51,7 @@ pub mod cpu;
 pub mod cpuid;
 pub mod decode;
 pub mod decode_table;
+pub mod dev;
 pub mod errno;
 pub mod errno_table;
 pub mod fchdir;
@@ -67,6 +70,7 @@ pub mod misc;
 pub mod mmap;
 pub mod mmu;
 pub mod modrm;
+pub mod path;
 pub mod random;
 pub mod rebuild;
 pub mod resource;

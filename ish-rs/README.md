@@ -44,7 +44,9 @@ against the compiled C original**, not just against hand-written expectations.
 | `timer.rs`   | `util/timer.{h,c}`    | 163     | **done** — the timespec helpers (single-subtract carry included) and the interruptible timer thread with its reload and free-ownership rules; 58 C records replayed against a scripted clock |
 | `futex.rs`   | `kernel/futex.{h,c}`  | 217     | **done** — the refcounted `(mem, addr)` hash table, wake/requeue with their reference transfers, the `wait_for` wait contract, and the two robust-list calls; 82 C records replayed over hand-built queues |
 | `fchdir.rs`  | `util/fchdir.{h,c}`   | 12      | **done** — one process-wide lock taken around the host's `fchdir`, held across the relative-path work that follows; 12 C records replayed with two workers contending for it |
-| `stat.rs`    | `fs/stat.{h,c}`       | 307     | **done** — the nine guest stat structures with their packings and padding, and `stat_convert_newstat64`; 9 C layouts, 173 field values and 5 converted `statbuf`s verified byte-for-byte |
+| `stat.rs`    | `fs/stat.{h,c}`       | 307     | **done** — the nine guest stat structures with their packings and padding, and `stat_convert_newstat64`; 9 C layouts, 173 field values and 5 converted `statbuf`s verified byte-for-byte || `stat.rs`    | `fs/stat.{h,c}`       | 307     | **done** — the nine guest stat structures with their packings and padding, and `stat_convert_newstat64`; 9 C layouts, 173 field values and 5 converted `statbuf`s verified byte-for-byte |
+| `dev.rs`     | `fs/dev.h` + `fs/devices.h` | 92  | **done** — the guest's 32-bit device-number encoding (`dev_make`/`dev_major`/`dev_minor`), its two host conversions, and the major/minor of every device iSH names; 28 encodings, 56 host conversions and 18 constants verified against the C |
+| `path.rs`    | `fs/path.{h,c}`       | 216     | **done** — the normalization predicate and the component walk with its `MAX_NAME` boundary; 69 paths, 107 component steps and 5 constants verified against the C. The two normalizers wait on mounts |
 
 `cpu.rs` models the parts of `struct cpu_state` that the ported code touches.
 Three fields are not there yet because nothing uses them: `struct mmu *mmu` and
@@ -58,7 +60,7 @@ iSH tree, so there is nothing to port for it.
 
 ```console
 $ cargo test --all-targets
-running 240 tests  (unit tests in src/)
+running 252 tests  (unit tests in src/)
 running 3 tests    (tests/decode_differential.rs)  -> 140,289 decoder events
 running 3 tests    (tests/errno_differential.rs)   ->   4,216 err_map inputs
 running 2 tests    (tests/mmap_differential.rs)    ->      51 mmap operations
@@ -82,7 +84,9 @@ running 2 tests    (tests/timer_differential.rs)   ->      58 timer records from
 running 2 tests    (tests/futex_differential.rs)   ->      82 futex records from hand-built queues
 running 2 tests    (tests/fchdir_differential.rs)  ->      12 fchdir records from two contending workers
 running 2 tests    (tests/stat_differential.rs)    ->       9 struct layouts + 5 converted statbufs
-test result: ok. 285 passed
+running 1 test     (tests/dev_differential.rs)     ->      28 encodings + 56 host conversions, 42 host macro records in the unit test
+running 1 test     (tests/path_differential.rs)    ->      69 paths + 107 component steps
+test result: ok. 299 passed
 $ cargo clippy --all-targets -- -D warnings       # clean, no warnings
 ```
 
@@ -978,8 +982,10 @@ and `fs/stat.c`'s `stat_convert_newstat64` is the one function every one of the
 five stat syscalls funnels through. The rest of the file — `sys_stat64`,
 `sys_lstat64`, `sys_fstatat64`, `sys_fstat64`, `sys_statx` and
 `generic_statat` — needs `path_normalize`, `find_mount_and_trim_path`,
-`mount_release`, `f_get` and the `user_*` bridge, none of which exists in the
-crate yet, so what is ported is the layout and the conversion.
+`mount_release`, `f_get` and the filesystem objects they hang off. `path.rs`
+now has that file's normalization predicate and component walk, but
+`path_normalize` itself is still waiting on the same mount layer, so what is
+ported from `fs/stat.c` is the layout and the conversion.
 
 Three things in that layout are easy to get wrong on the way to Rust:
 
@@ -1024,6 +1030,106 @@ The five conversion cases exist to make specific mistakes loud: `all-ones` and
 differ, `0xdeadbeef_00000001`) catches a conversion that keeps only one half of
 the inode, and `typical` is an ordinary 0644 file.
 
+### Devices
+
+`fs/dev.h` is where iSH invents its own device numbers. A Linux guest expects
+the i386 encoding in a `dev_t`, but the guest's `dev_t_` here is 32 bits, and the
+number has to mean the same thing on every host iSH runs on — so the header
+stores `mmmMMMmm` in a `uint32_t`: the major in bits 8..19, and the minor split
+across bits 0..7 and 20..31.
+
+* **The two boundaries are not symmetric.** `dev_make` masks the minor to
+  twenty bits but does not mask the major at all, so a minor of `0x100000`
+  becomes no minor (it encodes as `0x100`) while a major of `0x1000` leaks into
+  the minor's high half (`0x100000`). Both are the C's answers, and both are in
+  the corpus, because a port that "tidied up" either mask would silently change
+  what `mknod` and `stat` report.
+* **The encoding is a bijection.** `dev_major` and `dev_minor` between them read
+  every bit, so `dev_make(dev_major(dev), dev_minor(dev)) == dev` for all 2³²
+  values — which is what lets iSH pass a `dev_t_` around as an opaque number, and
+  what the corpus checks for every number it builds.
+* **The host conversions are transcribed, not called.** `dev_real_from_fake`
+  is the C's `makedev(dev_major(dev), dev_minor(dev))` and `dev_fake_from_real`
+  is its `major`/`minor`; this crate declares no host functions, so the glibc
+  macros' arithmetic is written out. The oracle prints the *host's* answers for
+  the same numbers next to them, so that transcription is checked against the
+  platform rather than against a reading of it — including the direction that
+  loses bits, since the host minor has room a 32-bit guest's does not.
+* **Two limbs of those macros are invisible through the two conversions.** The
+  major glibc gives bit 32 and up can never reach `dev_real_from_fake`, which is
+  only ever handed `dev_major`'s twelve bits; and the extra major bits a wider
+  mask would read are already covered by the minor's high half, so
+  `dev_fake_from_real` cannot tell the difference. Those arguments are not
+  reachable from the fake encoding at all, so the oracle records the host's
+  `makedev`/`major`/`minor` for arguments of its own — `X` and `Y` records — and
+  the unit test beside the transcription replays them; the differential test
+  cannot, because the functions it would call are private.
+* **`dev_make` overflows, and the machine wrapped.** The C computes in `int`, so
+  a negative minor shifts into the sign bit; the port computes in `u32`, which is
+  what the hardware did. `dev_make(-1, -1) == 0xffffffff` is in the corpus for
+  exactly that reason.
+
+What is not ported is `fs/dev.c`: its `char_devs`/`block_devs` tables hold
+`struct dev_ops` that carry an `fd_ops`, and `dev_open` assigns one to a
+`struct fd`, so the table and the dispatch arrive with the fd layer and the
+devices they point at (`mem`, `tty`, `dyndev`).
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_dev_reference.sh
+wrote tests/fixtures/dev_reference.txt: 202 lines, 28 encodings, 18 constants
+$ cargo test --test dev_differential
+… 28 encodings, 56 host conversions and 18 constants matched the C
+```
+
+### Paths
+
+Every filesystem operation starts in `fs/path.c`, turning the string the guest
+passed into an absolute path with no `.`, `..`, doubled slash or symlink left in
+it. `__path_normalize` and `path_normalize` are the two big functions there, and
+neither is ported yet: between them they walk the mount tree
+(`find_mount_and_trim_path`), call into the mounted filesystem
+(`mount->fs->readlink` and `->stat`), check permissions (`access_check`) and read
+`current->fs`'s root and working directory under its lock. Those are
+`fs/mount.c`, `fs/fd.c`, `fs/generic.c` and `kernel/fs.c`, none of which exists
+in the crate yet.
+
+What is ported is what those functions, and the filesystems that implement
+`lookup` on top of them, are allowed to assume — the file's only two pure
+functions:
+
+* **`path_is_normalized`**: the empty path is normalized, `"/"` is normalized,
+  `"/a/"` is normalized (a trailing slash is a component of its own), and
+  anything with a doubled slash or a missing leading one is not.
+* **`path_next_component`**: one component at a time, with the two shapes the
+  callers depend on. `"/"` yields one component whose name is empty rather than
+  ending the walk, and it is `rest` being empty — the C's `*path == '\0'` — and
+  not the absence of a next component that says "this was the last name". The
+  C's `MAX_NAME` is 256 *including the terminator*, so a 255-byte name is the
+  longest that fits and a 256-byte one is `_ENAMETOOLONG`; the corpus straddles
+  that boundary at 1, 2, 3, 252, 254, 255, 256, 257 and 512 bytes.
+
+One C behaviour cannot be ported: on `_ENAMETOOLONG` the C returns false *after*
+copying `MAX_NAME` bytes into the caller's `component` buffer with no
+terminator. Nothing ever reads those bytes — every caller abandons the walk —
+and the port returns a borrowed slice instead of filling a buffer, so there is
+no half-written buffer to leave behind. The fixture records the error and not
+the partial copy, which is also all a caller can see. A path that does not begin
+with `/` is an `assert` in the C and a panic in the port: that is the contract
+the port's callers have to keep, and the corpus checks that every walk in it
+does.
+
+The fixture is one record per *call*, each naming the path it was given, so
+replaying it is a matter of threading: a step hands the next record the `rest` it
+produced, and a `ret=0` record is the call that ended the walk.
+
+```console
+$ ISH_SRC=/path/to/ish ./tools/gen_path_reference.sh
+replayed 107 steps over 64 walks
+wrote tests/fixtures/path_reference.txt: 255 lines, 69 predicates, 107 steps, 64 walks, 9 long names
+$ cargo test --test path_differential
+… 69 predicates, 107 steps over 64 walks and 5 constants matched the C
+```
+
 ## Layout
 
 ```
@@ -1064,7 +1170,9 @@ ish-rs/
 │   ├── timer.rs                # util/timer.{h,c} timespec helpers + timer thread
 │   ├── futex.rs                # kernel/futex.{h,c} refcounted wait queues
 │   ├── fchdir.rs               # util/fchdir.{h,c} the working-directory lock
-│   └── stat.rs                 # fs/stat.{h,c} guest stat layouts + newstat64 conversion
+│   ├── stat.rs                 # fs/stat.{h,c} guest stat layouts + newstat64 conversion
+│   ├── dev.rs                  # fs/dev.h + fs/devices.h device numbers and majors/minors
+│   └── path.rs                 # fs/path.{h,c} path predicate + component walk
 ├── tests/
 │   ├── differential.rs         # bit-exact replay of the float80 reference
 │   ├── fpu_differential.rs     # word-exact replay of the cpu/fpu reference
@@ -1089,6 +1197,8 @@ ish-rs/
 │   ├── futex_differential.rs   # C futex corpus replayed over hand-built queues
 │   ├── fchdir_differential.rs  # C fchdir corpus replayed with two workers
 │   ├── stat_differential.rs    # C struct layouts, images and conversions replayed
+│   ├── dev_differential.rs     # C device encodings and host conversions replayed
+│   ├── path_differential.rs    # C path predicates and component walk replayed
 │   └── fixtures/
 │       ├── f80_reference.txt   # 125k results from the unmodified C
 │       ├── fpu_reference.txt   # 15.7k full cpu_state dumps from the C
@@ -1112,7 +1222,9 @@ ish-rs/
 │       ├── timer_reference.txt # 58 timer records, scripted clock and sleeps
 │       ├── futex_reference.txt # 82 futex records, hand-built queues and parks
 │       ├── fchdir_reference.txt# 12 fchdir records, two workers and a wrapped call
-│       └── stat_reference.txt  # 9 C struct layouts, 173 field values, 5 conversions
+│       ├── stat_reference.txt  # 9 C struct layouts, 173 field values, 5 conversions
+│       ├── dev_reference.txt   # 28 encodings, 56 conversions, 42 host macro records
+│       └── path_reference.txt  # 69 C paths + 107 component steps
 ├── vendor/
 │   └── graphitesql/            # v0.1.7 pure-Rust SQLite-3-compatible library
 └── tools/
@@ -1139,6 +1251,8 @@ ish-rs/
     ├── futex-dump.c            # futex oracle (hand-built queues, scripted parks)
     ├── fchdir-dump.c           # fchdir oracle (wraps fchdir, two contending workers)
     ├── stat-dump.c             # stat oracle (sizeof/offsetof plus the C conversion)
+    ├── dev-dump.c              # dev oracle (dev_make/decode plus the host makedev)
+    ├── path-dump.c             # path oracle (includes fs/path.c, walks the corpus)
     ├── gen_errno_table.py      # derives src/errno_table.rs, asking the host
     ├── modrm-dump.c            # ModRM/SIB reference generator
     ├── vec-dump.c              # vec/mmx reference generator
@@ -1164,6 +1278,8 @@ ish-rs/
     ├── gen_futex_reference.sh
     ├── gen_fchdir_reference.sh
     ├── gen_stat_reference.sh
+    ├── gen_dev_reference.sh
+    ├── gen_path_reference.sh
     ├── gen_modrm_reference.sh
     ├── gen_tlb_reference.sh
     └── gen_vec_reference.sh

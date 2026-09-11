@@ -1,0 +1,202 @@
+# dev reference, generated from unmodified fs/dev.h and fs/devices.h
+S dev_t_ size=4
+M 0 0 dev=0
+D 0 major=0 minor=0
+T 0 back=0
+M 1 3 dev=0x103
+D 0x103 major=1 minor=3
+T 0x103 back=0x103
+M 1 5 dev=0x105
+D 0x105 major=1 minor=5
+T 0x105 back=0x105
+M 1 7 dev=0x107
+D 0x107 major=1 minor=7
+T 0x107 back=0x107
+M 1 8 dev=0x108
+D 0x108 major=1 minor=8
+T 0x108 back=0x108
+M 1 9 dev=0x109
+D 0x109 major=1 minor=9
+T 0x109 back=0x109
+M 4 0 dev=0x400
+D 0x400 major=4 minor=0
+T 0x400 back=0x400
+M 4 15 dev=0x40f
+D 0x40f major=4 minor=15
+T 0x40f back=0x40f
+M 5 0 dev=0x500
+D 0x500 major=5 minor=0
+T 0x500 back=0x500
+M 5 1 dev=0x501
+D 0x501 major=5 minor=1
+T 0x501 back=0x501
+M 5 2 dev=0x502
+D 0x502 major=5 minor=2
+T 0x502 back=0x502
+M 128 0 dev=0x8000
+D 0x8000 major=128 minor=0
+T 0x8000 back=0x8000
+M 128 255 dev=0x80ff
+D 0x80ff major=128 minor=255
+T 0x80ff back=0x80ff
+M 136 1 dev=0x8801
+D 0x8801 major=136 minor=1
+T 0x8801 back=0x8801
+M 240 0 dev=0xf000
+D 0xf000 major=240 minor=0
+T 0xf000 back=0xf000
+M 240 1 dev=0xf001
+D 0xf001 major=240 minor=1
+T 0xf001 back=0xf001
+M 1 255 dev=0x1ff
+D 0x1ff major=1 minor=255
+T 0x1ff back=0x1ff
+M 1 256 dev=0x100100
+D 0x100100 major=1 minor=256
+T 0x100100 back=0x100100
+M 1 4095 dev=0xf001ff
+D 0xf001ff major=1 minor=4095
+T 0xf001ff back=0xf001ff
+M 1 4096 dev=0x1000100
+D 0x1000100 major=1 minor=4096
+T 0x1000100 back=0x1000100
+M 1 1048320 dev=0xfff00100
+D 0xfff00100 major=1 minor=1048320
+T 0xfff00100 back=0xfff00100
+M 1 1048575 dev=0xfff001ff
+D 0xfff001ff major=1 minor=1048575
+T 0xfff001ff back=0xfff001ff
+M 1 1048576 dev=0x100
+D 0x100 major=1 minor=0
+T 0x100 back=0x100
+M 4095 0 dev=0xfff00
+D 0xfff00 major=4095 minor=0
+T 0xfff00 back=0xfff00
+M 4096 0 dev=0x100000
+D 0x100000 major=0 minor=256
+T 0x100000 back=0x100000
+M -1 -1 dev=0xffffffff
+D 0xffffffff major=4095 minor=1048575
+T 0xffffffff back=0xffffffff
+M -1 0 dev=0xffffff00
+D 0xffffff00 major=4095 minor=1048320
+T 0xffffff00 back=0xffffff00
+M 0 -1 dev=0xfff000ff
+D 0xfff000ff major=0 minor=1048575
+T 0xfff000ff back=0xfff000ff
+H 0 0 fake=0 real=0
+R 0 0 real=0 fake=0
+H 1 3 fake=0x103 real=0x103
+R 1 3 real=0x103 fake=0x103
+H 1 5 fake=0x105 real=0x105
+R 1 5 real=0x105 fake=0x105
+H 1 7 fake=0x107 real=0x107
+R 1 7 real=0x107 fake=0x107
+H 1 8 fake=0x108 real=0x108
+R 1 8 real=0x108 fake=0x108
+H 1 9 fake=0x109 real=0x109
+R 1 9 real=0x109 fake=0x109
+H 4 0 fake=0x400 real=0x400
+R 4 0 real=0x400 fake=0x400
+H 4 15 fake=0x40f real=0x40f
+R 4 15 real=0x40f fake=0x40f
+H 5 0 fake=0x500 real=0x500
+R 5 0 real=0x500 fake=0x500
+H 5 1 fake=0x501 real=0x501
+R 5 1 real=0x501 fake=0x501
+H 5 2 fake=0x502 real=0x502
+R 5 2 real=0x502 fake=0x502
+H 128 0 fake=0x8000 real=0x8000
+R 128 0 real=0x8000 fake=0x8000
+H 128 255 fake=0x80ff real=0x80ff
+R 128 255 real=0x80ff fake=0x80ff
+H 136 1 fake=0x8801 real=0x8801
+R 136 1 real=0x8801 fake=0x8801
+H 240 0 fake=0xf000 real=0xf000
+R 240 0 real=0xf000 fake=0xf000
+H 240 1 fake=0xf001 real=0xf001
+R 240 1 real=0xf001 fake=0xf001
+H 1 255 fake=0x1ff real=0x1ff
+R 1 255 real=0x1ff fake=0x1ff
+H 1 256 fake=0x100100 real=0x100100
+R 1 256 real=0x100100 fake=0x100100
+H 1 4095 fake=0xf001ff real=0xf001ff
+R 1 4095 real=0xf001ff fake=0xf001ff
+H 1 4096 fake=0x1000100 real=0x1000100
+R 1 4096 real=0x1000100 fake=0x1000100
+H 1 1048320 fake=0xfff00100 real=0xfff00100
+R 1 1048320 real=0xfff00100 fake=0xfff00100
+H 1 1048575 fake=0xfff001ff real=0xfff001ff
+R 1 1048575 real=0xfff001ff fake=0xfff001ff
+H 1 1048576 fake=0x100 real=0x100
+R 1 1048576 real=0x100000100 fake=0x100
+H 4095 0 fake=0xfff00 real=0xfff00
+R 4095 0 real=0xfff00 fake=0xfff00
+H 4096 0 fake=0x100000 real=0x100000
+R 4096 0 real=0x100000000000 fake=0x100000
+H -1 -1 fake=0xffffffff real=0xffffffff
+R -1 -1 real=0xffffffffffffffff fake=0xffffffff
+H -1 0 fake=0xffffff00 real=0xffffff00
+R -1 0 real=0xfffff000000fff00 fake=0xffffff00
+H 0 -1 fake=0xfff000ff real=0xfff000ff
+R 0 -1 real=0xffffff000ff fake=0xfff000ff
+X 0 0 makedev=0
+Y 0 major=0 minor=0
+X 1 3 makedev=0x103
+Y 0x103 major=1 minor=3
+X 1 255 makedev=0x1ff
+Y 0x1ff major=1 minor=255
+X 1 256 makedev=0x100100
+Y 0x100100 major=1 minor=256
+X 1 1048576 makedev=0x100000100
+Y 0x100000100 major=1 minor=1048576
+X 1 1048575 makedev=0xfff001ff
+Y 0xfff001ff major=1 minor=1048575
+X 4095 1048575 makedev=0xffffffff
+Y 0xffffffff major=4095 minor=1048575
+X 4096 0 makedev=0x100000000000
+Y 0x100000000000 major=4096 minor=0
+X 65535 65535 makedev=0xf0000fffffff
+Y 0xf0000fffffff major=65535 minor=65535
+X 2147483647 2147483647 makedev=0x7ffff7ffffffffff
+Y 0x7ffff7ffffffffff major=2147483647 minor=2147483647
+X -1 -1 makedev=0xffffffffffffffff
+Y 0xffffffffffffffff major=-1 minor=-1
+X -1 0 makedev=0xfffff000000fff00
+Y 0xfffff000000fff00 major=-1 minor=0
+X 0 -1 makedev=0xffffff000ff
+Y 0xffffff000ff major=0 minor=-1
+X 268435456 268435456 makedev=0x1000010000000000
+Y 0x1000010000000000 major=268435456 minor=268435456
+Y 0 major=0 minor=0
+Y 0x103 major=1 minor=3
+Y 0xfff001ff major=1 minor=1048575
+Y 0x100000000000 major=4096 minor=0
+Y 0xfffff000000fff00 major=-1 minor=0
+Y 0xffffff000ff major=0 minor=-1
+Y 0xffffffffffffffff major=-1 minor=-1
+Y 0x123456789abcdef0 major=305421534 minor=1737075696
+Y 0x8000000000000000 major=-2147483648 minor=0
+Y 0x100000000 major=0 minor=1048576
+Y 0xfff000000000000 major=268369920 minor=0
+Y 0xf00000 major=0 minor=3840
+Y 0xf00000000000 major=61440 minor=0
+Y 0xf0000 major=3840 minor=0
+K DEV_BLOCK=0
+K DEV_CHAR=1
+K MEM_MAJOR=1
+K DEV_NULL_MINOR=3
+K DEV_ZERO_MINOR=5
+K DEV_FULL_MINOR=7
+K DEV_RANDOM_MINOR=8
+K DEV_URANDOM_MINOR=9
+K TTY_CONSOLE_MAJOR=4
+K TTY_ALTERNATE_MAJOR=5
+K DEV_TTY_MINOR=0
+K DEV_CONSOLE_MINOR=1
+K DEV_PTMX_MINOR=2
+K TTY_PSEUDO_MASTER_MAJOR=128
+K TTY_PSEUDO_SLAVE_MAJOR=136
+K DYN_DEV_MAJOR=240
+K DEV_CLIPBOARD_MINOR=0
+K DEV_LOCATION_MINOR=1
