@@ -1,6 +1,5 @@
-//! `kernel/fork.c` — clone flags and task creation constants.
+//! `kernel/fork.c` — clone flags and task creation.
 
-/// `CSIGNAL_`
 pub const CSIGNAL: u32 = 0x000000ff;
 pub const CLONE_VM: u32 = 0x00000100;
 pub const CLONE_FS: u32 = 0x00000200;
@@ -26,18 +25,7 @@ pub const CLONE_NEWPID: u32 = 0x20000000;
 pub const CLONE_NEWNET: u32 = 0x40000000;
 pub const CLONE_IO: u32 = 0x80000000;
 
-pub const IMPLEMENTED_FLAGS: u32 = CLONE_VM
-    | CLONE_FILES
-    | CLONE_FS
-    | CLONE_SIGHAND
-    | CLONE_SYSVSEM
-    | CLONE_VFORK
-    | CLONE_THREAD
-    | CLONE_SETTLS
-    | CLONE_CHILD_SETTID
-    | CLONE_PARENT_SETTID
-    | CLONE_CHILD_CLEARTID
-    | CLONE_DETACHED;
+pub const IMPLEMENTED_FLAGS: u32 = CLONE_VM | CLONE_FILES | CLONE_FS | CLONE_SIGHAND | CLONE_SYSVSEM | CLONE_VFORK | CLONE_THREAD | CLONE_SETTLS | CLONE_CHILD_SETTID | CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID | CLONE_DETACHED;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CloneArgs {
@@ -50,27 +38,27 @@ pub struct CloneArgs {
 
 impl CloneArgs {
     pub fn new(flags: u32, stack: u32, ptid: u32, tls: u32, ctid: u32) -> Self {
-        Self {
-            flags,
-            stack,
-            ptid,
-            tls,
-            ctid,
-        }
+        Self { flags, stack, ptid, tls, ctid }
     }
-
-    pub fn is_thread(&self) -> bool {
-        (self.flags & CLONE_THREAD) != 0
-    }
-
-    pub fn is_vfork(&self) -> bool {
-        (self.flags & CLONE_VFORK) != 0
-    }
-
-    pub fn has_unimplemented_flags(&self) -> bool {
-        (self.flags & !IMPLEMENTED_FLAGS & !CSIGNAL) != 0
-    }
+    pub fn is_thread(&self) -> bool { (self.flags & CLONE_THREAD) != 0 }
+    pub fn is_vfork(&self) -> bool { (self.flags & CLONE_VFORK) != 0 }
+    pub fn has_unimplemented_flags(&self) -> bool { (self.flags & !IMPLEMENTED_FLAGS & !CSIGNAL) != 0 }
+    pub fn exit_signal(&self) -> u32 { self.flags & CSIGNAL }
 }
+
+/// Task group copy, simplified
+#[derive(Debug, Clone, Default)]
+pub struct TgroupCopy {
+    pub is_thread: bool,
+    pub new_group: bool,
+}
+
+pub fn should_copy_group(flags: u32) -> bool { (flags & CLONE_THREAD) == 0 }
+
+pub fn should_copy_mm(flags: u32) -> bool { (flags & CLONE_VM) == 0 }
+pub fn should_copy_files(flags: u32) -> bool { (flags & CLONE_FILES) == 0 }
+pub fn should_copy_fs(flags: u32) -> bool { (flags & CLONE_FS) == 0 }
+pub fn should_copy_sighand(flags: u32) -> bool { (flags & CLONE_SIGHAND) == 0 }
 
 #[cfg(test)]
 mod tests {
@@ -89,8 +77,20 @@ mod tests {
         assert!(args.is_thread());
         assert!(!args.is_vfork());
         assert!(!args.has_unimplemented_flags());
+        assert_eq!(args.exit_signal(), 0);
 
         let args2 = CloneArgs::new(CLONE_NEWNS, 0, 0, 0, 0);
         assert!(args2.has_unimplemented_flags());
+
+        let args3 = CloneArgs::new(17, 0, 0, 0, 0); // SIGCHLD=17
+        assert_eq!(args3.exit_signal(), 17);
+    }
+
+    #[test]
+    fn copy_checks() {
+        assert!(should_copy_group(0));
+        assert!(!should_copy_group(CLONE_THREAD));
+        assert!(should_copy_mm(0));
+        assert!(!should_copy_mm(CLONE_VM));
     }
 }
