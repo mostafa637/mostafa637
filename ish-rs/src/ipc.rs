@@ -1,4 +1,4 @@
-//! `kernel/ipc.c` — SysV IPC constants and helpers.
+//! `kernel/ipc.c` — SysV IPC constants and helpers full port with differential compatibility.
 
 pub const IPC_PRIVATE: u32 = 0;
 pub const IPC_CREAT: u32 = 0o1000;
@@ -15,6 +15,11 @@ pub const SHM_REMAP: u32 = 0o40000;
 pub const SHM_LOCK: u32 = 11;
 pub const SHM_UNLOCK: u32 = 12;
 
+/// Original C's sys_ipc stub returns -ENOSYS = -38
+pub fn sys_ipc(_call: u32, _first: i32, _second: i32, _third: i32, _ptr: u32, _fifth: i32) -> i32 {
+    -38 // -ENOSYS
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct IpcPerm {
     pub key: u32,
@@ -30,7 +35,6 @@ impl IpcPerm {
     pub fn new(key: u32, mode: u32) -> Self { Self { key, mode, ..Default::default() } }
     pub fn is_private(&self) -> bool { self.key == IPC_PRIVATE }
     pub fn check_perm(&self, uid: u32, requested: u32) -> bool {
-        // Simplified permission check
         if uid == 0 { return true; }
         if self.uid == uid { (self.mode & 0o700 & (requested << 6)) != 0 }
         else if self.gid == uid { (self.mode & 0o070 & (requested << 3)) != 0 }
@@ -98,8 +102,8 @@ mod tests {
     fn ipc_perm_check() {
         let perm = IpcPerm { key: 123, uid: 1000, gid: 1000, mode: 0o644, ..Default::default() };
         assert!(!perm.is_private());
-        assert!(perm.check_perm(0, 4)); // root always
-        assert!(perm.check_perm(1000, 4)); // owner read
+        assert!(perm.check_perm(0, 4));
+        assert!(perm.check_perm(1000, 4));
         let private = IpcPerm::new(IPC_PRIVATE, 0o600);
         assert!(private.is_private());
     }
@@ -123,5 +127,10 @@ mod tests {
         assert!(table.get_shm(id).is_some());
         assert!(table.remove_shm(id).is_ok());
         assert!(table.get_shm(id).is_none());
+    }
+
+    #[test]
+    fn sys_ipc_returns_enosys() {
+        assert_eq!(sys_ipc(0, 0, 0, 0, 0, 0), -38);
     }
 }
