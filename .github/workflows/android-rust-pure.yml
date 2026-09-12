@@ -1,408 +1,103 @@
-name: iSH Android Pure Rust (Slint + Servo + hterm + KVM + Screenshot) - ONLINE ONLY
+name: iSH Android Pure Rust (Rust core + Slint logic)
+
+# Scope: the pure-Rust side only - ish-emu core tests, android-rs logic, the desktop
+# binary that exercises the same UI code paths.
+#
+# The APK build and the Android emulator run now live in android-emulator.yml
+# ("Android Emulator Smoke Test"). They used to be duplicated here, which meant two
+# 50-minute jobs racing to configure the same AVD and two copies of the same
+# emulator script to keep in sync. Emulator work happens in exactly one workflow.
 
 on:
   push:
-    branches: [arena/01a092f8-mostafa637, arena/01a09105-mostafa637, main]
+    branches: [main, 'arena/**']
     paths:
       - 'android-rs/**'
-      - 'android/**'
       - 'ish-rs/**'
+      - '.github/scripts/**'
       - '.github/workflows/android-rust-pure.yml'
   pull_request:
-    branches: [arena/01a09105-mostafa637, main]
     paths:
       - 'android-rs/**'
-      - 'android/**'
       - 'ish-rs/**'
+      - '.github/scripts/**'
   workflow_dispatch:
 
+concurrency:
+  group: android-rust-pure-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   rust-core-test-online:
-    name: Rust Core + Android Pure Rust Logic ONLINE (KVM + hterm as iOS)
+    name: Rust core + android-rs logic ONLINE (no --offline)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
+      - uses: actions/checkout@v7
 
-      - name: Check KVM availability (linux + kvm)
-        run: |
-          echo "Checking KVM acceleration (linux + kvm)..."
-          ls -lh /dev/kvm && echo "KVM available - will use -accel on" || echo "KVM not found"
-          kvm-ok && echo "kvm-ok: KVM acceleration can be used" || echo "kvm-ok not available"
-          lscpu | grep -i virtualization || true
-          echo "KVM check complete"
-
-      - name: Install system deps for Slint (ONLINE)
+      - name: Install system deps for Slint
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev || true
-          echo "System deps installed"
+          sudo apt-get install -y --no-install-recommends \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev
 
-      - name: Initialize hterm as iSH iOS does (ONLINE ONLY - no offline)
-        run: |
-          echo "=== تهيئة ملفات xterm.js كما يفعلة ish ios - ONLINE ONLY ==="
-          echo "iOS: app/terminal/term.html loads hterm_all.js + term.js + term.css"
-          echo "iOS Xcode build phase: cd \$SRCROOT/deps/libapps && ./hterm/bin/mkdist"
-          echo "Cloning libapps ONLINE (no offline)..."
-          rm -rf /tmp/libapps
-          git clone https://github.com/ish-app/libapps --depth 1 /tmp/libapps
-          cd /tmp/libapps
-          ./hterm/bin/mkdist
-          ls -lh hterm/dist/js/hterm_all.js
-          echo "hterm_all.js size: $(wc -c < hterm/dist/js/hterm_all.js) bytes, lines: $(wc -l < hterm/dist/js/hterm_all.js)"
-          echo "Copying to Android assets as iOS does to Resources..."
-          mkdir -p $GITHUB_WORKSPACE/android/app/src/main/assets/terminal
-          mkdir -p $GITHUB_WORKSPACE/android-rs/assets/terminal
-          cp hterm/dist/js/hterm_all.js $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/
-          cp hterm/dist/js/hterm_all.js $GITHUB_WORKSPACE/android-rs/assets/terminal/
-          ls -lh $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/
-          ls -lh $GITHUB_WORKSPACE/android-rs/assets/terminal/
-          echo "Verifying term.html, term.js, term.css as iOS..."
-          cat $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/term.html
-          echo "--- term.js head ---"
-          head -n 30 $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/term.js
-          echo "=== Terminal files initialized ONLINE ONLY ==="
+      # Clones libapps, rebuilds hterm_all.js like the iSH iOS Xcode phase does, and
+      # falls back to the committed bundle if the network misbehaves. It also asserts
+      # the invariant the app needs: term.html + hterm_all.js + term.js + term.css
+      # present, and term.js bridging to window.Android.onLoad.
+      - name: Prepare hterm terminal assets
+        run: bash .github/scripts/init-hterm-assets.sh
 
-      - name: Install Rust toolchain (ONLINE ONLY)
-        uses: dtolnay/rust-toolchain@1.89.0
+      - uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: rustfmt, clippy
 
-      - name: Test ish-emu core ONLINE (no offline) - fetch + verbose + isolate hang
+      - name: Test ish-emu core ONLINE (no offline)
         working-directory: ish-rs
         run: |
-          echo "=== Building ish-emu ONLINE ONLY (no --offline) as requested ==="
-          echo "Cargo version:"
+          echo "=== ish-emu: cargo fetch + full lib test, ONLINE ONLY ==="
           cargo --version
-          echo "Fetching dependencies ONLINE..."
-          cargo fetch --verbose 2>&1 | tail -n 100
-          echo "Listing tests (should be 462)..."
-          cargo test --lib -- --list 2>&1 | tail -n 50
-          echo "Running cargo test --lib with single thread and timeout 300s to catch hanging test..."
-          # First try fast run with default threads and timeout 300s
-          timeout 300 cargo test --lib -- --test-threads=1 --nocapture 2>&1 | tail -n 500 || echo "cargo test timed out after 300s or failed - will try per-module"
-          echo "Trying per-module tests to isolate hang..."
-          for mod in generic getset group gui init inode interrupt ipc kernel list lock log mem memory misc mm mmap mmu modrm mount path personality pipe poll proc ptrace pty ram random real refcount resource signal sock sock_restart stat sync task time timer tlb tls tmp tty uname user vdso vec; do
-            echo "=== Testing module $mod ==="
-            timeout 30 cargo test --lib $mod -- --test-threads=1 --nocapture 2>&1 | tail -n 20 || echo "Module $mod timed out or failed after 30s"
+          cargo fetch 2>&1 | tail -n 20
+          cargo test --lib -- --list 2>&1 | tail -n 20
+          if timeout 600 cargo test --lib -- --test-threads=1 > /tmp/core-test.log 2>&1; then
+            echo "core lib tests passed"
+            tail -n 20 /tmp/core-test.log
+            exit 0
+          fi
+          # A hang and a real failure look the same from here, so re-run per module to
+          # name the offender instead of leaving a 40-minute timeout as the only clue.
+          echo "::warning::full lib test run failed or timed out - isolating per module"
+          tail -n 40 /tmp/core-test.log
+          for mod in generic getset group gui init inode interrupt ipc kernel list lock log \
+                     mem memory misc mm mmap mmu modrm mount path personality pipe poll proc \
+                     ptrace pty ram random real refcount resource signal sock sock_restart \
+                     stat sync task time timer tlb tls tmp tty uname user vdso vec; do
+            timeout 60 cargo test --lib "$mod" -- --test-threads=1 2>&1 | tail -n 5 \
+              || echo "module $mod timed out or failed after 60s"
           done
-          echo "Running final cargo test with all threads but timeout 60s for summary..."
-          timeout 60 cargo test --lib 2>&1 | tail -n 100 || echo "Final test timed out after 60s - but per-module tests above show which hangs"
-          echo "ish-emu tests done (with hang isolation)"
+          echo "=== per-module results above; full run log tail: ==="
+          exit 1
 
-      - name: Test android-rs pure Rust logic ONLINE (fast-test without heavy Slint compile)
+      - name: Test android-rs logic ONLINE (fast-test, no heavy Slint compile)
         working-directory: android-rs
         run: |
-          echo "=== Building android-rs ONLINE ONLY - fast-test (no heavy Slint compile) ==="
-          echo "This avoids 30m+ Slint compilation that caused previous hangs"
-          echo "Full Slint + Servo + hterm APK will be built in next job with default features"
-          cargo fetch --verbose 2>&1 | tail -n 50 || true
-          cargo test --lib --no-default-features --features fast-test --verbose 2>&1 | tail -n 300
-          echo "android-rs fast tests done ONLINE"
+          echo "=== android-rs fast-test: skips Slint so this stays quick ==="
+          cargo fetch 2>&1 | tail -n 10
+          cargo test --lib --no-default-features --features fast-test 2>&1 | tail -n 60
 
-      - name: Test android-rs with SlintUi ONLINE (full, but with timeout)
+      - name: Test android-rs with SlintUi (best effort, bounded)
         working-directory: android-rs
         continue-on-error: true
         run: |
-          echo "=== Building android-rs ONLINE ONLY with SlintUi (may take 10-20m) ==="
-          timeout 600 cargo test --lib --features slint-ui --verbose 2>&1 | tail -n 300 || echo "Slint test timed out or failed, but fast-test already passed - continuing"
-          echo "android-rs slint tests done (or timed out)"
+          echo "=== Slint build can take 10-20m; fast-test above is the gate ==="
+          timeout 900 cargo test --lib --features slint-ui 2>&1 | tail -n 60 \
+            || echo "Slint test timed out or failed - fast-test already covered the logic"
 
-      - name: Run desktop binary ONLINE (simulates Android UI logic - fast)
+      - name: Run desktop binary (same UI logic the Android shell drives)
         working-directory: android-rs
         run: |
-          cargo run --bin ish-android-rs --no-default-features --features fast-test --verbose 2>&1 | tail -n 200
-          echo "Desktop binary run done ONLINE (fast-test)"
-
-  android-emulator-pure-rust-online:
-    name: Build APK ONLINE (Pure Rust Slint + Servo + hterm) + Emulator KVM + Screenshot
-    runs-on: ubuntu-latest
-    timeout-minutes: 50
-    needs: rust-core-test-online
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install system deps for Slint + Android (ONLINE)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev openjdk-17-jdk || true
-
-      - name: Set up Java 17 (for Gradle)
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Rust toolchain + Android targets ONLINE
-        uses: dtolnay/rust-toolchain@1.89.0
-        with:
-          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android, i686-linux-android
-
-      - name: Initialize xterm.js / hterm as iSH iOS does - ONLINE ONLY (no offline)
-        run: |
-          echo "=== تهيئة ملفات xterm.js كما يفعلة ish ios - ONLINE ONLY ==="
-          echo "iOS app/terminal/term.html: <!doctype html> + meta viewport + link term.css + div#terminal + script hterm_all.js + script term.js"
-          echo "iOS Xcode: shellScript = cd \$SRCROOT/deps/libapps && ./hterm/bin/mkdist"
-          rm -rf /tmp/libapps
-          git clone https://github.com/ish-app/libapps --depth 1 /tmp/libapps
-          cd /tmp/libapps
-          ./hterm/bin/mkdist
-          ls -lh hterm/dist/js/hterm_all.js hterm/dist/js/hterm.js
-          echo "Copying hterm_all.js to Android assets (as iOS Xcode does to Resources)..."
-          mkdir -p $GITHUB_WORKSPACE/android/app/src/main/assets/terminal
-          mkdir -p $GITHUB_WORKSPACE/android-rs/assets/terminal
-          cp hterm/dist/js/hterm_all.js $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/
-          cp hterm/dist/js/hterm_all.js $GITHUB_WORKSPACE/android-rs/assets/terminal/
-          # Ensure term.css and term.js exist (Android adaptation)
-          ls -lh $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/
-          echo "term.html content (as iOS):"
-          cat $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/term.html
-          echo "=== Terminal files initialized ONLINE ==="
-
-      - name: Install cargo-ndk and cargo-apk ONLINE (robust)
-        run: |
-          echo "Installing cargo-ndk and cargo-apk ONLINE ONLY - robust version..."
-          cargo --version
-          rustc --version
-          echo "Trying cargo install cargo-ndk without --locked first..."
-          cargo install cargo-ndk --force 2>&1 | tail -n 100 || cargo install cargo-ndk --locked --force 2>&1 | tail -n 100 || cargo install cargo-ndk --version 3.5.2 --force 2>&1 | tail -n 100 || echo "cargo-ndk install failed, will try alternative"
-          cargo ndk --version || echo "cargo ndk not found, trying cargo install with git..."
-          if ! command -v cargo-ndk >/dev/null 2>&1 && ! cargo ndk --version >/dev/null 2>&1; then
-            echo "Trying cargo install cargo-ndk from git..."
-            cargo install --git https://github.com/bbqsrc/cargo-ndk --force 2>&1 | tail -n 100 || true
-          fi
-          echo "Trying cargo install cargo-apk..."
-          cargo install cargo-apk --force 2>&1 | tail -n 100 || cargo install cargo-apk --locked --force 2>&1 | tail -n 100 || echo "cargo-apk install failed, will use gradle fallback"
-          cargo apk --version || echo "cargo apk not found"
-          cargo ndk --version || echo "cargo ndk still not found"
-          echo "cargo-ndk and cargo-apk installation attempt complete"
-
-      - name: Build pure Rust Android APK ONLINE (Slint + Servo + hterm)
-        run: |
-          set -e
-          cd android-rs
-          echo "=== Building APK ONLINE ONLY (no --offline) ==="
-          echo "Building with Slint 1.8.0 + android-activity + hterm as iOS..."
-          cargo fetch --verbose 2>&1 | tail -n 50 || true
-          # Try cargo apk build if available, otherwise skip to Kotlin fallback
-          if cargo apk --version >/dev/null 2>&1 || cargo ndk --version >/dev/null 2>&1; then
-            echo "cargo-apk/cargo-ndk found, attempting APK build..."
-            cargo apk build --release --verbose 2>&1 | tail -n 300 || echo "cargo apk build failed, will try Kotlin fallback"
-          else
-            echo "cargo-apk not available, skipping to Kotlin fallback"
-          fi
-          
-          # Fallback: Kotlin APK that embeds pure Rust logic + hterm as iOS
-          if [ ! -f target/android-artifacts/app/build/outputs/apk/release/app-release.apk ]; then
-            echo "Fallback: Building Kotlin Android APK (pure Rust logic via JNI simulation + hterm as iOS)"
-            cd ../android
-            chmod +x gradlew
-            ./gradlew assembleDebug 2>&1 | tail -n 100 || gradle assembleDebug 2>&1 | tail -n 100 || echo "Gradle build failed, will try again with --no-daemon"
-            ./gradlew assembleDebug --no-daemon 2>&1 | tail -n 100 || true
-            ls -lh app/build/outputs/apk/debug/ app/build/outputs/apk/release/ || true
-            mkdir -p ../android-rs/target/android-artifacts/app/build/outputs/apk/release/
-            cp app/build/outputs/apk/debug/app-debug.apk ../android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk 2>/dev/null || cp app/build/outputs/apk/release/app-release-unsigned.apk ../android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk 2>/dev/null || true
-            cd ../android-rs
-          fi
-          ls -lh target/android-artifacts/app/build/outputs/apk/release/ || true
-          find target -name "*.apk" -type f | head -n 20 || find ../android -name "*.apk" -type f | head -n 20 || echo "No APK found yet"
-
-      - name: Build Kotlin Android APK ONLINE (with hterm as iOS) - robust
-        if: always()
-        run: |
-          cd android
-          chmod +x gradlew
-          echo "Building Kotlin APK ONLINE with hterm initialization as iOS..."
-          echo "Accepting Android licenses..."
-          yes | sdkmanager --licenses || true
-          echo "Building with gradle..."
-          ./gradlew assembleDebug --no-daemon 2>&1 | tail -n 200 || ./gradlew assembleDebug 2>&1 | tail -n 200 || gradle assembleDebug --no-daemon 2>&1 | tail -n 200 || gradle assembleDebug 2>&1 | tail -n 200 || echo "Gradle assembleDebug failed"
-          ls -lh app/build/outputs/apk/debug/ app/build/outputs/apk/release/ 2>&1 | head -n 30 || true
-          mkdir -p ../android-rs/screenshots
-          find app/build -name "*.apk" -exec ls -lh {} \; 2>&1 | head -n 20 || true
-          echo "Kotlin APK build attempt complete"
-
-      - name: Run APK on Android Emulator (linux + kvm + screenshot) ONLINE - robust
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          cores: 4
-          ram-size: 4096M
-          heap-size: 1024M
-          disk-size: 8192M
-          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on
-          disable-animations: true
-          script: |
-            set +e
-            echo "=== iSH Android Pure Rust Emulator Test (linux + kvm + hterm as iOS) ONLINE ONLY - ROBUST ==="
-            echo "KVM check:"
-            ls -lh /dev/kvm && echo "KVM available" || echo "KVM not available"
-            echo "Waiting for device..."
-            adb wait-for-device || true
-            echo "Checking boot_completed..."
-            for i in 1 2 3 4 5 6; do
-              adb shell getprop sys.boot_completed 2>&1 | tr -d '\r' | grep -q 1 && echo "Boot completed!" && break || echo "Waiting boot... $i" && sleep 10
-            done
-            echo "Emulator booted, waiting 15s..."
-            sleep 15
-            
-            APK_RUST="android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk"
-            APK_KOTLIN_DEBUG="android/app/build/outputs/apk/debug/app-debug.apk"
-            APK_KOTLIN_RELEASE="android/app/build/outputs/apk/release/app-release-unsigned.apk"
-            APK=""
-            if [ -f "$APK_RUST" ]; then APK="$APK_RUST"; echo "Using Rust APK (Slint + Servo + hterm): $APK";
-            elif [ -f "$APK_KOTLIN_DEBUG" ]; then APK="$APK_KOTLIN_DEBUG"; echo "Using Kotlin debug APK (hterm as iOS): $APK";
-            elif [ -f "$APK_KOTLIN_RELEASE" ]; then APK="$APK_KOTLIN_RELEASE"; echo "Using Kotlin release APK: $APK";
-            else
-              echo "No APK found in expected paths, searching..."
-              find . -name "*.apk" -type f 2>/dev/null | head -n 20 || true
-              APK=$(find . -name "*.apk" -type f 2>/dev/null | head -n 1 || true)
-            fi
-            
-            mkdir -p android-rs/screenshots
-            
-            if [ -z "$APK" ] || [ ! -f "$APK" ]; then
-              echo "ERROR: No APK found - taking empty screenshot and continuing"
-              adb exec-out screencap -p > android-rs/screenshots/emulator-screen.png 2>&1 || true
-              ls -lh android-rs/screenshots/ || true
-              echo "Listing all APKs for debug:"
-              find . -name "*.apk" -type f 2>/dev/null || true
-              echo "Emulator test completed with no APK (still success for artifact upload)"
-              exit 0
-            fi
-            
-            echo "Installing APK: $APK (size $(ls -lh $APK | awk '{print $5}'))"
-            adb install -r "$APK" 2>&1 || adb install -r -d "$APK" 2>&1 || echo "APK install failed, trying pm install"
-            adb shell pm install -r /data/local/tmp/$(basename $APK) 2>&1 || true
-            
-            PKG_RUST="com.ish.emulator.rust"
-            PKG_KOTLIN="com.ish.emulator"
-            PKG=""
-            if adb shell pm list packages 2>&1 | grep -q "$PKG_RUST"; then PKG="$PKG_RUST"; echo "Found Rust package $PKG";
-            elif adb shell pm list packages 2>&1 | grep -q "$PKG_KOTLIN"; then PKG="$PKG_KOTLIN"; echo "Found Kotlin package $PKG";
-            else PKG=$(adb shell pm list packages 2>&1 | grep ish | head -n 1 | cut -d: -f2 | tr -d '\r' | xargs || true); echo "Found package via grep: $PKG"; fi
-            if [ -z "$PKG" ]; then PKG="$PKG_KOTLIN"; echo "Fallback package $PKG"; fi
-            echo "Package: $PKG"
-            
-            adb shell pm clear "$PKG" 2>&1 || true
-            adb shell am force-stop "$PKG" 2>&1 || true
-            adb logcat -c 2>&1 || true
-            
-            echo "Starting app: $PKG/.MainActivity"
-            adb shell am start -n "$PKG/.MainActivity" 2>&1 || adb shell am start -n "$PKG/com.ish.emulator.MainActivity" 2>&1 || adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 2>&1 || true
-            sleep 20
-            
-            echo "Taking screenshots..."
-            adb exec-out screencap -p > android-rs/screenshots/emulator-screen-before.png 2>&1 || true
-            echo "First screenshot taken (should show hterm + SlintUi + Servo)"
-            
-            for i in 1 2 3; do
-              adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
-              adb shell cat /sdcard/window.xml 2>/dev/null | grep -Eqi 'responding|system.?ui' && adb shell input tap 540 1060 || true
-              sleep 2
-            done
-            
-            adb shell am force-stop com.android.systemui 2>&1 || true
-            sleep 3
-            adb shell am start -n "$PKG/.MainActivity" 2>&1 || true
-            sleep 10
-            
-            adb exec-out screencap -p > android-rs/screenshots/emulator-screen.png 2>&1 || true
-            echo "Main screenshot taken - hterm initialized as iOS"
-            
-            echo "Simulating UI interactions (help, about, roots, theme, prefs, apk, python)..."
-            adb shell input text "help" 2>&1 || true
-            adb shell input keyevent 66 2>&1 || true
-            sleep 3
-            adb exec-out screencap -p > android-rs/screenshots/emulator-screen-help.png 2>&1 || true
-            
-            adb shell input text "about" 2>&1 || true
-            adb shell input keyevent 66 2>&1 || true
-            sleep 3
-            adb exec-out screencap -p > android-rs/screenshots/emulator-screen-about.png 2>&1 || true
-            
-            adb shell input text "roots" 2>&1 || true
-            adb shell input keyevent 66 2>&1 || true
-            sleep 3
-            adb exec-out screencap -p > android-rs/screenshots/emulator-screen-roots.png 2>&1 || true
-            
-            adb shell input text "theme" 2>&1 || true
-            adb shell input keyevent 66 2>&1 || true
-            sleep 3
-            adb exec-out screencap -p > android-rs/screenshots/emulator-screen-theme.png 2>&1 || true
-            
-            adb shell input text "prefs" 2>&1 || true
-            adb shell input keyevent 66 2>&1 || true
-            sleep 3
-            adb exec-out screencap -p > android-rs/screenshots/emulator-screen-prefs.png 2>&1 || true
-            
-            adb shell input text "apk add python3" 2>&1 || true
-            adb shell input keyevent 66 2>&1 || true
-            sleep 3
-            adb exec-out screencap -p > android-rs/screenshots/emulator-screen-apk.png 2>&1 || true
-            
-            adb shell input text "python3 --version" 2>&1 || true
-            adb shell input keyevent 66 2>&1 || true
-            sleep 3
-            adb exec-out screencap -p > android-rs/screenshots/emulator-screen-python.png 2>&1 || true
-            
-            adb logcat -d -v threadtime > android-rs/screenshots/logcat.txt 2>&1 || true
-            adb shell dumpsys window windows > android-rs/screenshots/windows.txt 2>&1 || true
-            adb shell dumpsys activity activities > android-rs/screenshots/activities.txt 2>&1 || true
-            adb shell dumpsys activity activities | grep -i ish > android-rs/screenshots/activities-ish.txt 2>&1 || true
-            
-            echo "=== Emulator test complete ONLINE ONLY - ROBUST ==="
-            ls -lh android-rs/screenshots/ || true
-            adb shell ps -A 2>&1 | grep -i ish || true
-            cat android-rs/screenshots/logcat.txt 2>&1 | grep -i "iSH\|KVM\|Slint\|Servo\|hterm" | head -n 50 || true
-            echo "Emulator script finished with exit 0 (robust mode)"
-            exit 0
-
-      - name: Upload APK and screenshots (Pure Rust ONLINE)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ish-android-pure-rust-online-results
-          path: |
-            android-rs/target/android-artifacts/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/release/*.apk
-            android-rs/screenshots/*.png
-            android-rs/screenshots/*.txt
-            android-rs/assets/terminal/*
-            android/app/src/main/assets/terminal/*
-          if-no-files-found: warn
-
-      - name: Publish emulator screenshots branch
-        if: always() && github.event_name == 'push'
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          if [ ! -d android-rs/screenshots ] || [ -z "$(ls -A android-rs/screenshots/*.png 2>/dev/null)" ]; then echo "No screenshots"; exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin || true
-          git switch --orphan debug/android-pure-rust-latest || git checkout --orphan debug/android-pure-rust-latest
-          git rm -r --cached . >/dev/null 2>&1 || true
-          mkdir -p screenshots
-          cp android-rs/screenshots/*.png screenshots/ 2>/dev/null || true
-          cp android-rs/screenshots/*.txt screenshots/ 2>/dev/null || true
-          ls -lh screenshots/
-          git add screenshots/
-          git commit -m "chore: publish Android pure Rust ONLINE ONLY screenshots (Slint + Servo + hterm as iOS + KVM) [skip ci]" || true
-          git push origin HEAD:refs/heads/debug/android-pure-rust-latest --force || true
+          cargo run --bin ish-android-rs --no-default-features --features fast-test 2>&1 | tail -n 60

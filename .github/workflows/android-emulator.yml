@@ -1,113 +1,189 @@
-name: GTK Android Emulator
+name: Android Emulator Smoke Test
+
+# One place for "build the APK and prove it runs on a real emulator".
+# The config below follows the action's own README (ReactiveCircus/android-emulator-runner):
+#   * enable KVM perms, otherwise /dev/kvm exists but the runner cannot use it and
+#     x86_64 images refuse to boot -> "Timeout waiting for emulator to boot."
+#   * never pass -accel on by hand: the action's disable-linux-hw-accel=auto adds
+#     -accel off when KVM is missing; a manual -accel on just hard-fails the boot.
+#   * cold boot every run (-no-snapshot) is the other half of that timeout, so the
+#     AVD + its boot snapshot are cached and reused with -no-snapshot-save.
+#   * `script:` is split per line and each line gets its own `sh -c`, so the real
+#     test logic lives in .github/scripts/emulator-smoke-test.sh (one line here).
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'arena/**']
+    paths:
+      - 'android/**'
+      - 'android-rs/**'
+      - 'ish-rs/**'
+      - '.github/scripts/**'
+      - '.github/workflows/android-emulator.yml'
   pull_request:
-    branches: [main]
+    paths:
+      - 'android/**'
+      - 'android-rs/**'
+      - 'ish-rs/**'
+      - '.github/scripts/**'
   workflow_dispatch:
 
+# Emulator jobs are long; two runs at once on the same ref just waste each other.
+concurrency:
+  group: android-emulator-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
-  contents: write
+  contents: read
+
+env:
+  API_LEVEL: '34'
+  TARGET: google_apis        # x86_64 image guaranteed to exist; 'default' is lighter if you prefer it
+  ARCH: x86_64
+  PROFILE: pixel_6
+  AVD_NAME: ish-test
+  SCREENSHOT_DIR: android-rs/screenshots
 
 jobs:
-  emulator-test:
-    name: Install and run GTK APK
+  emulator:
+    name: Build APK + run on emulator (KVM, AVD snapshot cache)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 90
+    # Only the screenshot-publish step writes to the repo; everything else is read-only.
+    permissions:
+      contents: write
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      # --- terminal assets -------------------------------------------------
+      # hterm_all.js must exist in the app's assets before Gradle packages it.
+      - name: Prepare hterm terminal assets
+        run: bash .github/scripts/init-hterm-assets.sh
+
+      # --- build -----------------------------------------------------------
+      - name: Set up Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      # Pinned so the optional cargo-apk build below does not depend on whatever
+      # Rust version the runner image happens to ship this month.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+
+      # Installs a matching Gradle and caches ~/.gradle - the repo's gradlew is a
+      # stand-in wrapper with no gradle-wrapper.jar, so it relies on this.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.6'   # matches android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Build Kotlin APK (WebView + hterm shell)
+        working-directory: android
+        run: gradle --no-daemon assembleDebug
+
+      - name: Build pure Rust APK (optional - Slint/android-activity via cargo-apk)
+        working-directory: android-rs
+        continue-on-error: true
+        run: |
+          rustup target add aarch64-linux-android x86_64-linux-android
+          # cargo-apk drives cargo-ndk internally, so both are needed.
+          cargo install cargo-ndk cargo-apk --force --locked
+          cargo apk build --release || echo "::warning::cargo apk build failed - falling back to the Kotlin shell APK"
+
+      # Fail here, not 30 emulator-minutes later, when nothing is installable.
+      - name: Verify an APK was produced
+        run: |
+          find android android-rs -name '*.apk' -type f | sed 's/^/found: /'
+          if [ -z "$(find android android-rs -name '*.apk' -type f -print -quit)" ]; then
+            echo "::error::No APK was produced by either builder; the emulator would have nothing to install."
+            exit 1
+          fi
+
+      # --- AVD snapshot cache ----------------------------------------------
+      - name: Restore cached AVD
+        id: avd-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          # Bump the trailing vN whenever AVD-affecting inputs change (cores, ram-size)
+          # so a stale, incompatible snapshot is never restored.
+          key: avd-${{ env.API_LEVEL }}-${{ env.TARGET }}-${{ env.ARCH }}-${{ env.PROFILE }}-${{ env.AVD_NAME }}-v1
+
+      # Only runs on a cache miss: boot once, let the action save the snapshot on exit.
+      - name: Create AVD and snapshot for caching
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ env.API_LEVEL }}
+          target: ${{ env.TARGET }}
+          arch: ${{ env.ARCH }}
+          profile: ${{ env.PROFILE }}
+          avd-name: ${{ env.AVD_NAME }}
+          cores: 2
+          ram-size: 4096M
+          force-avd-creation: false
+          emulator-boot-timeout: 900
+          disable-animations: false
+          enable-hw-keyboard: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: echo "Generated AVD snapshot for caching."
+
+      # --- the actual test --------------------------------------------------
+      # Inputs affecting the AVD must match the snapshot step, or the cached AVD
+      # and this run disagree.
       - name: Run APK on Android Emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
-          target: default
-          arch: x86_64
-          profile: pixel_2
-          force-avd-creation: true
-          cores: 4
+          api-level: ${{ env.API_LEVEL }}
+          target: ${{ env.TARGET }}
+          arch: ${{ env.ARCH }}
+          profile: ${{ env.PROFILE }}
+          avd-name: ${{ env.AVD_NAME }}
+          cores: 2
           ram-size: 4096M
-          heap-size: 1024M
-          disk-size: 4096M
-          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
+          force-avd-creation: false
+          emulator-boot-timeout: 600
           disable-animations: true
-          script: |
-            set -e
-            adb wait-for-device
-            adb shell getprop sys.boot_completed | grep -q 1
-            sleep 15
-            adb install -r gtk-hello-android/gtk-hello-android-release.apk
-            adb shell pm clear com.example.gtkhelloworld || true
-            adb shell am force-stop com.example.gtkhelloworld || true
-            adb logcat -c || true
-            timeout 30s adb shell am start -n com.example.gtkhelloworld/org.gtk.android.ToplevelActivity
-            sleep 25
-            adb exec-out screencap -p > gtk-hello-android/emulator-screen-before-dismiss.png || true
-            # Android API 34 may show a transient System UI ANR dialog while
-            # background phone services finish booting. Dismiss it if present.
-            # Dismiss transient emulator ANR dialogs. Keep these as separate
-            # POSIX commands because the emulator runner executes each line
-            # as its own /bin/sh command.
-            adb shell uiautomator dump /sdcard/gtk-window.xml >/dev/null 2>&1 || true
-            adb shell cat /sdcard/gtk-window.xml 2>/dev/null | grep -Eqi 'responding|system.?ui' && adb shell input tap 540 1060 || true
-            sleep 2
-            adb shell uiautomator dump /sdcard/gtk-window.xml >/dev/null 2>&1 || true
-            adb shell cat /sdcard/gtk-window.xml 2>/dev/null | grep -Eqi 'responding|system.?ui' && adb shell input tap 540 1060 || true
-            sleep 2
-            adb shell uiautomator dump /sdcard/gtk-window.xml >/dev/null 2>&1 || true
-            adb shell cat /sdcard/gtk-window.xml 2>/dev/null | grep -Eqi 'responding|system.?ui' && adb shell input tap 540 1060 || true
-            sleep 2
-            adb shell uiautomator dump /sdcard/gtk-window.xml >/dev/null 2>&1 || true
-            adb shell cat /sdcard/gtk-window.xml 2>/dev/null | grep -Eqi 'responding|system.?ui' && adb shell input tap 540 1060 || true
-            sleep 2
-            adb shell uiautomator dump /sdcard/gtk-window.xml >/dev/null 2>&1 || true
-            adb shell cat /sdcard/gtk-window.xml 2>/dev/null | grep -Eqi 'responding|system.?ui' && adb shell input tap 540 1060 || true
-            sleep 2
-            adb shell uiautomator dump /sdcard/gtk-window.xml >/dev/null 2>&1 || true
-            adb shell cat /sdcard/gtk-window.xml 2>/dev/null | grep -Eqi 'responding|system.?ui' && adb shell input tap 540 1060 || true
-            # Do not send BACK here: if the final dialog has already been
-            # dismissed, BACK would finish the GTK Activity and show launcher.
-            # The dialog itself belongs to System UI, which is the component
-            # reported as ANR in logcat. Restart it so the final screenshot is
-            # not covered by a stale system dialog.
-            adb shell am force-stop com.android.systemui || true
-            sleep 5
-            adb shell am start -n com.example.gtkhelloworld/org.gtk.android.ToplevelActivity || true
-            sleep 8
-            adb logcat -d -v threadtime > gtk-hello-android/logcat.txt || true
-            adb shell dumpsys window windows > gtk-hello-android/windows.txt || true
-            adb exec-out screencap -p > gtk-hello-android/emulator-screen.png || true
-            grep -q 'GTK Hello World: activate started' gtk-hello-android/logcat.txt
-            grep -q 'GTK Hello World: window presented' gtk-hello-android/logcat.txt
-            adb shell ps -A | grep -q 'com.example.gtkhelloworld'
-            adb shell dumpsys activity activities | grep -q 'org.gtk.android.ToplevelActivity'
+          disable-spellchecker: true
+          enable-hw-keyboard: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash .github/scripts/emulator-smoke-test.sh
 
-      - name: Upload APK and emulator screenshot
+      - name: Upload emulator evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: gtk-hello-android-results
+          name: emulator-evidence
           path: |
-            gtk-hello-android/gtk-hello-android-release.apk
-            gtk-hello-android/emulator-screen.png
-            gtk-hello-android/emulator-screen-before-dismiss.png
-            gtk-hello-android/logcat.txt
-            gtk-hello-android/windows.txt
-            if-no-files-found: warn
+            ${{ env.SCREENSHOT_DIR }}/*.png
+            ${{ env.SCREENSHOT_DIR }}/*.txt
+            ${{ env.SCREENSHOT_DIR }}/*.xml
+            android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 14
 
-      - name: Publish emulator diagnostics branch
-        if: always() && github.event_name == 'push'
+      # Publishing to a branch makes the screenshots viewable at a stable raw URL
+      # that the job summary links to. It must never break CI.
+      - name: Publish screenshots to debug branch
+        if: always() && github.event_name != 'pull_request'
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          if [ ! -f gtk-hello-android/emulator-screen.png ]; then exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch --orphan debug/emulator-latest
-          git rm -r --cached . >/dev/null 2>&1 || true
-          git add gtk-hello-android/emulator-screen.png gtk-hello-android/emulator-screen-before-dismiss.png gtk-hello-android/logcat.txt gtk-hello-android/windows.txt
-          git commit -m "chore: publish latest emulator diagnostics [skip ci]" || true
-          git push origin HEAD:refs/heads/debug/emulator-latest --force
+        run: bash .github/scripts/publish-screenshots.sh "$SCREENSHOT_DIR" debug/android-emulator-latest
