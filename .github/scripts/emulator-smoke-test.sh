@@ -49,15 +49,17 @@ ok()   { PASS+=("$1"); printf '  [ok]   %s\n' "$1"; }
 bad()  { FAIL+=("$1"); printf '  [FAIL] %s\n' "$1"; }
 
 # `try` = run, echo, never abort. Failures are decided by explicit assertions.
+# `< /dev/null` matters: adb forwards stdin to the device, so a child left attached
+# to the loop's input pipe would swallow the remaining iterations.
 try() {
   printf '  $ %s\n' "$*"
-  sh -c "$*" 2>&1 | sed 's/^/  | /' || true
+  sh -c "$*" < /dev/null 2>&1 | sed 's/^/  | /' || true
 }
-adb_sh() { adb shell "$@" 2>&1 | tr -d '\r'; }
+adb_sh() { adb shell "$@" < /dev/null 2>&1 | tr -d '\r'; }
 
 shot() { # <name>
   local f="$OUT_DIR/$1.png"
-  if adb exec-out screencap -p > "$f" 2>/dev/null && [ "$(wc -c < "$f")" -gt 1024 ]; then
+  if adb exec-out screencap -p < /dev/null > "$f" 2>/dev/null && [ "$(wc -c < "$f")" -gt 1024 ]; then
     ok "screenshot $1.png ($(wc -c < "$f") bytes)"
   else
     # A missing screencap is an emulator/GPU flake, not an app failure: warn, do not redden the run.
@@ -75,7 +77,7 @@ collect_evidence() {
   adb_sh dumpsys activity activities > "$OUT_DIR/activities.txt" 2>/dev/null || true
   [ -n "$PKG" ] && adb_sh dumpsys package "$PKG" > "$OUT_DIR/package.txt" 2>/dev/null
   try "adb shell uiautomator dump /sdcard/window.xml"
-  adb exec-out cat /sdcard/window.xml > "$OUT_DIR/window.xml" 2>/dev/null || true
+  adb exec-out cat /sdcard/window.xml < /dev/null > "$OUT_DIR/window.xml" 2>/dev/null || true
   ls -l "$OUT_DIR" | sed 's/^/  /'
 }
 
@@ -175,7 +177,7 @@ cp -f "$SELECTED_APK" "$OUT_DIR/app.apk" 2>/dev/null || true
 # 3. install (allow test-only/unsigned), grant runtime permissions at install
 # ---------------------------------------------------------------------------
 note "installing with: adb install -r -g -t $SELECTED_APK"
-INSTALL_OUT="$(adb install -r -g -t "$SELECTED_APK" 2>&1 | tr -d '\r')"
+INSTALL_OUT="$(adb install -r -g -t "$SELECTED_APK" < /dev/null 2>&1 | tr -d '\r')"
 printf '%s\n' "$INSTALL_OUT" | sed 's/^/  | /'
 if grep -q 'Success' <<<"$INSTALL_OUT"; then
   ok "adb install succeeded"
@@ -186,7 +188,7 @@ else
   for p in $(grep -E 'ish|gtk' <<<"$PKG_LIST" | sed -n 's/^package://p' || true); do
     try "adb shell pm uninstall $p"
   done
-  INSTALL_OUT="$(adb install -r -g -t "$SELECTED_APK" 2>&1 | tr -d '\r')"
+  INSTALL_OUT="$(adb install -r -g -t "$SELECTED_APK" < /dev/null 2>&1 | tr -d '\r')"
   printf '%s\n' "$INSTALL_OUT" | sed 's/^/  | /'
   if grep -q 'Success' <<<"$INSTALL_OUT"; then ok "adb install succeeded on retry"; else bad "adb install failed: $(printf '%s' "$INSTALL_OUT" | tr '\n' ' ' | cut -c1-200)"; report_and_exit; fi
 fi
@@ -268,7 +270,8 @@ fi
 # ---------------------------------------------------------------------------
 shot screen-boot
 UI_COMMANDS="${UI_COMMANDS:-apk add python3:apk;python3 --version:python;help:help;about:about;roots:roots;theme:theme;prefs:prefs}"
-while IFS= read -r pair; do
+mapfile -t UI_PAIRS < <(printf '%s\n' "$UI_COMMANDS" | tr ';' '\n')
+for pair in "${UI_PAIRS[@]}"; do
   [ -n "$pair" ] || continue
   cmd="${pair%%:*}"
   label="${pair##*:}"
@@ -279,7 +282,7 @@ while IFS= read -r pair; do
   try "adb shell input keyevent 66"
   sleep 3
   shot "screen-$label"
-done < <(printf '%s\n' "$UI_COMMANDS" | tr ';' '\n')
+done
 
 # ---------------------------------------------------------------------------
 # 6. final verdict: the app must still be the live foreground UI
