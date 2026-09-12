@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.iSH" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="android:statusBarColor">@color/black</item>
+        <item name="android:windowBackground">@color/black</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

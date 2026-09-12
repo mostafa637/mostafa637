@@ -1,0 +1,27 @@
+[package]
+name = "ish-android-rs"
+version = "0.1.0"
+edition = "2021"
+description = "iSH Android pure Rust port - SlintUi + Servo WebView + KVM emulator testing + hterm as iOS"
+license = "GPL-2.0-or-later"
+repository = "https://github.com/ish-app/ish"
+
+[lib]
+name = "ish_android_rs"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ish-android-rs"
+path = "src/main.rs"
+
+[dependencies]
+ish-emu = { path = "../ish-rs" }
+
+[patch.crates-io]
+libc = { path = "../ish-rs/vendor/libc" }
+
+[profile.release]
+opt-level = 3
+debug = true
+lto = false

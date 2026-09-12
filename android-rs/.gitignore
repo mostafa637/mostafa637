@@ -1,0 +1,5 @@
+/target
+/android
+/android-artifacts
+/screenshots
+*.apk
