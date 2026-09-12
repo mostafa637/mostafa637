@@ -176,12 +176,12 @@ def make_queue():
 ])
 
 #exercise(label-name: <ex:deque>, [
-الطابور المزدوج (#emph[deque] -
+الـ #emph[ديك] (#en[deque] — «الطابور ذو النهايتين»)
 #idx("queue", sub: "double-ended")
 #idx("deque")
-"الطابور ذو النهايتين") هو تسلسل يمكن إدراج وحذف العناصر فيه إما عند المقدمة أو عند الخلفية.
-والعمليات على السطور المزدوجة هي المنشئ #py("make_deque")، والمحمول #py("is_empty_deque")، والمحددات #py("front_deque") و #py("rear_deque")، ودوال التعديل #py("front_insert_deque") و #py("front_delete_deque") و #py("rear_insert_deque") و #py("rear_delete_deque").
-أظهر كيفية تمثيل السطور المزدوجة باستخدام الأزواج، وقدم تنفيذات للعمليات.#footnote[احرص على عدم جعل المفسر يحاول طباعة بنية تحتوي على دورات. (انظر التمرين @ex:make-cycle).]
+هو تسلسل يمكن إدراج وحذف العناصر فيه إما عند المقدمة أو عند الخلفية.
+والعمليات على الديوك هي المنشئ #py("make_deque")، والمحمول #py("is_empty_deque")، والمحددات #py("front_deque") و #py("rear_deque")، ودوال التعديل #py("front_insert_deque") و #py("front_delete_deque") و #py("rear_insert_deque") و #py("rear_delete_deque").
+أظهر كيفية تمثيل الديوك باستخدام الأزواج، وقدم تنفيذات للعمليات.#footnote[احرص على عدم جعل المفسر يحاول طباعة بنية تحتوي على دورات. (انظر التمرين @ex:make-cycle).]
 ويجب أن تتطلب جميع العمليات $Theta(1)$ من الخطوات.
 ])
 
