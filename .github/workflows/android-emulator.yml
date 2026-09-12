@@ -112,11 +112,24 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/$SCREENSHOT_DIR"
           tail -n 400 "$GITHUB_WORKSPACE/gradle-build.log" > "$GITHUB_WORKSPACE/$SCREENSHOT_DIR/gradle-build.txt" || true
           if [ "$rc" -ne 0 ]; then
-            grep -nE 'FAILURE|What went wrong|error:|Caused by|Could not (resolve|find|download)|SDK component' \
-              "$GITHUB_WORKSPACE/gradle-build.log" | tail -n 25 > /tmp/err.txt || true
-            MSG=$(sed 's/%/%25/g; s/:/%3A/g' /tmp/err.txt |
-                   awk '{printf "%s%s", (NR > 1 ? "%0A" : ""), $0}')
+            LOG="$GITHUB_WORKSPACE/gradle-build.log"
+            {
+              # `^e: ` is how kotlinc reports real compile errors; javac/AAPT use `error:`.
+              grep -E '^e: |^[0-9]+: error: |error: ' "$LOG" | head -n 15
+              grep -E 'What went wrong' -A 5 "$LOG" | head -n 12
+              grep -E '> Task .*FAILED' "$LOG" | head -n 5
+            } > /tmp/err.txt || true
+            [ -s /tmp/err.txt ] || tail -n 25 "$LOG" > /tmp/err.txt
+            # Annotations are the only channel that survives back to a plain API
+            # client (raw logs and artifacts sit on blob storage), so keep it short.
+            MSG=$(head -c 4500 /tmp/err.txt | sed 's/%/%25/g' |
+                  awk '{printf "%s%s", (NR > 1 ? "%0A" : ""), $0}')
             echo "::error::gradle assembleDebug failed (exit $rc): %0A${MSG}"
+            {
+              printf '\n### gradle assembleDebug failed\n\n```\n'
+              head -c 4500 /tmp/err.txt
+              printf '\n```\n'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
           exit "$rc"
 
