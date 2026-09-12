@@ -5,7 +5,7 @@
 
 #idx("generic arithmetic operations")
 
-تشبه مهمة تصميم عمليات حسابية عامة مهمة تصميم عمليات الأعداد المركبة العامة. ونود، على سبيل المثال، أن تكون لدينا دالة جمع عامة #py("add") تتصرف مثل الجمع الأولي العادي #py("+") على الأعداد العادية، ومثل #py("add_rat") على الأعداد الكسرية، ومثل #py("add_complex") على الأعداد المركبة. ويمكننا تنفيذ #py("add")، والعمليات الحسابية العامة الأخرى، باتباع استراتيجية التوجيه بالبيانات نفسها التي استخدمناها في القسم @sec:data-directed لتنفيذ محددات الاختيارات العامة للأعداد المركبة. وسوف نرفق وسم نوع بكل نوع من الأعداد ونجعل الدالة العامة ترسل الإرسال إلى حزمة مناسبة وفقًا لنوع بيانات وسائطها.
+تشبه مهمة تصميم عمليات حسابية عامة مهمة تصميم عمليات الأعداد المركبة العامة. ونود، على سبيل المثال، أن تكون لدينا دالة جمع عامة #py("add") تتصرف مثل الجمع الأولي العادي #py("+") على الأعداد العادية، ومثل #py("add_rat") على الأعداد الكسرية، ومثل #py("add_complex") على الأعداد المركبة. ويمكننا تنفيذ #py("add")، والعمليات الحسابية العامة الأخرى، باتباع استراتيجية البرمجة الموجَّهة بالبيانات نفسها التي استخدمناها في القسم @sec:data-directed لتنفيذ محددات الاختيارات العامة للأعداد المركبة. وسوف نرفق وسم نوع بكل نوع من الأعداد ونجعل الدالة العامة ترسل العمل إلى حزمة مناسبة وفقًا لنوع بيانات وسائطها.
 
 وتُعرَّف الدوال الحسابية العامة كما يلي:
 #idx("add (generic)", decl: true)#idx("sub (generic)", decl: true)#idx("mul (generic)", decl: true)#idx("div (generic)", decl: true)
@@ -48,7 +48,7 @@ def make_python_number(n):
     return get("make", "python_number")(n)
 ```)
 
-الآن وبعد أن أصبح إطار عمل نظام الحساب العام قائماً، يمكننا facilmente تضمين أنواع جديدة من الأعداد. إليك حزمة تؤدي الحساب الكسري. لاحظ أنه كفائدة للخاصية الجمعية، يمكننا استخدام شفرة الأعداد الكسرية من القسم @sec:rationals دون تعديل كدوال داخلية في الحزمة:
+الآن وبعد أن أصبح إطار عمل نظام الحساب العام قائماً، يمكننا بسهولة تضمين أنواع جديدة من الأعداد. إليك حزمة تجري الحساب على الأعداد الكسرية. لاحظ أنه كفائدة من التجمعية، يمكننا استخدام شفرة الأعداد الكسرية من القسم @sec:rationals دون تعديل كدوال داخلية في الحزمة:
 #idx("package", sub: "rational-number")#idx("rational package")#idx("rational-number arithmetic", sub: "interfaced to generic arithmetic system")#idx("installrationalpackage", decl: true)#idx("makerational", decl: true)
 #snippet(```python
 def install_rational_package():
@@ -91,7 +91,7 @@ def make_rational(n, d):
 
 يمكننا تثبيت حزمة مماثلة للتعامل مع الأعداد المركبة، باستخدام الوسم #py("\"complex\"").
 وفي إنشاء الحزمة، نستخرج من الجدول العمليات #py("make_from_real_imag") و #py("make_from_mag_ang") التي عُرِّفت بوساطة الحزمتين المستطيلية والقطبية.
-وتسمح لنا الخاصية الجمعية (#idx("additivity")) باستخدام الدوال نفسها #py("add_complex") و #py("sub_complex") و #py("mul_complex") و #py("div_complex") من القسم @sec:representations-complex-numbers كعمليات داخلية.
+وتسمح لنا التجمعية (#idx("additivity")) باستخدام الدوال نفسها #py("add_complex") و #py("sub_complex") و #py("mul_complex") و #py("div_complex") من القسم @sec:representations-complex-numbers كعمليات داخلية.
 #idx("package", sub: "complex-number")#idx("complex package")#idx("complex-number arithmetic", sub: "interfaced to generic arithmetic system")#idx("installcomplexpackage", decl: true)
 #snippet(```python
 def install_complex_package():
@@ -130,7 +130,7 @@ def install_complex_package():
     return "done"
 ```)
 
-يمكن للبرامج خارج حزمة الأعداد المركبة بناء الأعداد المركبة إما من أجزاء حقيقية وتخيلية وإما من سعات وزوايا. لاحظ كيف أن الدوال الأساسية، المعرّفة أصلًا في الحزمتين المستطيلية والقطبية، تُمَدّ إلى الحزمة المركبة، وتُمَدّ من هناك إلى العالم الخارجي.
+يمكن للبرامج خارج حزمة الأعداد المركبة بناء الأعداد المركبة إما من أجزاء حقيقية وتخيلية وإما من سعات وزوايا. لاحظ كيف أن الدوال الأساسية، المعرّفة أصلًا في الحزمتين المستطيلية والقطبية، تُصدَّر إلى الحزمة المركبة، وتُصدَّر من هناك إلى العالم الخارجي.
 
 #idx("makecomplexfromrealimag", decl: true)#idx("makecomplexfrommagang", decl: true)
 #snippet(```python
@@ -140,7 +140,7 @@ def make_complex_from_mag_ang(r, a):
     return get("make_from_mag_ang", "complex")(r, a)
 ```)
 
-ما لدينا هنا هو #idx("type tag", sub: "two-level") نظام وسوم من مستويين. فالعدد المركب النموذجي، مثل $3+4i$ في الشكل المستطيلي، سيمثل كما هو موضح في الشكل @fig:complex-number-structure.
+ما لدينا هنا هو #idx("type tag", sub: "two-level") نظام وسوم من مستويين. فالعدد المركب النموذجي، مثل $3+4i$ في الشكل المستطيلي، سيمثَّل كما هو موضح في الشكل @fig:complex-number-structure.
 يُستخدم الوسم الخارجي (#py("\"complex\"")) لتوجيه العدد إلى الحزمة المركبة. وبمجرد الدخول إلى الحزمة المركبة، يُستخدم الوسم التالي (#py("\"rectangular\"")) لتوجيه العدد إلى الحزمة المستطيلية. وفي نظام كبير ومعقد قد تكون هناك مستويات عديدة، يرتبط كل منها بالمستوى التالي بوساطة عمليات عامة. ومع تمرير كائن البيانات "لأسفل"، يُنتزع الوسم الخارجي المستخدَم لتوجيهه إلى الحزمة المناسبة (عن طريق تطبيق #py("contents")) ويصبح المستوى التالي من الوسم (إن وجد) مرئياً ليُستخدَم للإرسال الإضافي.
 
 #sicp-figure(image("/images/img_javascript/ch2-Z-G-65.svg", width: 70%), caption: [تمثيل $3+4i$ في الشكل المستطيلي.], label-name: <fig:complex-number-structure>)
@@ -159,7 +159,7 @@ put("magnitude", llist("complex"), magnitude)
 print(put("angle", llist("complex"), angle))
 ```)
 
-صف بالتفصيل سبب عمل هذا. وكأمثلة، تتبع عبر جميع الدوال المستدعاة في تقييم التعبير #py("magnitude(z)") حيث #py("z") هو الكائن الموضح في الشكل @fig:complex-number-structure. وعلى وجه الخصوص، كم مرة تُستدعى #py("apply_generic")؟ وإلى أي دالة يُرسَل في كل حالة؟
+صِف بالتفصيل سبب عمل هذا. وكمثال، تتبَّع عبر جميع الدوال المستدعاة في تقييم التعبير #py("magnitude(z)") حيث #py("z") هو الكائن الموضح في الشكل @fig:complex-number-structure. وعلى وجه الخصوص، كم مرة تُستدعى #py("apply_generic")؟ وإلى أي دالة يُرسَل في كل حالة؟
 ])
 
 #exercise(label-name: <ex:internal-type-system>, [

@@ -4,133 +4,101 @@
 #subsection([مثال: الجبر الرمزي], label-name: <sec:symbolic-algebra>)
 
 #idx("symbolic algebra")
-#idx("algebra", sub: "symbolic")
 
-تُعد معالجة التعبيرات الجبرية الرمزية عملية معقدة توضح العديد من القضايا المتعلقة بتجريد البيانات. وتتراوح الأنظمة المصممة لمعالجة التعبيرات الجبرية من المعالجات القائمة على القواعد البسيطة، إلى المجمعات القائمة على تبسيط التعبيرات الخاصة، وصولاً إلى الأنظمة العامة المعقدة للغاية. وفي هذا القسم ننظر إلى سياق محدود ولكنه مهم لحسابيات متعددي الحدود (#en[polynomials]). وتلك مهمة حسابية شائعة، وتعتمد الخوارزميات المتقدمة في الجبر الحاسوبي بشكل مكثف على معالجة متعددي الحدود.
+تُعدّ التلاعب بالتعبيرات الجبرية الرمزية عمليةً معقدة توضح كثيراً من أصعب المسائل التي تحدث في تصميم الأنظمة واسعة النطاق. والتعبير #idx("algebraic expression") الجبري، عموماً، يمكن اعتباره بنيةً هرمية، شجرةً من العوامل مطبقةً على وسائط. ويمكننا بناء تعبيرات جبرية بالبدء بمجموعة من الكائنات الأولية، مثل الثوابت والمتغيرات، ودمج هذه بوساطة عوامل جبرية، مثل الجمع والضرب. وكما في اللغات الأخرى، نشكّل تجريديات تمكّننا من الإشارة إلى الكائنات المركبة بعبارة بسيطة. والتجريديات النموذجية في الجبر الرمزي هي أفكار مثل التركيبة الخطية، والحدودية، والدالة الناطقة، أو الدالة المثلثية. ويمكننا اعتبار هذه "أنواعاً" مركبة، وهي غالباً مفيدة لتوجيه معالجة التعبيرات. فعلى سبيل المثال، يمكننا وصف التعبير
 
+$ x^(2) thin sin (y^(2)+1)+x thin cos 2y+ cos (y^(3) -2y^(2)) $
+
+كحدوديةٍ في $x$ معاملاتها دوالٌ مثلثية لحدودياتٍ في
+$y$ معاملاتها أعداد صحيحة.
+
+لن نحاول تطوير نظام كامل للتلاعب الجبري هنا. فمثل هذه الأنظمة برامجٌ معقدة للغاية، تجسّد معرفةً جبريةً عميقةً وخوارزميات أنيقة. وما سنفعله هو النظر إلى جزء بسيط لكنه مهم من التلاعب الجبري: حسابيات الحدوديات. وسنوضح أنواع القرارات التي يواجهها مصمم مثل هذا النظام، وكيفية تطبيق أفكار البيانات المجردة والعمليات العامة للمساعدة في تنظيم هذا الجهد.
+
+#subheading([حسابيات الحدوديات])
+
+#idx("polynomial(s)")
 #idx("polynomial arithmetic")
-#idx("arithmetic", sub: "of polynomials")
 
-سنقوم ببناء نظام يؤدي العمليات الحسابية على متعددي الحدود. وهدفنا الأساسي هو توضيح كيفية دمج متعددي الحدود في نظامنا الحسابي العام، مع الحفاظ على التجريد البياناتي السليم.
+مهمتنا الأولى في تصميم نظام لإجراء حسابيات على الحدوديات هي أن نقرر ما هي الحدودية بالضبط. تُعرَّف الحدوديات عادةً بالنسبة إلى متغيرات معينة (وهي #idx("indeterminate of a polynomial") #idx("polynomial(s)", sub: "indeterminate of") #emph[المجهولات] #en[indeterminates] للحدودية). وللتبسيط، سنحصر أنفسنا في حدوديات ذات مجهول واحد فقط #idx("univariate polynomial") #idx("polynomial(s)", sub: "univariate") #emph[(حدوديات أحادية المتغير]).#footnote[من ناحية أخرى، سنسمح بحدودياتٍ معاملاتها حدودياتٌ في متغيرات أخرى بحد ذاتها. وهذا يمنحنا عملياً القوة التمثيلية نفسها التي يوفرها نظام كامل متعدد المتغيرات، وإن كان يقود إلى مشاكل تحويل إجباري، كما سنناقش أدناه.] وسنعرّف الحدودية بأنها مجموعٌ من الحدود، كلٌّ منها إما معامل، أو قوة للمجهول، أو جداء معاملٍ في قوة للمجهول. ويُعرَّف المعامل بأنه تعبير جبري لا يعتمد على مجهول الحدودية. فعلى سبيل المثال،
 
-=== حسابيات متعددي الحدود
+$ 5x^(2) +3x +7 $
 
-#idx("polynomial arithmetic", sub: "definition of polynomial")
-#idx("polynomial(s)", sub: "definition of")
+حدودية بسيطة في $x$، و
 
-تُعرّف حدودية متعددي الحدود (#en[polynomial]) عادةً بدلالة متغير غير محدد (أو متغير مستقل - #idx("indeterminate") #emph[indeterminate]) يُرمز له بالرمز $x$. وتُكتب الحدودية كمجموع من الحدود (#en[terms]):
-$ a_n x^n + a_(n-1) x^(n-1) + ... + a_1 x + a_0 $
-حيث $a_n, a_(n-1), ..., a_0$ هي المعاملات (#idx("coefficient") #emph[coefficients])، و $n$ هي الدرجة أو الرتبة (#emph[order])، و $x^k$ هي القوى المتتالية للمتغير.
+$ (y^(2) +1)x^(3) +(2y)x+1 $
 
-في هذا القسم سننظر فقط في #idx("univariate polynomial") #idx("polynomial(s)", sub: "univariate") #emph[متعددي الحدود أحادي المتغير] (#en[univariate polynomials])، أي تلك التي تحتوي على متغير مستقل واحد.
+حدودية في $x$ معاملاتها
+حدوديات في $y$.
 
-لتنفيذ الحسابيات على متعددي الحدود، يجب أن نتفق على التجريد الذي يمثل حدودية ما. الحدودية تنتمي إلى نوع بيانات معين ويكون لها متغير محدد وقائمة من الحدود. وسوف نستخدم الوسم #py("polynomial") لتمثيل هذا النوع.
+وهذا يكفي لنتفاهُ مع بعض القضايا الشائكة. هل الأولى من هاتين الحدوديتين هي نفسها الحدودية $5y^(2) +3y +7$ أم لا؟ قد يكون الجواب المعقول "نعم، إذا كنا نعتبر الحدودية بوصفها دالة رياضية خالصة، ولا، إذا كنا نعتبر الحدودية صورةً نحوية." والحدودية الثانية مكافئة جبرياً لحدوديةٍ في $y$ معاملاتها حدودياتٌ في $x$. هل ينبغي لنظامنا أن يتعرف على هذا أم لا؟ علاوة على ذلك، هناك طرق أخرى لتمثيل حدودية — على سبيل المثال، كجداء عوامل، أو (لحدودية أحادية المتغير) كمجموعة الجذور، أو كسردٍ لقيم الحدودية عند مجموعة معينة من النقاط.#footnote[للحدوديات أحادية المتغير، يمكن أن يكون إعطاء قيمة الحدودية عند مجموعة معينة من النقاط تمثيلاً جيداً على وجه الخصوص. فهذا يجعل حسابيات الحدوديات بسيطة للغاية. فللحصول، على سبيل المثال، على مجموع حدوديتين ممثلتين بهذه الطريقة، نحتاج فقط إلى جمع قيمتي الحدوديتين عند النقاط المناظرة. ولالتحول إلى تمثيل أكثر ألفة، يمكننا استخدام #idx("Lagrange interpolation formula") صيغة الاستيفاء لاغرانج، التي تبين كيف نستعيد معاملات حدودية درجتها $n$ بمعلومية قيم الحدودية عند $n+1$ نقطة.] ويمكننا ترويض هذه الأسئلة بإقرار أن "الحدودية" في نظام التلاعب الجبري لدينا ستكون صورةً نحويةً معينة، لا معناها الرياضي الكامن.
 
-نعرف المنشئات والمحددات لمتعددي الحدود كما يلي:
+الآن علينا أن ننظر في كيفية إجراء حسابيات على الحدوديات. في هذا النظام البسيط، سننظر فقط في الجمع والضرب. علاوة على ذلك، سنصرّ على أن تكون الحدوديتان المراد دمجهما لهما المجهول نفسه.
 
-#snippet(```python
-def make_polynomial(variable, term_list):
-    return contents(apply_generic("make_polynomial",
-                                  llist(variable, term_list)))
-
-def variable(p):
-    return apply_generic("variable", llist(p))
-
-def term_list(p):
-    return apply_generic("term_list", llist(p))
-```)
-
-وسوف نستخدم الرموز لتمثيل المتغيرات، مثل الرمز #py("\"x\""). ونستخدم الدالة #py("is_same_variable") للتحقق مما إذا كان متغيران متطابقين:
-
-#snippet(```python
-def is_same_variable(v1, v2):
-    return is_variable(v1) and is_variable(v2) and v1 == v2
-
-def is_variable(x):
-    return is_string(x)
-```)
-
-يمكننا إضافة حدوديتين إذا كانتا في المتغير نفسه، وذلك بجمع حدودهما المناظرة. وإذا كانت الحدوديتان في متغيرين مختلفين، يمكننا إما إطلاق خطأ أو تحويلهما إلى متغير مشترك إذا كانت هناك أولوية محددة بين المتغيرات.
-
-نعرف الدالة العامية #py("add_poly") والجمع الكلي لمتعددي الحدود:
-
+سنتعامل مع تصميم نظامنا باتباع انضباط تجريد البيانات المألوف. وسنمثّل الحدوديات باستخدام بنية بيانات تسمى #idx("poly") #emph[poly]، تتكون من متغير و #idx("term list of polynomial") مجموعةٍ من الحدود. ونفترض أن لدينا محددين #py("variable") و #py("term_list") يستخرجان هذين الجزأين من poly، ومُنشِئاً #py("make_poly") يجمّع poly من متغير معطى وقائمة حدود. وسيكون المتغير مجرد
+سلسلة نصية،
+حتى نتمكن من استخدام #idx("issamevariable") دالةِ #py("is_same_variable") من القسم @sec:symbolic-differentiation لمقارنة
+المتغيرات. والدالتان التاليتان تُعرِّفان #idx("polynomial arithmetic", sub: "addition") #idx("polynomial arithmetic", sub: "multiplication") جمعَ polys وضربَها:
+#idx("addpoly", decl: true)#idx("mulpoly", decl: true)
 #snippet(```python
 def add_poly(p1, p2):
-    if is_same_variable(variable(p1), variable(p2)):
-        return make_polynomial(variable(p1),
-                               add_terms(term_list(p1),
-                                         term_list(p2)))
-    else:
-        error("Polys not in same var -- ADD_POLY", llist(p1, p2))
-
+    return (make_poly(variable(p1),
+                      add_terms(term_list(p1), term_list(p2)))
+            if is_same_variable(variable(p1), variable(p2))
+            else error("polys not in same var -- add_poly", llist(p1, p2)))
 def mul_poly(p1, p2):
-    if is_same_variable(variable(p1), variable(p2)):
-        return make_polynomial(variable(p1),
-                               mul_terms(term_list(p1),
-                                         term_list(p2)))
-    else:
-        error("Polys not in same var -- MUL_POLY", llist(p1, p2))
+    return (make_poly(variable(p1),
+                      mul_terms(term_list(p1), term_list(p2)))
+            if is_same_variable(variable(p1), variable(p2))
+            else error("polys not in same var -- mul_poly", llist(p1, p2)))
 ```)
 
-نثبت هذه العمليات في النظام العام:
+ولدمج الحدوديات في نظامنا الحسابي العام، نحتاج إلى تزويدها بوسوم أنواع. سنستخدم الوسم #py("\"polynomial\"")، ونثبّت العمليات المناسبة على الحدوديات الموسومة في جدول العمليات.
 
-#snippet(```python
+سنضمّن شفرتنا كلها في دالة تثبيت
+لحزمة الحدوديات،
+مماثلة لدوال التثبيت في
+القسم @sec:generic-arithmetic-operators:
+#idx("package", sub: "polynomial")#idx("polynomial package")#idx("polynomial arithmetic", sub: "interfaced to generic arithmetic system")#idx("installpolynomialpackage", decl: true)#idx("makepoly", decl: true)#idx("variable", decl: true)#idx("termlist", decl: true)
+#syntax("
 def install_polynomial_package():
-    # Internal procedures
+    # internal functions
+    # representation of poly
     def make_poly(variable, term_list):
-        return llist(variable, term_list)
-    def var(p): return head(p)
-    def tag_term_list(p): return head(tail(p))
+        return pair(variable, term_list)
+    def variable(p): return head(p)
+    def term_list(p): return tail(p)
+    ", metaphrase[functions #py("is_same_variable") and #py("is_variable") from section 2.3.2], "
 
-    def add_poly(p1, p2):
-        if is_same_variable(var(p1), var(p2)):
-            return make_poly(var(p1),
-                             add_terms(tag_term_list(p1),
-                                       tag_term_list(p2)))
-        else:
-            error("Polys not in same var -- ADD_POLY", llist(p1, p2))
+    # representation of terms and term lists
+    ", metaphrase[functions #py("adjoin_term...coeff") from text below], "
 
-    def mul_poly(p1, p2):
-        if is_same_variable(var(p1), var(p2)):
-            return make_poly(var(p1),
-                             mul_terms(tag_term_list(p1),
-                                       tag_term_list(p2)))
-        else:
-            error("Polys not in same var -- MUL_POLY", llist(p1, p2))
+    def add_poly(p1, p2): ...
+    ", metaphrase[functions used by #py("add_poly")], "
+    def mul_poly(p1, p2): ...
+    ", metaphrase[functions used by #py("mul_poly")], "
 
-    # Interface to rest of the system
-    def tag(p): return attach_tag("polynomial", p)
-    put("add", llist("polynomial", "polynomial"),
+    # interface to rest of the system
+    def tag(p): return attach_tag(\"polynomial\", p)
+    put(\"add\", llist(\"polynomial\", \"polynomial\"),
         lambda p1, p2: tag(add_poly(p1, p2)))
-    put("mul", llist("polynomial", "polynomial"),
+    put(\"mul\", llist(\"polynomial\", \"polynomial\"),
         lambda p1, p2: tag(mul_poly(p1, p2)))
-    put("make_polynomial", "polynomial",
-        lambda variable, term_list: tag(make_poly(variable, term_list)))
-    return "done"
-```)
+    put(\"make\", \"polynomial\",
+        lambda variable, terms: tag(make_poly(variable, terms)))
+    return \"done\"
+	    ")
 
-=== تمثيل قوائم الحدود
+يُجرى جمع الحدوديات حدَّاً حدَّاً. ويجب دمج الحدود من الرتبة نفسها (أي ذات القوة نفسها للمجهول). ويتم ذلك بتشكيل حدٍّ جديد من الرتبة نفسها يكون معامله مجموع معاملي الحدَّين المضافَين. أما الحدود في أحد الحدَّين المضافَين والتي لا تقابلها حدودٌ من الرتبة نفسها في الحدِّ المضاف الآخر فتُراكم ببساطة في حدودية المجموع قيد البناء.
 
-الآن نحتاج إلى تنفيذ العمليات #py("add_terms") و #py("mul_terms") على قوائم الحدود (#en[term lists]). تدمج #py("add_terms") قائمتين من الحدود لتشكيل قائمة حدود حاصل الجمع، وتضرب #py("mul_terms") كل حد من القائمة الأولى في كل حد من القائمة الثانية وتجمع النتائج.
+وللتلاعب بقوائم الحدود، سنفترض أن لدينا مُنشِئاً #idx("theemptytermlist") #py("the_empty_termlist") يرجع قائمة حدود فارغة، ومُنشِئاً #idx("adjointerm") #py("adjoin_term") يلحق حداً جديداً بقائمة حدود. وسنفترض أيضاً أن لدينا محمولاً #idx("isemptytermlist") #py("is_empty_termlist") يخبر ما إذا كانت قائمة حدود معطاة فارغة، ومحدداً #idx("firstterm") #py("first_term") يستخرج الحد الأعلى رتبةً من قائمة حدود، ومحدداً #idx("restterms") #py("rest_terms") يرجع كل شيء ما عدا الحد الأعلى رتبةً. ولتلاعب الحدود، سنفترض أن لدينا مُنشِئاً #idx("maketerm") #py("make_term") يبني حداً برتبة ومعامل معطيين، ومحددين #idx("order") #py("order") و #idx("coeff") #py("coeff") يرجعان، على التوالي، رتبة الحد ومعامله. وتتيح لنا هذه العمليات اعتبار الحدود وقوائم الحدود كليهما تجريدياتِ بياناتٍ يمكننا أن نقلق بشأن تمثيلاتها الملموسة على حدة.
 
-#idx("term list")
-#idx("polynomial arithmetic", sub: "term lists")
+وهذه #idx("polynomial arithmetic", sub: "addition") الدالةُ التي تبني قائمة الحدود لمجموع حدوديتين؛#footnote[هذه العملية تشبه كثيراً العملية المرتبة #py("union_set") التي طوّرناها في التمرين @ex:union-set.
+وفي الواقع، إذا نظرنا إلى حدود الحدودية بوصفها مجموعةً مرتبةً وفقاً لقوة المجهول، فإن البرنامج الذي ينتج قائمة الحدود للمجموع يكاد يكون مطابقاً لـ #py("union_set").]
+لاحظ أننا نمّد قليلاً قواعد الصياغة #idx("conditional statement", sub: "conditional instead of alternative block") لعبارات الشرط الموصوفة في
+القسم @sec:lambda بإجازة عبارة شرطية أخرى مكان الكتلة التالية لـ
+#py("else"):
 
-نعرف إجراءات إنشاء واستخراج الحدود:
-
-#snippet(```python
-def make_term(order, coeff):
-    return llist(order, coeff)
-
-def order(term):
-    return head(term)
-
-def coeff(term):
-    return head(tail(term))
-```)
-
-تأخذ #py("add_terms") قائمتين مرتبتين من الحدود وتدمجهما:
-
+#idx("addterms", decl: true)
 #snippet(```python
 def add_terms(L1, L2):
     if is_empty_termlist(L1):
@@ -140,140 +108,413 @@ def add_terms(L1, L2):
     else:
         t1 = first_term(L1)
         t2 = first_term(L2)
-        if order(t1) > order(t2):
-            return adjoin_term(t1, add_terms(rest_terms(L1), L2))
-        elif order(t1) < order(t2):
-            return adjoin_term(t2, add_terms(L1, rest_terms(L2)))
-        else:
-            return adjoin_term(make_term(order(t1),
+        return (adjoin_term(t1, add_terms(rest_terms(L1), L2))
+                if order(t1) > order(t2)
+                else adjoin_term(t2, add_terms(L1, rest_terms(L2)))
+                if order(t1) < order(t2)
+                else adjoin_term(make_term(order(t1),
                                            add(coeff(t1), coeff(t2))),
-                               add_terms(rest_terms(L1),
-                                         rest_terms(L2)))
+                                 add_terms(rest_terms(L1),
+                                           rest_terms(L2))))
 ```)
 
-لاحظ أننا نستخدم العمليات الحسابية العامة #py("add") لجمع المعاملات. هذا يتيح لنظامنا معالجة متعددي حدود مع معاملات يمكن أن تكون أعداداً عادية، أو أعداداً كسرية، أو أعداداً مركبة، أو حتى متعددي حدود آخرين!
+النقطة الأهم التي يجب ملاحظتها هنا هي أننا استخدمنا دالة الجمع العامة #idx("add (generic)", sub: "used for polynomial coefficients") #py("add") لجمع معاملات الحدود قيد الدمج مع بعضها. وهذا له عواقب قوية، كما سنرى أدناه.
 
-ولضرب قائمتين من الحدود:
-
+ولضرب قائمتي حدود، نضرب كل حد من القائمة الأولى #idx("mul (generic)", sub: "used for polynomial coefficients") في جميع حدود القائمة الأخرى، مستخدمين بشكل متكرر
+#py("mul_term_by_all_terms")،
+التي تضرب حداً معطى في جميع حدود قائمة حدود معطاة. وتُراكم قوائم الحدود الناتجة (واحدة لكل حد من القائمة الأولى)
+في مجموع. ويُنتج ضرب حدين حداً رتبته مجموع رتبتي العاملين ومعامله جداء معاملي العاملين:
+#idx("multerms", decl: true)
 #snippet(```python
 def mul_terms(L1, L2):
-    if is_empty_termlist(L1):
-        return the_empty_termlist()
-    else:
-        return add_terms(mul_term_by_all_terms(first_term(L1), L2),
-                         mul_terms(rest_terms(L1), L2))
-
+    return (the_empty_termlist
+            if is_empty_termlist(L1)
+            else add_terms(mul_term_by_all_terms(
+                                  first_term(L1), L2),
+                           mul_terms(rest_terms(L1), L2)))
 def mul_term_by_all_terms(t1, L):
     if is_empty_termlist(L):
-        return the_empty_termlist()
+        return the_empty_termlist
     else:
         t2 = first_term(L)
         return adjoin_term(
-            make_term(order(t1) + order(t2), mul(coeff(t1), coeff(t2))),
-            mul_term_by_all_terms(t1, rest_terms(L)))
+                   make_term(order(t1) + order(t2),
+                             mul(coeff(t1), coeff(t2))),
+                   mul_term_by_all_terms(t1, rest_terms(L)))
 ```)
 
-لاحظ استخدام #py("mul") لضرب المعاملات و #py("+") لجمع الرتب.
+هذا حقاً كل ما في جمع الحدوديات وضربها. ولاحظ أنه، بما أننا نعالج الحدود باستخدام الدالتين العامتين #idx("add (generic)", sub: "used for polynomial coefficients") #idx("mul (generic)", sub: "used for polynomial coefficients") #py("add") و #py("mul")، فإن حزمة الحدوديات لدينا قادرة تلقائياً على التعامل مع أي نوع من المعاملات يعرفه نظام الحساب العام. وإذا ضمّنا #idx("coercion", sub: "in polynomial arithmetic") آليةَ تحويل إجباري مثل إحدى تلك المذكورة في
+القسم @sec:combining-data-of-different-types،
+أصبحنا قادرين أيضاً، تلقائياً، على التعامل مع عمليات على
+حدوديات من أنواع معاملات مختلفة، مثل
 
-==== قوائم الحدود الكثيفة والضئيلة
+$ (lr([ 3x^(2) +(2+3i)x+7 ]) dot.op lr([ x^(4) +frac(2, 3)x^(2) +(5+3i) ])) $
 
-#idx("dense polynomial")
-#idx("sparse polynomial")
-#idx("polynomial(s)", sub: "dense vs. sparse")
+ولأننا ثبّتنا دالتي جمع وضرب الحدوديات #py("add_poly") و #py("mul_poly") في نظام الحساب العام بوصفهما عمليتي #py("add") و #py("mul") للنوع #py("polynomial")، فإن نظامنا قادر أيضاً، تلقائياً، على التعامل مع عمليات على حدوديات مثل
 
-هناك طريقتان رئيسيتان لتمثيل قوائم الحدود:
-1. #emph[الكثيفة] (#en[dense]): تمثيل قوائم الحدود بقائمة من المعاملات فقط مرتبة حسب الرتبة تنازلياً.
-2. #emph[الضئيلة] (#en[sparse]): تمثيل قوائم الحدود بقائمة من الأزواج `(order, coeff)` فقط للحدود غير الصفرية.
+$ (lr([ (y+1)x^(2) +(y^(2) +1)x+(y-1) ]) dot.op lr([ (y-2)x+(y^(3) +7) ])) $
 
-على سبيل المثال، الحدودية $x^5 + 2x + 1$:
-- التمثيل الضئيل: `[(5, 1), (1, 2), (0, 1)]`
-- التمثيل الكثيف: `[1, 0, 0, 0, 2, 1]`
+والسبب أنه عندما يحاول النظام دمج المعاملات، سيُرسِل عبر #py("add") و #py("mul"). وبما أن المعاملات حدودياتٌ بحد ذاتها (في $y$)، فسيتم دمجها
+باستخدام
+#py("add_poly")
+و
+#py("mul_poly").
+والنتيجة نوع من #idx("data-directed recursion") #idx("recursion", sub: "data-directed") "العودية الموجَّهة بالبيانات"، حيث تؤدي، على سبيل المثال، الاستدعاء إلى #py("mul_poly") إلى استدعاءات عودية إلى
+#py("mul_poly")
+من أجل ضرب المعاملات. وإذا كانت معاملات المعاملات حدوديات بحد ذاتها (كما قد يُستخدم لتمثيل حدوديات في ثلاثة متغيرات)، فإن التوجيه بالبيانات سيضمن أن يتبع النظام مستوىً آخر من الاستدعاءات العودية، وهكذا عبر as many levels as the structure of the data dictates.#footnote[ولكي يعمل هذا بسلاسة تامة، ينبغي أن نضيف أيضاً إلى نظامنا الحسابي العام القدرة على تحويل "عدد" إلى
+حدودية باعتباره حدودية من الدرجة صفر يكون معاملها هو العدد نفسه. وهذا ضروري إن أردنا إجراء عمليات مثل
 
-تكون قوائم الحدود الضئيلة أكثر كفاءة بالنسبة لمتعددي الحدود ذات الدرجات العالية التي تحتوي على العديد من المعاملات الصفرية، مثل $x^(100) + 1$.
+$ (lr([ x^(2) +(y+1)x+5 ])+ lr([ x^(2) +2x+1 ])) $
 
-نعرف محددات ومنشئات قائمة الحدود الضئيلة كالتالي:
+التي تتطلب إضافة المعامل $y+1$ إلى
+المعامل 2.]
+#idx("polynomial arithmetic", sub: "addition")
+#idx("polynomial arithmetic", sub: "multiplication")
 
+#subheading([تمثيل قوائم الحدود])
+
+#idx("term list of polynomial", sub: "representing")
+
+أخيراً، علينا أن نواجه مهمة تنفيذ تمثيل جيد لقوائم الحدود. قائمة الحدود هي، في الواقع، مجموعة معاملات مفهرسة برتبة الحد. ومن ثمّ، يمكن تطبيق أيٍّ من طرق تمثيل المجموعات، كما نوقش في
+القسم @sec:representing-sets، على هذه
+المهمة. ومن ناحية أخرى، فإن دالتينا
+#py("add_terms") و #py("mul_terms")
+تصلان إلى قوائم الحدود تتابعياً دائماً من الرتبة الأعلى إلى الأدنى.
+ومن ثمّ، سنستخدم نوعاً من التمثيل المرتب بقائمة مترابطة.
+
+كيف ينبغي لنا أن ننظم القائمة التي تمثل قائمة الحدود؟ أحد الاعتبارات هو "كثافة" الحدوديات التي نعتزم التلاعب بها. تُقال عن الحدودية إنها #idx("dense polynomial") #idx("polynomial(s)", sub: "dense") #emph[كثيفة] إذا كانت لها معاملات غير صفرية في معظم الرتب. وإذا كانت لها حدود صفرية كثيرة فإنها تُقال إنها #idx("sparse polynomial") #idx("polynomial(s)", sub: "sparse") #emph[متناثرة]. فعلى سبيل المثال،
+
+$ A: x^(5) +2x^(4) +3x^(2) -2x -5 $
+
+حدودية كثيفة، في حين أن
+
+$ B: x^(100) +2x^(2) +1 $
+
+متناثرة.
+
+يُمثَّل جدول حدود الحدودية الكثيفة بأكبر كفاءة كقائمة مترابطة من المعاملات.
+فعلى سبيل المثال،
+الحدودية $A$ أعلاه ستُمثَّل على نحو جميل بـ
+#py("llist(1, 2, 0, 3, -2, -5)").
+ورتبة الحد في هذا التمثيل هي طول القائمة الجزئية
+التي يبدأ رأسها بمعامل ذلك الحد، منقوصاً منها 1.#footnote[في
+أمثلة الحدوديات هذه، نفترض أننا نفّذنا نظام الحساب العام
+باستخدام آلية الأنواع المقترحة في
+التمرين @ex:internal-type-system. وهكذا فالمعاملات
+التي أعداد عادية ستُمثَّل بالأعداد نفسها
+بدلاً من الأزواج التي يكون
+#py("head")
+فيها
+السلسلة النصية #py("\"python_number\"").]
+وسيكون هذا تمثيلاً فظيعاً لحدودية متناثرة مثل
+$B$: ستكون هناك قائمة مترابطة عملاقة من الأصفار
+تنقطع ببضعة حدود غير صفرية وحيدة. وتمثيل أكثر معقوليةً لقائمة حدود الحدودية المتناثرة هو قائمة مترابطة من الحدود غير الصفرية،
+حيث كل حد قائمة مترابطة تحتوي على رتبة الحد و
+معامل تلك الرتبة. وفي مثل هذا المخطط، تكون الحدودية
+$B$ ممثلة بكفاءة بـ
+#py("llist(llist(100, 1), llist(2, 2), llist(0, 1))").
+وبما أن معظم التلاعبات بالحدوديات تجري على حدوديات متناثرة، فسنستخدم هذه الطريقة. سنفترض أن قوائم الحدود ممثلة
+كقوائم مترابطة من الحدود، مرتبة من الحد الأعلى رتبةً إلى الأدنى رتبةً. وبمجرد أن نتخذ هذا القرار، يصبح تنفيذ المحددات والمُنشِئات للحدود وقوائم الحدود مباشراً:#footnote[ورغم أننا نفترض
+أن قوائم الحدود مرتبة، فقد نفّذنا
+#py("adjoin_term")
+بحيث يلحق الحد الجديد ببساطة بمقدمة قائمة الحدود القائمة.
+يمكننا أن ننفلت من هذا ما
+دام أننا نضمن أن الدوال
+(مثل
+#py("add_terms"))
+التي تستخدم
+#py("adjoin_term")
+تستدعيه دائماً بحدٍّ أعلى رتبةً من أي حد يظهر في القائمة المترابطة. وإذا لم نرغب في تقديم مثل هذا الضمان، فكان بوسعنا أن ننفّذ
+#py("adjoin_term")
+بحيث يشبه
+#py("adjoin_set")
+المُنشِئ للتمثيل المرتب بقائمة مترابطة
+للمجموعات
+(التمرين @ex:adjoin-set).]<foot:adjoin-term>
+#idx("adjointerm", decl: true)#idx("theemptytermlist", decl: true)#idx("firstterm", decl: true)#idx("restterms", decl: true)#idx("isemptytermlist", decl: true)#idx("maketerm", decl: true)#idx("order", decl: true)#idx("coeff", decl: true)
 #snippet(```python
 def adjoin_term(term, term_list):
-    if is_equal(coeff(term), 0):
-        return term_list
-    else:
-        return pair(term, term_list)
+    return (term_list
+            if is_equal_to_zero(coeff(term))
+            else pair(term, term_list))
 
-def the_empty_termlist(): return nil
+the_empty_termlist = None
+
 def first_term(term_list): return head(term_list)
+
 def rest_terms(term_list): return tail(term_list)
-def is_empty_termlist(term_list): return is_null(term_list)
+
+def is_empty_termlist(term_list): return is_none(term_list)
+
+def make_term(order, coeff): return llist(order, coeff)
+
+def order(term): return head(term)
+
+def coeff(term): return head(tail(term))
 ```)
 
-#exercise(label-name: <ex:poly-negation>, [
-#idx("negation of polynomials")
-عَرِّف الطرح لمتعددي الحدود بدلالة جمع المتناظرات السلبية لمتعددي الحدود. أضف العملية العامة #py("sub") لمتعددي الحدود إلى الحزمة.
-])
+حيث #py("is_equal_to_zero")
+كما عُرِّفت في التمرين @ex:-zero-. (انظر أيضاً
+التمرين @ex:adjoin-term أدناه.)
 
-#exercise(label-name: <ex:poly-zero>, [
-#idx("zero test for polynomials")
-عَرِّف فحص الصفر العام #py("is_zero") لمتعددي الحدود.
-])
+سينشئ مستخدمو حزمة الحدوديات (حدودياتٍ) موسومة بوساطة
+الدالة:
 
-#exercise(label-name: <ex:dense-sparse-poly>, [
-صمِّم واجهة لتمثيل قوائم الحدود الكثيفة والضئيلة بحيث يمكن استخدام كليهما في حزمة متعددي الحدود ذاتها.
-])
-
-=== قسمة متعددي الحدود
-
-#idx("polynomial arithmetic", sub: "division")
-#idx("division", sub: "of polynomials")
-
-يمكننا قسمة حدودية على أخرى لإنتاج حدودية ناتج القسمة وحزمة باقي القسمة. الخوارزمية هي خوارزمية القسمة المطولة التقليدية لمتعددي الحدود:
-
+#idx("makepolynomial", decl: true)
 #snippet(```python
+def make_polynomial(variable, terms):
+    return get("make", "polynomial")(variable, terms)
+```)
+
+#exercise(label-name: <ex:adjoin-term>, [
+ثبّت
+#idx("isequaltozero (generic)", sub: "for polynomials")
+#idx("zero test (generic)", sub: "for polynomials")
+#py("is_equal_to_zero")
+للحدوديات في حزمة الحساب العام. سيسمح هذا لـ
+#py("adjoin_term")
+أن يعمل لحدوديات معاملاتها حدوديات بحد ذاتها.
+])
+
+#exercise(label-name: <ex:sub-poly>, [
+مدّد نظام الحدوديات ليشمل #idx("polynomial arithmetic", sub: "subtraction") طرحَ الحدوديات.
+(إرشاد: قد تجد من المفيد تعريف عملية سالٍ عامة.)
+])
+
+#exercise(label-name: <ex:2_89>, [
+أعلن عن دوال
+تنفّذ تمثيل قائمة الحدود الموصوف أعلاه
+بما يناسب الحدوديات الكثيفة.
+])
+
+#exercise(label-name: <ex:2_90>, [
+نفترض أننا نريد نظاماً للحدوديات فعالاً لكل من
+الحدوديات المتناثرة والكثيفة. إحدى طرق فعل ذلك هي السماح بنوعي تمثيل قوائم الحدود في نظامنا. والحالة
+مماثلة لمثال الأعداد المركبة في
+القسم @sec:multiple-reps، حيث سمحنا بكل من
+التمثيلين المستطيلي والقطبي. ولعمل ذلك يجب أن نميز بين أنواع مختلفة من قوائم الحدود ونجعل العمليات على قوائم الحدود عامة. أعد تصميم نظام الحدوديات لتنفيذ هذه التعميم.
+هذا جهد كبير، لا تغيير موضعي.
+])
+
+#idx("term list of polynomial", sub: "representing")
+
+#exercise(label-name: <ex:-terms>, [
+يمكن قسمة حدودية أحادية المتغير على أخرى لإنتاج #idx("polynomial arithmetic", sub: "division") خارجِ قسمةِ حدودي وباقيِ قسمة. فعلى سبيل المثال،
+
+$ mat(delim: #none, frac(x^(5)-1, x^(2) -1), =, x^(3) +x, space upright("remainder ")x-1) $
+
+يمكن إجراء القسمة بوساطة القسمة المطولة.
+أي أننا نقسم الحد الأعلى رتبةً من المقسوم على
+الحد الأعلى رتبةً من المقسوم عليه. والناتج هو الحد الأول من
+خارج القسمة. ثم نضرب الناتج في المقسوم عليه، ونطرح ذلك
+من المقسوم، وينتج بقية الجواب بقسمة الفرق تعاوُدياً على المقسوم عليه. نتوقف عندما تتجاوز رتبة
+المقسوم عليه رتبة المقسوم، ونعلن المقسوم باقيَ القسمة. كذلك، إذا أصبح المقسوم صفراً في أي وقت، نرجع
+الصفر خارجَ القسمة وباقيَ قسمة معاً.
+
+يمكننا تصميم
+#idx("divpoly")
+دالة #py("div_poly")
+على نموذج
+#py("add_poly")
+و
+#py("mul_poly").
+فالدالة
+تفحص ما إذا كانت الـpolys لهما المتغير نفسه. إذا كان الأمر كذلك،
+فإن #py("div_poly")
+تنزع المتغير وتمرر المسألة إلى
+#py("div_terms")،
+التي تجري عملية القسمة على قوائم الحدود.
+وتعيد الدالة #py("div_poly")
+أخيراً إلحاق المتغير بالنتيجة المقدمة من
+#py("div_terms").
+ومن الملائم تصميم
+#py("div_terms")
+بحيث تحسب خارج القسمة وباقي القسمة معاً.
+فيمكن للدالة #py("div_terms")
+أن تأخذ قائمتي حدود كوسيطين وترجع قائمة مترابطة من قائمة
+حدود خارج القسمة وقائمة حدود الباقي.
+
+أكمل التعريف التالي لـ
+#py("div_terms")
+بتعبئة الأجزاء الناقصة.
+استخدم هذا لتنفيذ
+#py("div_poly")،
+التي تأخذ polys اثنين كوسيطين وترجع قائمة مترابطة من خارج القسمة و
+باقي القسمة بوصفهما polys.
+#idx("divterms", decl: true)
+#syntax("
 def div_terms(L1, L2):
     if is_empty_termlist(L1):
-        return llist(the_empty_termlist(), the_empty_termlist())
+        return llist(the_empty_termlist, the_empty_termlist)
     else:
         t1 = first_term(L1)
         t2 = first_term(L2)
-        if order(t1) < order(t2):
-            return llist(the_empty_termlist(), L1)
+        if order(t2) > order(t1):
+            return llist(the_empty_termlist, L1)
         else:
             new_c = div(coeff(t1), coeff(t2))
             new_o = order(t1) - order(t2)
-            rest_of_result = div_terms(
-                sub_terms(L1,
-                          mul_term_by_all_terms(make_term(new_o, new_c),
-                                                L2)),
-                L2)
-            return llist(adjoin_term(make_term(new_o, new_c),
-                                     head(rest_of_result)),
-                         head(tail(rest_of_result)))
-```)
-
-تأخذ #py("div_terms") قائمتين من الحدود وتُرجع قائمة تحتوي على قائمة حدود ناتج القسمة وقائمة حدود باقي القسمة.
-
-#exercise(label-name: <ex:poly-div>, [
-استخدم #py("div_terms") لتحديد #py("div_poly") والعملية العامة #py("div") لمتعددي الحدود.
+            rest_of_result = ", metaphrase[compute rest of result recursively], "
+            ", metaphrase[form and return complete result])
 ])
 
-=== القاسم المشترك الأعظم لمتعددي الحدود
+#subheading([هرميات الأنواع في الجبر الرمزي])
 
-#idx("polynomial arithmetic", sub: "greatest common divisor")
-#idx("greatest common divisor", sub: "polynomials")
+#idx("hierarchy of types", sub: "in symbolic algebra")
+#idx("polynomial(s)", sub: "hierarchy of types")
+#idx("type(s)", sub: "hierarchy in symbolic algebra")
 
-يمكننا حساب القاسم المشترك الأعظم (#en[GCD]) لمتعددي حدود باستخدام خوارزمية إقليدس المناظرة للأعداد الصحيحة:
+يوضح نظام الحدوديات لدينا كيف يمكن أن تكون كائنات نوع ما (الحدوديات) كائناتٍ معقدة في الواقع، لها كائنات من أنواع كثيرة مختلفة كأجزاء. وهذا لا يطرح صعوبة حقيقية في تعريف العمليات العامة. فنحن نحتاج فقط إلى تثبيت عمليات عامة مناسبة لإجراء التلاعبات الضرورية بأجزاء الأنواع المركبة. وفي الواقع، رأينا أن الحدوديات تشكل نوعاً من "تجريد البيانات العودي"، إذ إن أجزاء الحدودية قد تكون حدوديات بحد ذاتها. ويمكن لعملياتنا العامة وأسلوبنا في البرمجة الموجهة بالبيانات أن يتعاملا مع هذا التعقيد دون مشقة تذكر.
+
+ومن ناحية أخرى، فإن حساب الحدوديات نظام لا يمكن أن تُرتب أنواعه طبيعياً في برج. فعلى سبيل المثال، يمكن أن تكون هناك حدوديات في $x$ معاملاتها
+حدوديات في $y$. ويمكن أيضاً أن تكون هناك حدوديات في $y$ معاملاتها
+حدوديات في $x$. ولا يوجد من النوعين ما هو "فوق" الآخر بأي طريقة طبيعية، ومع ذلك
+من الضروري غالباً أن نجمع عناصر من كل مجموعة معاً. وهناك عدة
+طرق لفعل ذلك. إحدى الإمكانيات هي تحويل حدودية إلى نوع
+الأخرى بتوسيع الحدود وإعادة ترتيبها بحيث تكون للحدوديتين المتغير الرئيسي نفسه. ويمكن فرض بنية شبيهة بالبرج
+على ذلك بترتيب المتغيرات، وبالتالي تحويل أي حدودية دائماً إلى
+#idx("canonical form, for polynomials")
+#idx("polynomial(s)", sub: "canonical form")
+"صورة قياسية" يكون فيها المتغير ذو الأولوية العليا هو السائد والمتغيرات ذات الأولوية الأدنى مدفونة في المعاملات.
+تعمل هذه الاستراتيجية جيداً نسبياً، عدا أن التحويل قد يمدّد
+حدوديةً بلا داعٍ، مما يجعل قراءتها صعبة وربما يجعل العمل بها أقل كفاءة. وبالتأكيد ليست استراتيجية البرج طبيعية
+لهذا المجال أو لأي مجال يمكن للمستخدم فيه ابتكار أنواع جديدة ديناميكياً باستخدام أنواع قديمة في أشكال دمج مختلفة، مثل
+الدوال المثلثية، والمتسلسلات القوى، والتكاملات.
+
+ولا ينبغي أن يكون مفاجئاً أن يكون ضبط #idx("coercion", sub: "in algebraic manipulation") التحويل الإجباري مشكلةً جادةً في تصميم أنظمة التلاعب الجبري واسعة النطاق. فجزء كبير من تعقيد مثل هذه الأنظمة يتعلق
+بالعلاقات بين أنواع متنوعة. بل من العدل أن نقول إننا لا نفهم التحويل الإجباري فهماً تاماً بعد. وفي الواقع، لا نفهم
+بعد مفهوم نوع البيانات فهماً تاماً. ومع ذلك، فإن ما نعرفه يوفر لنا
+مبادئ قوية للتنظيم والنمطية لدعم تصميم الأنظمة الكبيرة.
+
+#exercise(label-name: <ex:2_92>, [
+بفرض ترتيبٍ على المتغيرات، مدّد حزمة الحدوديات بحيث
+يعمل جمع وضرب الحدوديات لحدوديات في متغيرات مختلفة. (هذا ليس سهلاً!)
+])
+
+#idx("hierarchy of types", sub: "in symbolic algebra")
+#idx("polynomial(s)", sub: "hierarchy of types")
+#idx("type(s)", sub: "hierarchy in symbolic algebra")
+
+#subheading([تمرين موسع: الدوال الناطقة])
+
+#idx("rational function")
+#idx("function (mathematical)", sub: "rational")
+#idx("polynomial arithmetic", sub: "rational functions")
+
+يمكننا مدّ نظامنا الحسابي العام ليشمل #emph[الدوال الناطقة]. وهي "كسور" بسطها و
+مقامها حدوديات، مثل
+
+$ frac(x+1, x^(3) -1) $
+
+وينبغي أن يكون النظام قادراً على جمع وطرح وضرب وقسمة
+الدوال الناطقة، وإجراء حسابات مثل
+
+$ mat(delim: #none, frac(x+1, x^(3) -1)+frac(x, x^(2) -1), =, frac(x^(3) +2x^(2) +3x +1, x^(4) + x^(3) -x-1)) $
+
+(هنا بُسّط المجموع بإزالة العوامل المشتركة.
+لكان "الضرب التبادلي" العادي أن ينتج
+حدوديةً من الدرجة الرابعة فوق حدودية من الدرجة الخامسة.)
+
+إذا عدّلنا حزمة الحساب الناطق لدينا بحيث تستخدم العمليات
+العامة، فسوف تفعل ما نريد، ما عدا مشكلة
+اختزال الكسور إلى أبسط صورة.
+
+#exercise(label-name: <ex:make-rat-poly>, [
+عدّل حزمة الحساب الناطق لتستخدم العمليات العامة، ولكن
+غيّر
+#py("make_rat")
+بحيث لا تحاول اختزال الكسور إلى أبسط صورة. اختبر
+نظامك باستدعاء
+#py("make_rational")
+على حدوديتين لإنتاج دالة ناطقة
 
 #snippet(```python
-def gcd_terms(a, b):
-    if is_empty_termlist(b):
-        return a
-    else:
-        return gcd_terms(b, remainder_terms(a, b))
+p1 = make_polynomial("x", llist(make_term(2, 1), make_term(0, 1)))
+p2 = make_polynomial("x", llist(make_term(3, 1), make_term(0, 1)))
+rf = make_rational(p2, p1)
 ```)
 
-حيث #py("remainder_terms") تُرجع باقي قسمة #py("a") على #py("b").
+الآن أضف #py("rf") إلى نفسه، باستخدام
+#py("add"). ستلاحظ أن دالة الجمع
+هذه
+لا تختزل الكسور إلى أبسط صورة.
+])
+
+يمكننا اختزال كسور الحدوديات إلى أبسط صورة باستخدام الفكرة نفسها
+التي استخدمناها مع الأعداد الصحيحة: تعديل
+#py("make_rat")
+لقسمة كل من البسط والمقام على قاسمهما المشترك الأعظم. ومفهوم
+#idx("greatest common divisor", sub: "of polynomials")
+#idx("polynomial arithmetic", sub: "greatest common divisor")
+"القاسم المشترك الأعظم" ذو معنى للحدوديات. وفي
+الواقع، يمكننا حساب القاسم المشترك الأعظم لحدوديتين باستخدام
+خوارزمية إقليدس نفسها تقريباً التي تعمل للأعداد الصحيحة.#footnote[حقيقة أن
+#idx("Euclid's Algorithm", sub: "for polynomials")
+#idx("polynomial arithmetic", sub: "Euclid's Algorithm")
+خوارزمية إقليدس تعمل للحدوديات يُنظَّر لها في الجبر
+بقولنا إن الحدوديات تشكل نوعاً من المجالات الجبرية يسمى
+#idx("Euclidean ring")
+#idx("measure in a Euclidean ring")
+#emph[حلقة إقليدية]. والحلقة الإقليدية مجال يتيح
+الجمع والطرح والضرب التبادلي، مع
+طريقة لإسناد إلى كل عنصر $x$ من
+الحلقة عدد صحيح موجب
+"مقياس" $m(x)$ له
+الخاصيتان: $m(x y) gt.eq m(x)$ لأي
+$x$ و $y$ غير صفريين، وكون أنه،
+لمعطى أي $x$ و $y$،
+يوجد $q$ بحيث
+$y=q x+r$ وإما
+$r=0$ أو
+$m(r) < m(x)$. ومن وجهة نظر مجردة، هذا ما هو مطلوب لإثبات أن خوارزمية إقليدس تعمل.
+ولمجال الأعداد الصحيحة، يكون مقياس
+عدد صحيح هو القيمة المطلقة للعدد نفسه. ولمجال
+الحدوديات، يكون مقياس الحدودية درجتها.] والنسخة الصحيحة هي
+
+#snippet(```python
+def gcd(a, b):
+    return (a
+            if b == 0
+            else gcd(b, a % b))
+```)
+
+وباستخدام هذا، يمكننا إجراء التعديل البديهي لتعريف عملية قاسم مشترك أعظم تعمل على قوائم الحدود:
+#idx("gcdterms", decl: true)
+#snippet(```python
+def gcd_terms(a, b):
+    return (a
+            if is_empty_termlist(b)
+            else gcd_terms(b, remainder_terms(a, b)))
+```)
+
+حيث #py("remainder_terms")
+تنتقي مركون الباقي من القائمة التي ترجعها عملية
+قسمة قوائم الحدود
+#py("div_terms")
+التي نُفِّذت في التمرين @ex:-terms.
 
 #exercise(label-name: <ex:remainder-terms>, [
-باستخدام #py("div_terms")، نفّذ الدالة #idx("remainderterms")#py("remainder_terms") واستخدمها لتعريف #py("gcd_terms") كما هو موضح أعلاه. ثم اكتب دالة #idx("greatest common divisor", sub: "generic")#py("gcd_poly") تحسب القاسم المشترك الأعظم لمتعددي حدود. واثبّت عملية عامة #py("greatest_common_divisor") تؤول إلى #py("gcd_poly") بالنسبة لمتعددي الحدود وإلى #py("gcd") العادي بالنسبة للأعداد. واختبر برنامجك على:
+باستخدام
+#py("div_terms")،
+نفّذ
+الدالة
+#idx("remainderterms")
+#py("remainder_terms")
+واستخدم هذا لتعريف
+#py("gcd_terms")
+كما أعلاه. الآن اكتب
+دالة
+#idx("greatest common divisor", sub: "generic")
+#py("gcd_poly")
+تحسب القاسم المشترك الأعظم لحدوديتين. (ينبغي
+للدالة
+أن ترفع خطأً إذا لم تكونا الـpolys في المتغير نفسه.)
+ثبّت في النظام عملية عامة
+#py("greatest_common_divisor")
+تؤول إلى
+#py("gcd_poly")
+للحدوديات وإلى #py("gcd") العادي للأعداد
+العادية. وكاختبار، جرّب
 
 #snippet(```python
 p1 = make_polynomial("x", llist(make_term(4, 1), make_term(3, -1),
@@ -281,61 +522,106 @@ p1 = make_polynomial("x", llist(make_term(4, 1), make_term(3, -1),
 p2 = make_polynomial("x", llist(make_term(3, 1), make_term(1, -1)))
 greatest_common_divisor(p1, p2)
 ```)
-تحقق من النتيجة يدوياً.
+
+وافحص نتيجتك يدوياً.
 ])
 
 #exercise(label-name: <ex:gcd-of-polys>, [
-لتكن $P_1$ و $P_2$ و $P_3$ متعددي الحدود التالية:
+عرِّف $P_(1)$،
+$P_(2)$، و
+$P_(3)$ لتكون الحدوديات
 
-#sicp-table(columns: 2, [$P_1$:], [$x^2 - 2x + 1$], [$P_2$:], [$11x^2 + 7$], [$P_3$:], [$13x + 5$])
+#sicp-table(columns: 2, [$P_(1)$:], [$x^(2) - 2x + 1$], [$P_(2)$:], [$11x^(2) + 7$], [$P_(3)$:], [$13x + 5$])
 
-الآن لتكن $Q_1$ حاصل ضرب $P_1$ و $P_2$، ولتكن $Q_2$ حاصل ضرب $P_1$ و $P_3$. استخدم #py("greatest_common_divisor") (التمرين @ex:remainder-terms) لحساب GCD لـ $Q_1$ و $Q_2$. لاحظ أن النتيجة ليست مساوية لـ $P_1$. يُدخل هذا المثال عمليات غير صحيحة (كسرية) في الحسابات، مما يسبب صعوبات لخوارزمية GCD.#footnote[في Python، قد تؤدي قسمة الأعداد الصحيحة إلى أعداد عشرية ذات دقة محدودة، وبالتالي قد نفشل في الحصول على مقسوم عليه صحيح.]
-لِفهم ما يحدث، جرب تتبع #py("gcd_terms") أثناء حساب GCD أو حاول إجراء القسمة يدوياً.
+الآن عرِّف $Q_(1)$ لتكون جداء
+$P_(1)$ و $P_(2)$، و
+$Q_(2)$ لتكون جداء
+$P_(1)$ و $P_(3)$، و
+استخدم
+#py("greatest_common_divisor")
+(التمرين @ex:remainder-terms) لحساب القاسم المشترك الأعظم لـ
+$Q_(1)$ و $Q_(2)$.
+لاحظ أن الجواب ليس هو نفسه $P_(1)$.
+يُدخل هذا المثال عملياتٍ غير صحيحة في الحساب، مسبباً
+صعوباتٍ لخوارزمية القاسم المشترك الأعظم.#footnote[في Python، يمكن لقسمة الأعداد الصحيحة أن تنتج أعداداً عشرية محدودة الدقة، وبالتالي قد نفشل في الحصول على قاسم صحيح.]
+ولفهم ما يجري، جرّب تتبع
+#py("gcd_terms")
+أثناء حساب القاسم المشترك الأعظم، أو جرّب إجراء القسمة يدوياً.
 ])
 
-يمكننا حل المشكلة المعروضة في التمرين @ex:gcd-of-polys باستخدام التعديل التالي على خوارزمية GCD (والذي يعمل حقاً فقط في حالة متعددي الحدود ذات المعاملات الصحيحة).
-قبل إجراء أي قسمة متعددي حدود في حساب GCD، نضرب المقسوم في عامل ثابت صحيح، يُختار لضمان عدم ظهور أي كسور أثناء عملية القسمة. وبالتالي فإن إجابتنا ستختلف عن GCD الفعلي بمقدار عامل ثابت صحيح، ولكن هذا لا يهم في حالة اختزال الدوال الكسرية إلى أدن طواحينها؛ حيث سيُستخدم GCD لقسمة البسط والمقام معاً، وبالتالي سيلتغي العامل الثابت الصحيح.
+يمكننا حل المشكلة المعروضة في
+التمرين @ex:gcd-of-polys إذا
+استخدمنا التعديل التالي على خوارزمية القاسم المشترك الأعظم (والذي لا يعمل حقاً إلا في حالة الحدوديات ذات المعاملات الصحيحة).
+قبل إجراء أي قسمة حدوديات في حساب القاسم المشترك الأعظم، نضرب
+المقسوم في عامل ثابت صحيح، يُختار ليضمن
+أنه لن تنشأ أي كسور أثناء عملية القسمة.
+سيختلف جوابنا عن القاسم المشترك الأعظم الفعلي بعامل ثابت صحيح، ولكن هذا لا يهم في حالة اختزال الدوال
+الناطقة إلى أبسط صورة؛ إذ سيُستخدم القاسم المشترك الأعظم لقسمة كل من
+البسط والمقام، فيتلغى العامل الثابت الصحيح في نهاية الأمر.
 
-وبشكل أكثر دقة، إذا كان $P$ و $Q$ متعددي حدود، لتكن $O_1$ رتبة $P$ (أي رتبة أكبر حد في $P$) ولتكن $O_2$ رتبة $Q$. وليكن $c$ المعامل الرئيسي لـ $Q$. فيمكن إثبات أنه إذا ضربنا $P$ في
+وبصياغة أدق، إذا كانت $P$ و
+$Q$ حدوديتين، لتكن
+$O_(1)$ رتبة
+$P$ (أي رتبة الحد الأكبر من
+$P$) ولتكن $O_(2)$
+رتبة $Q$. وليكن
+$c$ المعامل الرئيسي لـ
+$Q$. فيمكن إثبات أنه، إذا ضربنا
+$P$ في
 #idx("integerizing factor")
-#emph[معامل المعالجة الصحيحة]
-$c^(1+O_1 - O_2)$، فإن الحدودية الناتجة يمكن قسمتها على $Q$ باستخدام الخوارزمية
+#emph[معامل التحويل الصحيح]
+$c^(1+O_(1) -O_(2))$، فإن الحدودية الناتجة
+يمكن قسمتها على $Q$ باستخدام
+خوارزمية
 #py("div_terms")
-دون إدخال أي كسور. وتُسمى عملية ضرب المقسوم في هذا الثابت ثم القسمة أحياناً بـ
+دون إدخال أي كسور. وتسمى عملية ضرب
+المقسوم في هذا الثابت ثم القسمة أحياناً
 #idx("pseudodivision of polynomials")
-#emph[القسمة الزائفة] لـ $P$ على $Q$. ويسمى باقي القسمة بـ
+#emph[القسمة الزائفة] لـ $P$ على
+$Q$. ويسمى باقي القسمة
 #idx("pseudoremainder of polynomials")
 #emph[الباقي الزائف].
 
 #exercise(label-name: <ex:pseudoremainder-terms>, [
-+ نفّذ الدالة #py("pseudoremainder_terms")، والتي تشبه #py("remainder_terms") تماماً باستثناء أنها تضرب المقسوم في معامل المعالجة الصحيحة الموصوف أعلاه قبل استدعاء #py("div_terms"). عدّل #py("gcd_terms") لاستخدام #py("pseudoremainder_terms")، وتحقق من أن #py("greatest_common_divisor") ينتج الآن إجابة بمعاملات صحيحة في المثال الموجود في التمرين @ex:gcd-of-polys.
-+ أصبح لـ GCD الآن معاملات صحيحة، ولكنها أكبر من معاملات $P_1$. عدّل #py("gcd_terms") بحيث يزيل العوامل المشتركة من معاملات الإجابة عن طريق قسمة جميع المعاملات على القاسم المشترك الأعظم (الصحيح) لها.
++ نفّذ الدالة #py("pseudoremainder_terms")، وهي تماماً مثل #py("remainder_terms") باستثناء أنها تضرب المقسوم في معامل التحويل الصحيح الموصوف أعلاه قبل استدعاء #py("div_terms"). عدّل #py("gcd_terms") لاستخدام #py("pseudoremainder_terms")، وتحقق من أن #py("greatest_common_divisor") ينتج الآن جواباً بمعاملات صحيحة على المثال في التمرين @ex:gcd-of-polys.
++ أصبح للقاسم المشترك الأعظم الآن معاملات صحيحة، ولكنها أكبر من معاملات $P_(1)$. عدّل #py("gcd_terms") بحيث يزيل العوامل المشتركة من معاملات الجواب بقسمة جميع المعاملات على قاسمها المشترك الأعظم (الصحيح).
 ])
 
 #idx("polynomial arithmetic", sub: "greatest common divisor")
 #idx("rational function", sub: "reducing to lowest terms")
 #idx("reducing to lowest terms")
 
-وهكذا، إليك كيفية اختزال دالة كسرية إلى أدنى حدودها:
+وهكذا، إليك كيفية اختزال دالة ناطقة إلى أبسط صورة:
 
-- احسب GCD للبسط والمقام، باستخدام نسخة #py("gcd_terms") من التمرين @ex:pseudoremainder-terms.
-- عند الحصول على GCD، اضرب كلاً من البسط والمقام بنفس معامل المعالجة الصحيحة قبل القسمة على GCD، حتى لا تؤدي القسمة على GCD إلى إدخال أي معاملات غير صحيحة. وكعامل يمكنك استخدام المعامل الرئيسي لـ GCD مرفوعاً للقوة $1+O_1 - O_2$، حيث $O_2$ هي رتبة GCD و $O_1$ هي القيمة العظمى لرتبتي البسط والمقام. سيضمن هذا أن قسمة البسط والمقام على GCD لن تدخل أي كسور.
-- ستكون نتيجة هذه العملية بسطاً ومقاماً بمعاملات صحيحة. ستكون المعاملات عادة ضخمة جداً بسبب كل عوامل المعالجة الصحيحة، لذا فإن الخطوة الأخيرة هي إزالة العوامل الزائدة عن طريق حساب القاسم المشترك الأعظم (الصحيح) لجميع معاملات البسط والمقام والقسمة على هذا العامل.
+- احسب القاسم المشترك الأعظم للبسط والمقام، باستخدام نسخة #py("gcd_terms") من التمرين @ex:pseudoremainder-terms.
+- عند حصولك على القاسم المشترك الأعظم، اضرب كلًّا من البسط والمقام في معامل التحويل الصحيح نفسه قبل القسمة عليه، حتى لا تُدخل القسمة على القاسم المشترك الأعظم أي معاملات غير صحيحة. وكعامل يمكنك استخدام المعامل الرئيسي للقاسم المشترك الأعظم مرفوعاً إلى القوة $1+O_(1) -O_(2)$، حيث $O_(2)$ هي رتبة القاسم المشترك الأعظم و $O_(1)$ هي أكبر رتبتي البسط والمقام. سيضمن هذا أن قسمة البسط والمقام على القاسم المشترك الأعظم لن تُدخل أي كسور.
+- ستكون نتيجة هذه العملية بسطاً ومقاماً بمعاملات صحيحة. وستكون المعاملات عادةً ضخمة جداً بسبب جميع معاملات التحويل الصحيح، لذا فالخطوة الأخيرة هي إزالة العوامل الزائدة بحساب القاسم المشترك الأعظم (الصحيح) لجميع معاملات البسط والمقام والقسمة عليه.
 
 #exercise(label-name: <ex:reduce-poly>, [
-+ نفّذ هذه الخوارزمية كدالة #py("reduce_terms") تأخذ قائمتي حدود #py("n") و #py("d") كوسيطين وترجع قائمة مرتبطة #py("nn"), #py("dd") تمثل #py("n") و #py("d") مختزلتين إلى أدنى الحدود عبر الخوارزمية الموضحة أعلاه. واكتب أيضاً دالة #py("reduce_poly")، ممثالة لـ #py("add_poly")، تتحقق مما إذا كان لمتعددي الحدود المتغير نفسه. إذا كان الأمر كذلك، تُجرد #py("reduce_poly") المتغير وتمرر المسألة إلى #py("reduce_terms")، ثم تعيد إرفاق المتغير بقائمتي الحدود المقدمتين من #py("reduce_terms").
-+ عرّف دالة مماثلة لـ #py("reduce_terms") تقوم بما كانت تفعله #py("make_rat") الأصلية للأعداد الصحيحة: #snippet(```python def reduce_integers(n, d): g = gcd(n, d) return llist(n // g, d // g) ```) وعرّف #py("reduce") كعملية عامة تستدعي #py("apply_generic") للتوجيه إما إلى #py("reduce_poly") (مع وسائط من النوع #py("polynomial")) أو إلى #py("reduce_integers") (مع وسائط من النوع #py("python_number")). يمكنك الآن بسهولة جعل حزمة الحسابيات الكسرية تختزل الكسور إلى أدنى حدودها من خلال جعل #py("make_rat") تستدعي #py("reduce") قبل دمج البسط والمقام المعطيين لتشكيل عدد كسرية. يتعامل النظام الآن مع التعبيرات الكسرية إما في الأعداد الصحيحة أو متعددي الحدود. لاختبار برنامجك، جرب المثال في بداية هذا التمرين الممتد: #snippet(```python p1 = make_polynomial("x", llist(make_term(1, 1), make_term(0, 1))) p2 = make_polynomial("x", llist(make_term(3, 1), make_term(0, -1))) p3 = make_polynomial("x", llist(make_term(1, 1))) p4 = make_polynomial("x", llist(make_term(2, 1), make_term(0, -1))) rf1 = make_rational(p1, p2) rf2 = make_rational(p3, p4) add(rf1, rf2) ```) انظر ما إذا كنت ستحصل على الإجابة الصحيحة مختزلة بشكل صحيح إلى أدنى حدودها.
++ نفّذ هذه الخوارزمية كدالة #py("reduce_terms") تأخذ قائمتي حدود #py("n") و #py("d") كوسيطين وترجع قائمة مترابطة #py("nn")، #py("dd")، وهما #py("n") و #py("d") مختزلتان إلى أبسط صورة بوساطة الخوارزمية المعطاة أعلاه. واكتب أيضاً دالة #py("reduce_poly")، مماثلةً لـ #py("add_poly")، تفحص ما إذا كانت الـpolys لهما المتغير نفسه. إذا كان الأمر كذلك، فإن #py("reduce_poly") تنزع المتغير وتمرر المسألة إلى #py("reduce_terms")، ثم تعيد إلحاق المتغير بقائمتي الحدود المقدمتين من #py("reduce_terms").
++ عرِّف دالة مماثلة لـ #py("reduce_terms") تفعل ما كانت تفعله #py("make_rat") الأصلية للأعداد الصحيحة: #snippet(```python def reduce_integers(n, d): g = gcd(n, d) return llist(n // g, d // g) ```) وعرِّف #py("reduce") كعملية عامة تستدعي #py("apply_generic") لتُرسِل إما إلى #py("reduce_poly") (لوسائط #py("polynomial")) أو إلى #py("reduce_integers") (لوسائط #py("python_number")). يمكنك الآن بسهولة جعل حزمة الحساب الناطق تختزل الكسور إلى أبسط صورة بجعل #py("make_rat") تستدعي #py("reduce") قبل دمج البسط والمقام المعطيين لتشكيل عدد ناطق. ويتعامل النظام الآن مع التعبيرات الناطقة في الأعداد الصحيحة أو الحدوديات. لاختبار برنامجك، جرّب المثال في بداية هذا التمرين الموسع: #snippet(```python p1 = make_polynomial("x", llist(make_term(1, 1), make_term(0, 1))) p2 = make_polynomial("x", llist(make_term(3, 1), make_term(0, -1))) p3 = make_polynomial("x", llist(make_term(1, 1))) p4 = make_polynomial("x", llist(make_term(2, 1), make_term(0, -1))) rf1 = make_rational(p1, p2) rf2 = make_rational(p3, p4) add(rf1, rf2) ```) انظر ما إذا كنت ستحصل على الجواب الصحيح، مختزلاً بشكل صحيح إلى أبسط صورة.
 ])
 
-تُعد حسابات GCD في قلب أي نظام يجري عمليات على الدوال الكسرية. والتقنية المستخدمة أعلاه، على الرغم من بساطتها الرياضياتية، إلا أنها بطيئة للغاية. ويرجع البطء جزئياً إلى العدد الكبير من عمليات القسمة وجزئياً إلى الحجم الهائل للمعاملات الوسيطة الناتجة عن القسمات الزائفة.
+حساب القاسم المشترك الأعظم في قلب أي نظام يجري عمليات
+على الدوال الناطقة. والخوارزمية المستخدمة أعلاه، ورغم
+كونها مستقيمة رياضياً، بطيئة للغاية. ويُعزى البطء
+جزئياً إلى العدد الكبير من عمليات القسمة وجزئياً إلى
+الحجم الهائل للمعاملات الوسيطة الناتجة عن القسمات الزائفة.
 #idx("rational function", sub: "reducing to lowest terms")
 #idx("reducing to lowest terms")
-تعد خوارزميات حساب GCD لمتعددي الحدود من المجالات النشطة في تطوير أنظمة المعالجة الجبرية.#footnote[اكتشف ريتشارد زيبيل (#idx("Zippel, Richard E.") #en[Richard Zippel], 1979) طريقة فائقة الكفاءة والأناقة لحساب
+إحدى المجالات النشطة في تطوير
+أنظمة التلاعب الجبري هي تصميم خوارزميات أفضل لحساب
+القواسم المشتركة الأعظم للحدوديات.#footnote[اكتشف
 #idx("polynomial arithmetic", sub: "greatest common divisor")
 #idx("polynomial arithmetic", sub: "probabilistic algorithm for GCD")
 #idx("probabilistic algorithm")
 #idx("algorithm", sub: "probabilistic")
-GCD لمتعددي الحدود. وتعد هذه الطريقة خوارزمية احتمالية (#en[probabilistic algorithm])، مثل الفحص السريع للأولية الذي ناقشناه في الفصل @chap:fun. ويصف كتاب زيبيل (1993) هذه الطريقة إلى جانب طرق أخرى لحساب GCD لمتعددي الحدود.]
+ريتشارد زيبيل (#idx("Zippel, Richard E.") #en[Richard Zippel]) عام 1979 طريقةً فائقة الكفاءة و
+أنيقة لحساب
+القواسم المشتركة الأعظم للحدوديات. والطريقة خوارزمية احتمالية، كما هو الفحص
+السريع للأولية الذي ناقشناه في الفصل @chap:fun.
+ويصف كتاب زيبيل (1993) هذه الطريقة، إلى جانب طرق أخرى
+لحساب القواسم المشتركة الأعظم للحدوديات.]
 #idx("rational function")
 #idx("function (mathematical)", sub: "rational")
 #idx("polynomial arithmetic", sub: "rational functions")
