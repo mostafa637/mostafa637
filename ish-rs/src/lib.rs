@@ -43,6 +43,12 @@
 //! | [`ptrace`]      | `kernel/ptrace.h`         | ported, ptrace constants and reg layouts |
 //! | [`futex`]       | `kernel/futex.{h,c}`      | ported, futex constants and queue types (host sync pending) |
 //! | [`signal`]      | `kernel/signal.h`         | ported, signal numbers, masks, and siginfo layouts (delivery pending) |
+//! | [`list`]        | `util/list.h`             | ported, intrusive doubly-linked list and safe wrapper |
+//! | [`refcount`]    | `util/refcount.h`         | ported, explicit refcounting helpers |
+//! | [`sync`]        | `util/sync.{h,c}`         | ported, lock, condvar, and rwlock abstractions |
+//! | [`timer`]       | `util/timer.{h,c}`        | ported, interval timer spec and state machine |
+//! | [`fix_path`]    | `fs/fix_path.h`           | ported, path normalization |
+//! | [`mm`]          | `kernel/mm.h`             | ported, full mm descriptor with procfs fields |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -62,6 +68,7 @@ pub mod errno_table;
 pub mod fake_db;
 pub mod fake_rebuild;
 pub mod fifo;
+pub mod fix_path;
 pub mod float80;
 pub mod fpu;
 pub mod futex;
@@ -69,20 +76,25 @@ pub mod getset;
 pub mod group;
 pub mod interrupt;
 pub mod ipc;
+pub mod list;
 pub mod log;
 pub mod memory;
 pub mod misc;
+pub mod mm;
 pub mod mmap;
 pub mod mmu;
 pub mod modrm;
 pub mod personality;
 pub mod ptrace;
 pub mod random;
+pub mod refcount;
 pub mod resource;
 pub mod signal;
 pub mod stat;
+pub mod sync;
 pub mod task;
 pub mod time;
+pub mod timer;
 pub mod tlb;
 pub mod tls;
 pub mod uname;
