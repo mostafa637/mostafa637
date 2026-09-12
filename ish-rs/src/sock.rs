@@ -1,4 +1,4 @@
-//! `fs/sock.h` — socket constants and guest ABI structures.
+//! `fs/sock.h` — socket constants, guest ABIs, and address helpers.
 
 /// Socket families
 pub const AF_UNSPEC: u32 = 0;
@@ -10,11 +10,19 @@ pub const AF_INET6: u32 = 10;
 pub const SOCK_STREAM: u32 = 1;
 pub const SOCK_DGRAM: u32 = 2;
 pub const SOCK_RAW: u32 = 3;
+pub const SOCK_SEQPACKET: u32 = 5;
 
 /// Protocols
 pub const IPPROTO_IP: u32 = 0;
 pub const IPPROTO_TCP: u32 = 6;
 pub const IPPROTO_UDP: u32 = 17;
+
+/// Socket options
+pub const SOL_SOCKET: u32 = 1;
+pub const SO_REUSEADDR: u32 = 2;
+pub const SO_TYPE: u32 = 3;
+pub const SO_ERROR: u32 = 4;
+pub const SO_KEEPALIVE: u32 = 9;
 
 /// `SOCKADDR_DATA_MAX`
 pub const SOCKADDR_DATA_MAX: usize = 108;
@@ -28,10 +36,7 @@ pub struct Sockaddr {
 
 impl Default for Sockaddr {
     fn default() -> Self {
-        Self {
-            family: 0,
-            data: [0; 14],
-        }
+        Self { family: 0, data: [0; 14] }
     }
 }
 
@@ -44,14 +49,11 @@ pub struct SockaddrMax {
 
 impl Default for SockaddrMax {
     fn default() -> Self {
-        Self {
-            family: 0,
-            data: [0; SOCKADDR_DATA_MAX],
-        }
+        Self { family: 0, data: [0; SOCKADDR_DATA_MAX] }
     }
 }
 
-/// `struct msghdr_` guest ABI (simplified).
+/// `struct msghdr_` guest ABI
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Msghdr {
     pub msg_name: u32,
@@ -61,6 +63,21 @@ pub struct Msghdr {
     pub msg_control: u32,
     pub msg_controllen: u32,
     pub msg_flags: u32,
+}
+
+/// Socket address size helper, matching C `sockaddr_size`
+pub fn sockaddr_size(family: u16) -> usize {
+    match family as u32 {
+        AF_UNIX => 2 + 108, // sun_path max
+        AF_INET => 16,
+        AF_INET6 => 28,
+        _ => 14,
+    }
+}
+
+/// Check if socket type is valid.
+pub fn is_valid_sock_type(sock_type: u32) -> bool {
+    matches!(sock_type, SOCK_STREAM | SOCK_DGRAM | SOCK_RAW | SOCK_SEQPACKET)
 }
 
 #[cfg(test)]
@@ -73,5 +90,19 @@ mod tests {
         assert_eq!(AF_INET, 2);
         assert_eq!(SOCK_STREAM, 1);
         assert_eq!(SOCKADDR_DATA_MAX, 108);
+        assert_eq!(SOL_SOCKET, 1);
+    }
+
+    #[test]
+    fn sockaddr_size_matches_c() {
+        assert_eq!(sockaddr_size(AF_INET as u16), 16);
+        assert_eq!(sockaddr_size(AF_UNIX as u16), 110);
+    }
+
+    #[test]
+    fn valid_sock_type() {
+        assert!(is_valid_sock_type(SOCK_STREAM));
+        assert!(is_valid_sock_type(SOCK_DGRAM));
+        assert!(!is_valid_sock_type(99));
     }
 }
