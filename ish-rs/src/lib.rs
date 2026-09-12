@@ -33,6 +33,16 @@
 //! | [`getset`]      | `kernel/getset.c`         | ported, identity and credential syscalls |
 //! | [`tls`]         | `kernel/tls.c`            | ported, i386 TLS descriptor calls |
 //! | [`misc`]        | `kernel/misc.c`           | ported, prctl and host-safe reboot policy |
+//! | [`personality`] | `kernel/personality.h`    | ported, ADDR_NO_RANDOMIZE and personality constants |
+//! | [`bits`]        | `util/bits.h`             | ported, bitset helpers |
+//! | [`fifo`]        | `util/fifo.{h,c}`         | ported, circular FIFO with overwrite/peek/last semantics |
+//! | [`elf`]         | `kernel/elf.h`            | ported, ELF32 constants and parsing |
+//! | [`vdso`]        | `kernel/vdso.{h,c}`       | ported, vdso symbol lookup over ELF image |
+//! | [`stat`]        | `fs/stat.h`               | ported, stat buffer ABIs |
+//! | [`time`]        | `kernel/time.h`           | ported, time structures and conversions |
+//! | [`ptrace`]      | `kernel/ptrace.h`         | ported, ptrace constants and reg layouts |
+//! | [`futex`]       | `kernel/futex.{h,c}`      | ported, futex constants and queue types (host sync pending) |
+//! | [`signal`]      | `kernel/signal.h`         | ported, signal numbers, masks, and siginfo layouts (delivery pending) |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -41,16 +51,20 @@
 //! This is a translation of GPLv3 / GPLv2-or-later code, so it carries the same
 //! license: `GPL-2.0-or-later`. See `README.md`.
 
+pub mod bits;
 pub mod cpu;
 pub mod cpuid;
 pub mod decode;
 pub mod decode_table;
+pub mod elf;
 pub mod errno;
 pub mod errno_table;
 pub mod fake_db;
 pub mod fake_rebuild;
+pub mod fifo;
 pub mod float80;
 pub mod fpu;
+pub mod futex;
 pub mod getset;
 pub mod group;
 pub mod interrupt;
@@ -61,13 +75,19 @@ pub mod misc;
 pub mod mmap;
 pub mod mmu;
 pub mod modrm;
+pub mod personality;
+pub mod ptrace;
 pub mod random;
 pub mod resource;
+pub mod signal;
+pub mod stat;
 pub mod task;
+pub mod time;
 pub mod tlb;
 pub mod tls;
 pub mod uname;
 pub mod user;
+pub mod vdso;
 pub mod vec;
 
 pub use cpu::CpuState;

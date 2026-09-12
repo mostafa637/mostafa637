@@ -32,6 +32,7 @@ use std::rc::Rc;
 
 use crate::cpu::CpuState;
 use crate::mmap::Mm;
+use crate::personality::ADDR_NO_RANDOMIZE as PERSONALITY_ADDR_NO_RANDOMIZE;
 use crate::resource::{Rlimit, Rusage, RLIMIT_NLIMITS};
 use crate::user::{Fault, User};
 
@@ -49,7 +50,10 @@ pub const MAX_PID: Pid = 1 << 15;
 /// `MAX_GROUPS` from `kernel/task.h`.
 pub const MAX_GROUPS: usize = 32;
 /// `ADDR_NO_RANDOMIZE_` from `kernel/personality.h`.
-pub const ADDR_NO_RANDOMIZE: u32 = 0x0004_0000;
+///
+/// This constant now lives in `crate::personality`; this re-export preserves
+/// the previous public path for existing callers and tests.
+pub const ADDR_NO_RANDOMIZE: u32 = PERSONALITY_ADDR_NO_RANDOMIZE;
 
 /// A task's attached `struct mm`.
 ///
