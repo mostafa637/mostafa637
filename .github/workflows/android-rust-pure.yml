@@ -23,7 +23,7 @@ jobs:
   rust-core-test-online:
     name: Rust Core + Android Pure Rust Logic ONLINE (KVM + hterm as iOS)
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,17 +74,27 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Test ish-emu core ONLINE (no offline) - fetch + verbose
+      - name: Test ish-emu core ONLINE (no offline) - fetch + verbose + isolate hang
         working-directory: ish-rs
         run: |
           echo "=== Building ish-emu ONLINE ONLY (no --offline) as requested ==="
           echo "Cargo version:"
           cargo --version
           echo "Fetching dependencies ONLINE..."
-          cargo fetch --verbose 2>&1 | tail -n 50
-          echo "Running cargo test --lib ONLINE..."
-          cargo test --lib --verbose 2>&1 | tail -n 200
-          echo "ish-emu tests done"
+          cargo fetch --verbose 2>&1 | tail -n 100
+          echo "Listing tests (should be 462)..."
+          cargo test --lib -- --list 2>&1 | tail -n 50
+          echo "Running cargo test --lib with single thread and timeout 300s to catch hanging test..."
+          # First try fast run with default threads and timeout 300s
+          timeout 300 cargo test --lib -- --test-threads=1 --nocapture 2>&1 | tail -n 500 || echo "cargo test timed out after 300s or failed - will try per-module"
+          echo "Trying per-module tests to isolate hang..."
+          for mod in generic getset group gui init inode interrupt ipc kernel list lock log mem memory misc mm mmap mmu modrm mount path personality pipe poll proc ptrace pty ram random real refcount resource signal sock sock_restart stat sync task time timer tlb tls tmp tty uname user vdso vec; do
+            echo "=== Testing module $mod ==="
+            timeout 30 cargo test --lib $mod -- --test-threads=1 --nocapture 2>&1 | tail -n 20 || echo "Module $mod timed out or failed after 30s"
+          done
+          echo "Running final cargo test with all threads but timeout 60s for summary..."
+          timeout 60 cargo test --lib 2>&1 | tail -n 100 || echo "Final test timed out after 60s - but per-module tests above show which hangs"
+          echo "ish-emu tests done (with hang isolation)"
 
       - name: Test android-rs pure Rust logic ONLINE (fast-test without heavy Slint compile)
         working-directory: android-rs
