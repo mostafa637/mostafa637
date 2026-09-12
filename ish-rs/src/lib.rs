@@ -60,6 +60,11 @@
 //! | [`mount`]       | `kernel/fs.h` mount       | ported, mount flags and param parsing |
 //! | [`lock`]        | `fs/lock.h`               | ported, file locking constants and structures |
 //! | [`calls`]       | `kernel/calls.h` + `calls.c` | ported, syscall numbers and dispatch |
+//! | [`tty`]         | `fs/tty.h`                | ported, winsize and termios constants |
+//! | [`sock`]        | `fs/sock.h`               | ported, socket families and guest ABIs |
+//! | [`proc`]        | `fs/proc.h`               | ported, proc entry types and modes |
+//! | [`generic`]     | `fs/generic.c`            | ported, generic seek and access helpers |
+//! | [`fchdir`]      | `util/fchdir.h` + `.c`    | ported, fchdir host abstraction |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -82,6 +87,7 @@ pub mod errno_table;
 pub mod eventfd;
 pub mod fake_db;
 pub mod fake_rebuild;
+pub mod fchdir;
 pub mod fd;
 pub mod fifo;
 pub mod fix_path;
@@ -89,6 +95,7 @@ pub mod float80;
 pub mod fpu;
 pub mod fs_info;
 pub mod futex;
+pub mod generic;
 pub mod getset;
 pub mod group;
 pub mod inode;
@@ -107,11 +114,13 @@ pub mod mount;
 pub mod path;
 pub mod personality;
 pub mod poll;
+pub mod proc;
 pub mod ptrace;
 pub mod random;
 pub mod refcount;
 pub mod resource;
 pub mod signal;
+pub mod sock;
 pub mod stat;
 pub mod sync;
 pub mod task;
@@ -119,6 +128,7 @@ pub mod time;
 pub mod timer;
 pub mod tlb;
 pub mod tls;
+pub mod tty;
 pub mod uname;
 pub mod user;
 pub mod vdso;
