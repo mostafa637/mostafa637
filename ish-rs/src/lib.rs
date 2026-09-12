@@ -34,8 +34,8 @@
 //! | [`tls`]         | `kernel/tls.c`            | ported, i386 TLS descriptor calls |
 //! | [`misc`]        | `kernel/misc.c`           | ported, prctl and host-safe reboot policy |
 //! | [`personality`] | `kernel/personality.h`    | ported, ADDR_NO_RANDOMIZE and personality constants |
-//! | [`bits`]        | `util/bits.h`             | ported, bitset helpers |
-//! | [`fifo`]        | `util/fifo.{h,c}`         | ported, circular FIFO with overwrite/peek/last semantics |
+//! | [`bits`]        | `util/bits.h`             | ported, bitset helpers (C vs Rust differential) |
+//! | [`fifo`]        | `util/fifo.{h,c}`         | ported, circular FIFO with quirk preservation (C vs Rust differential) |
 //! | [`elf`]         | `kernel/elf.h`            | ported, ELF32 constants and parsing |
 //! | [`vdso`]        | `kernel/vdso.{h,c}`       | ported, vdso symbol lookup over ELF image |
 //! | [`stat`]        | `fs/stat.h`               | ported, stat buffer ABIs |
@@ -47,11 +47,15 @@
 //! | [`refcount`]    | `util/refcount.h`         | ported, explicit refcounting helpers |
 //! | [`sync`]        | `util/sync.{h,c}`         | ported, lock, condvar, and rwlock abstractions |
 //! | [`timer`]       | `util/timer.{h,c}`        | ported, interval timer spec and state machine |
-//! | [`fix_path`]    | `fs/fix_path.h`           | ported, path normalization (trivial) |
+//! | [`fix_path`]    | `fs/fix_path.h`           | ported, path normalization (trivial) (C vs Rust differential) |
 //! | [`mm`]          | `kernel/mm.h`             | ported, full mm descriptor with procfs fields |
 //! | [`fs_info`]     | `kernel/fs.h` + `fs_info.c` | ported, cwd/root/umask with refcount |
-//! | [`path`]        | `fs/path.h` + `path.c`    | ported, path_is_normalized, next_component, simple normalize (symlink pending) |
+//! | [`path`]        | `fs/path.h` + `path.c`    | ported, path_is_normalized, next_component, simple normalize (C vs Rust differential) |
 //! | [`inode`]       | `fs/inode.h` + `inode.c`  | ported, inode cache and retain/release |
+//! | [`devices`]     | `fs/devices.h`            | ported, device major/minor constants |
+//! | [`dev`]         | `fs/dev.h`                | ported, dev_t encoding dev_make/major/minor |
+//! | [`poll`]        | `fs/poll.h` + `kernel/epoll.c` | ported, poll/epoll constants and event types |
+//! | [`eventfd`]     | `kernel/eventfd.c`        | ported, eventfd read/write/poll logic |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -65,9 +69,12 @@ pub mod cpu;
 pub mod cpuid;
 pub mod decode;
 pub mod decode_table;
+pub mod dev;
+pub mod devices;
 pub mod elf;
 pub mod errno;
 pub mod errno_table;
+pub mod eventfd;
 pub mod fake_db;
 pub mod fake_rebuild;
 pub mod fifo;
@@ -91,6 +98,7 @@ pub mod mmu;
 pub mod modrm;
 pub mod path;
 pub mod personality;
+pub mod poll;
 pub mod ptrace;
 pub mod random;
 pub mod refcount;
