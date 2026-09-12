@@ -28,7 +28,7 @@ Lisp لـ PDP-1 في
 #idx("Yochelson, Jerome C.")
 فينيكل ويوكيلسون (1969) للاستخدام في تنفيذ Lisp لنظام مشاركة الوقت
 #idx("Multics time-sharing system")
-Multics. لاحقًا، طور
+مولتيكس (#en[Multics]). لاحقًا، طور
 #idx("Baker, Henry G., Jr.")
 بيكر (1978) نسخة "في الوقت الحقيقي" (#en[real-time]) من الطريقة، والتي لا تتطلب توقف الحساب أثناء جمع القمامة. تم تمديد فكرة بيكر بواسطة
 #idx("Hewitt, Carl Eddie")

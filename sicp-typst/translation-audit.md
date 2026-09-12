@@ -30,7 +30,7 @@
 
 ## ٢. التزام المصطلح مع الجدول
 
-مصطلحات الجدول الحاضرة في نثر الأصل: **188**؛ منها متوافق (ظهر المقابل في ≥٥٠٪ من المواضع): **158**؛ ضعيف التغطية: **10**؛ بلا مقابل ظاهر: **20**.
+مصطلحات الجدول الحاضرة في نثر الأصل: **188**؛ منها متوافق (ظهر المقابل في ≥٥٠٪ من المواضع): **160**؛ ضعيف التغطية: **10**؛ بلا مقابل ظاهر: **18**.
 
 ### بلا مقابل ظاهر في الترجمة (مرشّحة أولى للمراجعة)
 
@@ -51,10 +51,8 @@
 | 398 | Kill (a process) | قتل (عملية) | 1 |
 | 336 | Megabyte (MB) | ميجابايت | 1 |
 | 869 | Monitors | مراقِبات | 1 |
-| 300 | Multics | مولتيكس | 1 |
 | 626 | Time-slicing | التقطيع الزمني | 1 |
 | 246 | Trap (instruction) | المصيدة (تعليمة) | 1 |
-| 292 | UNIX | يونكس | 1 |
 | 267 | Volatile (storage) | متطاير (تخزين) | 1 |
 
 ### ضعيفة التغطية (المقابل ظهر في أقل من نصف المواضع)
@@ -83,10 +81,8 @@
 | المصطلح | الملف | السياق |
 |---|---|---|
 | Abstraction | `chapter2/chapter2-ar.typ` | …قوية تسمى   #emph[تجريد البيانات (data abstraction)]. سنرى كيف يجعل تجريد البيانات تصميم ا… |
-| ACM (Association for Computing Machinery) | `chapter3/section5/subsection5-ar.typ` | …الدالية عندما تُمّ منحه جائزة تورينغ من ACM عام 1978. وخطاب قبوله   (باكوس 1978) دا… |
 | First In, First Out (FIFO) | `chapter3/section3/subsection2-ar.typ` | …ر أحياناً بـ   ذاكرة مؤقتة من نوع #emph[FIFO] (الأول دخولاً، الأول خروجاً -  ).… |
 | List (data structure) | `chapter2/section1/subsection3-ar.typ` | …فء للأزواج قد يستخدم قائمة بايثون #emph[list] الأصلية) بل أنها يمكن أن تعمل بهذه الط… |
-| Multics | `chapter5/section3/subsection2-ar.typ` | …خدام في تنفيذ Lisp لنظام مشاركة الوقت   Multics. لاحقًا، طور   بيكر (1978) نسخة   ( ) م… |
 | Process | `chapter2/chapter2-ar.typ` | …على العمليات الحسابية (computational processes) وعلى دور الدوال في تصميم البرامج. رأين… |
 | Python | `chapter2/section5/subsection1-ar.typ` | …لى حزمة  : magnitude(z) z apply_generic Python internal type system data types in Pyth… |
 | Python | `chapter3/section5/subsection4-ar.typ` | …تبة أيضاً.#footnote[هذا انعكاس صغير، في Python، للصعوبات التي واجهتها           لغات ا… |
