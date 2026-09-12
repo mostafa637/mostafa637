@@ -1,0 +1,30 @@
+NORM "" -> 1
+NORM "/" -> 1
+NORM "/a" -> 1
+NORM "/a/b" -> 1
+NORM "/a/b/c" -> 1
+NORM "a" -> 0
+NORM "//" -> 0
+NORM "/a//b" -> 0
+NORM "/a/" -> 1
+NORM "/a/b/" -> 1
+NORM "/a//" -> 0
+ITER "/a/bb/ccc":
+  COMP "a" remaining="/bb/ccc"
+  COMP "bb" remaining="/ccc"
+  COMP "ccc" remaining=""
+  END remaining=""
+ITER "/":
+  COMP "" remaining=""
+  END remaining=""
+ITER "/single":
+  COMP "single" remaining=""
+  END remaining=""
+ITER "/a/b/c/d":
+  COMP "a" remaining="/b/c/d"
+  COMP "b" remaining="/c/d"
+  COMP "c" remaining="/d"
+  COMP "d" remaining=""
+  END remaining=""
+ITER "":
+  END remaining=""

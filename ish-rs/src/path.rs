@@ -43,45 +43,41 @@ pub fn path_is_normalized(path: &str) -> bool {
 /// Mirrors `path_next_component`: `*path` is advanced to next `/`, component
 /// is copied. Returns `Some(component)` if there is a next component, `None`
 /// if at end. `err` is set to `ENAMETOOLONG` if component >= `MAX_NAME`.
+///
+/// For "/" C returns one empty component "" then end; we preserve that.
 pub fn path_next_component<'a>(path: &mut &'a str) -> Result<Option<String>, i32> {
     if path.is_empty() {
         return Ok(None);
     }
     assert!(path.starts_with('/'), "path must be normalized and start with '/'");
 
+    // C: p = *path; if *p == '\0' return false; assert(*p=='/'); p++;
+    // Then copy until '/' or '\0'
+    let p = *path;
     // Skip leading '/'
-    let mut p = &path[1..];
-    if p.is_empty() {
-        *path = "";
-        return Ok(None);
-    }
-
-    let end = p.find('/').unwrap_or(p.len());
-    let component = &p[..end];
+    let remaining = &p[1..];
+    let end = remaining.find('/').unwrap_or(remaining.len());
+    let component = &remaining[..end];
 
     if component.len() >= MAX_NAME {
-        return Err(-36); // ENAMETOOLONG = 36, negative as in kernel
+        return Err(-36);
     }
 
     let result = component.to_string();
 
-    if end == p.len() {
+    if end == remaining.len() {
         *path = "";
     } else {
-        *path = &p[end..];
+        *path = &remaining[end..];
     }
 
     Ok(Some(result))
 }
 
 /// Simplified `path_normalize` without symlink resolution.
-///
-/// Handles `.` and `..`, collapsing multiple slashes, and optionally
-/// prepending `at_path` if `path` is relative. Returns 0 on success,
-/// negative errno on failure.
 pub fn path_normalize_simple(at_path: Option<&str>, path: &str, out: &mut String) -> i32 {
     if path.is_empty() {
-        return -2; // ENOENT
+        return -2;
     }
 
     let mut result = String::new();
@@ -93,9 +89,7 @@ pub fn path_normalize_simple(at_path: Option<&str>, path: &str, out: &mut String
     }
 
     if !path.starts_with('/') {
-        // relative: at_path already in result, if no at_path result is empty
     } else {
-        // absolute: discard at_path
         result.clear();
     }
 
@@ -107,7 +101,6 @@ pub fn path_normalize_simple(at_path: Option<&str>, path: &str, out: &mut String
         format!("{}/{}", result, path)
     };
 
-    // Now normalize `.` and `..`
     let mut components: Vec<&str> = Vec::new();
     for comp in combined.split('/') {
         match comp {
@@ -129,7 +122,7 @@ pub fn path_normalize_simple(at_path: Option<&str>, path: &str, out: &mut String
     }
 
     if out.len() >= MAX_PATH {
-        return -36; // ENAMETOOLONG
+        return -36;
     }
 
     0
@@ -149,7 +142,7 @@ mod tests {
         assert!(!path_is_normalized("a"));
         assert!(!path_is_normalized("//"));
         assert!(!path_is_normalized("/a//b"));
-        assert!(path_is_normalized("/a/")); // C allows trailing slash? Let's see: "/a/" -> '/' 'a' '/' '\0' => true
+        assert!(path_is_normalized("/a/"));
     }
 
     #[test]
@@ -164,6 +157,13 @@ mod tests {
         assert_eq!(c3, "ccc");
         assert_eq!(path, "");
         assert!(path_next_component(&mut path).unwrap().is_none());
+
+        // "/" returns one empty component per C
+        let mut slash = "/";
+        let comp = path_next_component(&mut slash).unwrap().unwrap();
+        assert_eq!(comp, "");
+        assert_eq!(slash, "");
+        assert!(path_next_component(&mut slash).unwrap().is_none());
     }
 
     #[test]

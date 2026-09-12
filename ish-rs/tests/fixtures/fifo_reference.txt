@@ -1,0 +1,30 @@
+O INIT cap=8
+S after_init cap=8 size=0 start=0 data=0000000000000000 snapshot=
+O WRITE 3 abc R 0
+S after_write_abc cap=8 size=3 start=0 data=6162630000000000 snapshot=616263
+O READ 3 R 0 data=616263
+S after_read_abc cap=8 size=0 start=3 data=6162630000000000 snapshot=
+O FLUSH
+S after_flush cap=8 size=0 start=3 data=6162630000000000 snapshot=
+O WRITE 4 abcd R 0
+S after_abcd cap=8 size=4 start=3 data=6162636162636400 snapshot=61626364
+O WRITE 1 e no_overwrite R 0
+S after_e_no_overwrite cap=8 size=5 start=3 data=6162636162636465 snapshot=6162636465
+O WRITE 1 e overwrite R 0
+S after_e_overwrite cap=8 size=6 start=3 data=6562636162636465 snapshot=616263646565
+O FLUSH
+S after_flush2 cap=8 size=0 start=3 data=6562636162636465 snapshot=
+O WRITE 6 012345 R 0
+S after_012345 cap=8 size=6 start=3 data=3562633031323334 snapshot=303132333435
+O READ 2 PEEK R 0 data=3031
+S after_peek_2 cap=8 size=6 start=3 data=3562633031323334 snapshot=303132333435
+O READ 2 LAST|PEEK R 0 data=3400
+S after_last_peek_2 cap=8 size=6 start=3 data=3562633031323334 snapshot=303132333435
+O READ 2 LAST R 0 data=3400
+S after_last_2 cap=8 size=4 start=1 data=3562633031323334 snapshot=62633031
+O FLUSH
+S after_flush3 cap=8 size=0 start=1 data=3562633031323334 snapshot=
+O WRAP test
+S after_wrap cap=8 size=6 start=5 data=6831326364656667 snapshot=656667683132
+O READ 4 LAST|PEEK wrap R 0 data=67000068
+S after_wrap_last_peek cap=8 size=6 start=5 data=6831326364656667 snapshot=656667683132

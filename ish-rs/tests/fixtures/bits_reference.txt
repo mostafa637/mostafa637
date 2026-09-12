@@ -1,0 +1,42 @@
+SIZE 0 -> 1
+SIZE 1 -> 1
+SIZE 8 -> 1
+SIZE 9 -> 2
+SIZE 16 -> 2
+SET 0 -> 01 00 00 00 test0=1
+SET 9 -> 01 02 00 00 test9=1 test1=0
+CLEAR 0 -> 00 02 00 00 test0=0 test9=1
+SET 8 -> 00 03 00 00
+CLEAR 8 -> 00 02 00 00
+SEQ 0 -> 01 00
+SEQ 1 -> 01 00
+SEQ 2 -> 01 00
+SEQ 3 -> 09 00
+SEQ 4 -> 09 00
+SEQ 5 -> 09 00
+SEQ 6 -> 49 00
+SEQ 7 -> 49 00
+SEQ 8 -> 49 00
+SEQ 9 -> 49 02
+SEQ 10 -> 49 02
+SEQ 11 -> 49 02
+SEQ 12 -> 49 12
+SEQ 13 -> 49 12
+SEQ 14 -> 49 12
+SEQ 15 -> 49 92
+TEST 0 -> 1
+TEST 1 -> 0
+TEST 2 -> 0
+TEST 3 -> 1
+TEST 4 -> 0
+TEST 5 -> 0
+TEST 6 -> 1
+TEST 7 -> 0
+TEST 8 -> 0
+TEST 9 -> 1
+TEST 10 -> 0
+TEST 11 -> 0
+TEST 12 -> 1
+TEST 13 -> 0
+TEST 14 -> 0
+TEST 15 -> 1
