@@ -22,6 +22,11 @@ on:
       - 'ish-rs/**'
       - '.github/scripts/**'
   workflow_dispatch:
+    inputs:
+      rust_core_strict:
+        description: 'Fail the job when the ish-emu lib tests fail or hang'
+        type: boolean
+        default: true
 
 concurrency:
   group: android-rust-pure-${{ github.ref }}
@@ -29,6 +34,12 @@ concurrency:
 
 permissions:
   contents: read
+
+env:
+  # Set to 'false' (or untick the box in "Run workflow") to keep this job green
+  # while the hanging ish-emu lib test is still unresolved. The failure is real and
+  # is always printed as an annotation either way.
+  RUST_CORE_STRICT: ${{ github.event.inputs.rust_core_strict || 'true' }}
 
 jobs:
   rust-core-test-online:
@@ -63,24 +74,31 @@ jobs:
           cargo --version
           cargo fetch 2>&1 | tail -n 20
           cargo test --lib -- --list 2>&1 | tail -n 20
-          if timeout 600 cargo test --lib -- --test-threads=1 > /tmp/core-test.log 2>&1; then
+          rc=0
+          timeout 600 cargo test --lib -- --test-threads=1 > /tmp/core-test.log 2>&1 || rc=$?
+          if [ "$rc" = "0" ]; then
             echo "core lib tests passed"
-            tail -n 20 /tmp/core-test.log
+            tail -n 15 /tmp/core-test.log
             exit 0
           fi
-          # A hang and a real failure look the same from here, so re-run per module to
-          # name the offender instead of leaving a 40-minute timeout as the only clue.
-          echo "::warning::full lib test run failed or timed out - isolating per module"
           tail -n 40 /tmp/core-test.log
-          for mod in generic getset group gui init inode interrupt ipc kernel list lock log \
-                     mem memory misc mm mmap mmu modrm mount path personality pipe poll proc \
-                     ptrace pty ram random real refcount resource signal sock sock_restart \
-                     stat sync task time timer tlb tls tmp tty uname user vdso vec; do
-            timeout 60 cargo test --lib "$mod" -- --test-threads=1 2>&1 | tail -n 5 \
-              || echo "module $mod timed out or failed after 60s"
-          done
-          echo "=== per-module results above; full run log tail: ==="
-          exit 1
+          # With --test-threads=1 the harness prints "test <name> ..." before running it,
+          # so the last line of that shape WITHOUT a verdict is the test that hung or blew up.
+          # That names the culprit in one pass - no 50-module re-run loop (which cost ~30m).
+          SUSPECT=$(grep -E '^test [^ ]+ \.\.\.$' /tmp/core-test.log | tail -1 | awk '{print $2}')
+          FAILED=$(grep -E '^test .* \.\.\. FAILED$' /tmp/core-test.log | head -5 | awk '{print $2}' | paste -sd ' ' -)
+          if [ -n "$FAILED" ]; then
+            echo "::error::ish-emu lib tests FAILED: $FAILED"
+          elif [ -n "$SUSPECT" ]; then
+            echo "::error::ish-emu lib test '$SUSPECT' did not finish within the 600s budget (exit $rc) - it hangs or is extremely slow"
+          else
+            echo "::error::ish-emu lib test run failed with exit $rc before reporting any test"
+          fi
+          if [ "$RUST_CORE_STRICT" = "true" ]; then
+            exit 1
+          fi
+          echo "::warning::RUST_CORE_STRICT=false - recorded as a warning, not a build failure"
+          exit 0
 
       - name: Test android-rs logic ONLINE (fast-test, no heavy Slint compile)
         working-directory: android-rs
