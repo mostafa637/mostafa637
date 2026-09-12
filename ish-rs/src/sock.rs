@@ -24,6 +24,9 @@ pub const SO_ERROR: u32 = 4;
 pub const SO_KEEPALIVE: u32 = 9;
 pub const SO_SNDBUF: u32 = 7;
 pub const SO_RCVBUF: u32 = 8;
+pub const SO_LINGER: u32 = 13;
+pub const SO_RCVTIMEO: u32 = 20;
+pub const SO_SNDTIMEO: u32 = 21;
 
 pub const SOCKADDR_DATA_MAX: usize = 108;
 pub const SOCKET_TYPE_MASK: u32 = 0xf;
@@ -70,7 +73,6 @@ impl UnixAddr {
         let is_abstract = p.starts_with('\0');
         Self { path: p, is_abstract }
     }
-
     pub fn is_unnamed(&self) -> bool { self.path.is_empty() }
 }
 
@@ -106,6 +108,99 @@ pub fn sock_type_to_real(sock_type: u32, _protocol: u32) -> Result<i32, i32> {
         SOCK_RAW => Ok(3),
         SOCK_SEQPACKET => Ok(5),
         _ => Err(-22),
+    }
+}
+
+/// Socket state, matching C's sock state machine
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SocketState {
+    #[default]
+    Unbound,
+    Bound,
+    Listening,
+    Connecting,
+    Connected,
+    Closed,
+}
+
+#[derive(Debug, Default)]
+pub struct Socket {
+    pub family: u32,
+    pub sock_type: u32,
+    pub protocol: u32,
+    pub state: SocketState,
+    pub bound_addr: Option<UnixAddr>,
+    pub sndbuf: u32,
+    pub rcvbuf: u32,
+    pub reuseaddr: bool,
+}
+
+impl Socket {
+    pub fn new(family: u32, sock_type: u32, protocol: u32) -> Result<Self, i32> {
+        sock_family_to_real(family)?;
+        sock_type_to_real(sock_type, protocol)?;
+        Ok(Self {
+            family,
+            sock_type: sock_type & SOCKET_TYPE_MASK,
+            protocol,
+            state: SocketState::Unbound,
+            bound_addr: None,
+            sndbuf: 212992,
+            rcvbuf: 212992,
+            reuseaddr: false,
+        })
+    }
+
+    pub fn bind(&mut self, addr: UnixAddr) -> Result<(), i32> {
+        if self.state != SocketState::Unbound {
+            return Err(-22); // EINVAL
+        }
+        self.bound_addr = Some(addr);
+        self.state = SocketState::Bound;
+        Ok(())
+    }
+
+    pub fn listen(&mut self, _backlog: i32) -> Result<(), i32> {
+        if self.state != SocketState::Bound {
+            return Err(-22);
+        }
+        self.state = SocketState::Listening;
+        Ok(())
+    }
+
+    pub fn connect(&mut self, addr: UnixAddr) -> Result<(), i32> {
+        if self.state == SocketState::Listening {
+            return Err(-22);
+        }
+        self.bound_addr = Some(addr);
+        self.state = SocketState::Connected;
+        Ok(())
+    }
+
+    pub fn setsockopt(&mut self, level: u32, optname: u32, optval: u32) -> Result<(), i32> {
+        if level != SOL_SOCKET {
+            return Err(-92); // ENOPROTOOPT
+        }
+        match optname {
+            SO_REUSEADDR => { self.reuseaddr = optval != 0; Ok(()) },
+            SO_SNDBUF => { self.sndbuf = optval; Ok(()) },
+            SO_RCVBUF => { self.rcvbuf = optval; Ok(()) },
+            _ => Err(-92),
+        }
+    }
+
+    pub fn getsockopt(&self, level: u32, optname: u32) -> Result<u32, i32> {
+        if level != SOL_SOCKET {
+            return Err(-92);
+        }
+        match optname {
+            SO_TYPE => Ok(self.sock_type),
+            SO_ERROR => Ok(0),
+            SO_REUSEADDR => Ok(if self.reuseaddr { 1 } else { 0 }),
+            SO_SNDBUF => Ok(self.sndbuf),
+            SO_RCVBUF => Ok(self.rcvbuf),
+            _ => Err(-92),
+        }
     }
 }
 
@@ -156,5 +251,28 @@ mod tests {
         assert!(abstract_addr.is_abstract);
         let unnamed = UnixAddr::new("");
         assert!(unnamed.is_unnamed());
+    }
+
+    #[test]
+    fn socket_state_machine() {
+        let mut sock = Socket::new(AF_UNIX, SOCK_STREAM, 0).unwrap();
+        assert_eq!(sock.state, SocketState::Unbound);
+        sock.bind(UnixAddr::new("/tmp/test")).unwrap();
+        assert_eq!(sock.state, SocketState::Bound);
+        sock.listen(5).unwrap();
+        assert_eq!(sock.state, SocketState::Listening);
+        assert!(sock.connect(UnixAddr::new("/tmp/other")).is_err());
+    }
+
+    #[test]
+    fn socket_options() {
+        let mut sock = Socket::new(AF_INET, SOCK_STREAM, 0).unwrap();
+        assert_eq!(sock.getsockopt(SOL_SOCKET, SO_TYPE).unwrap(), SOCK_STREAM);
+        assert_eq!(sock.getsockopt(SOL_SOCKET, SO_ERROR).unwrap(), 0);
+        sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1).unwrap();
+        assert_eq!(sock.getsockopt(SOL_SOCKET, SO_REUSEADDR).unwrap(), 1);
+        sock.setsockopt(SOL_SOCKET, SO_SNDBUF, 4096).unwrap();
+        assert_eq!(sock.getsockopt(SOL_SOCKET, SO_SNDBUF).unwrap(), 4096);
+        assert!(sock.getsockopt(SOL_SOCKET, 9999).is_err());
     }
 }
