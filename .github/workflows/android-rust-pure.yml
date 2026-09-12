@@ -23,6 +23,7 @@ jobs:
   rust-core-test-online:
     name: Rust Core + Android Pure Rust Logic ONLINE (KVM + hterm as iOS)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,6 +37,12 @@ jobs:
           kvm-ok && echo "kvm-ok: KVM acceleration can be used" || echo "kvm-ok not available"
           lscpu | grep -i virtualization || true
           echo "KVM check complete"
+
+      - name: Install system deps for Slint (ONLINE)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev || true
+          echo "System deps installed"
 
       - name: Initialize hterm as iSH iOS does (ONLINE ONLY - no offline)
         run: |
@@ -67,22 +74,31 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Test ish-emu core ONLINE (no offline)
+      - name: Test ish-emu core ONLINE (no offline) - fetch + verbose
         working-directory: ish-rs
         run: |
-          echo "Building ish-emu ONLINE ONLY (no --offline) as requested"
-          cargo test --lib 2>&1 | tail -n 100
+          echo "=== Building ish-emu ONLINE ONLY (no --offline) as requested ==="
+          echo "Cargo version:"
+          cargo --version
+          echo "Fetching dependencies ONLINE..."
+          cargo fetch --verbose 2>&1 | tail -n 50
+          echo "Running cargo test --lib ONLINE..."
+          cargo test --lib --verbose 2>&1 | tail -n 200
+          echo "ish-emu tests done"
 
       - name: Test android-rs pure Rust logic ONLINE (SlintUi + Servo + hterm)
         working-directory: android-rs
         run: |
-          echo "Building android-rs ONLINE ONLY (no --offline) - pure Rust Slint + Servo + hterm"
-          cargo test --lib 2>&1 | tail -n 100
+          echo "=== Building android-rs ONLINE ONLY (no --offline) - pure Rust Slint + Servo + hterm ==="
+          cargo fetch --verbose 2>&1 | tail -n 50
+          cargo test --lib --verbose 2>&1 | tail -n 300
+          echo "android-rs tests done"
 
       - name: Run desktop binary ONLINE (simulates Android UI logic)
         working-directory: android-rs
         run: |
-          cargo run --bin ish-android-rs 2>&1 | tail -n 150
+          cargo run --bin ish-android-rs --verbose 2>&1 | tail -n 200
+          echo "Desktop binary run done ONLINE"
 
   android-emulator-pure-rust-online:
     name: Build APK ONLINE (Pure Rust Slint + Servo + hterm) + Emulator KVM + Screenshot
@@ -94,6 +110,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Install system deps for Slint + Android (ONLINE)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev openjdk-17-jdk || true
 
       - name: Set up Java 17 (for Gradle)
         uses: actions/setup-java@v4
@@ -144,7 +165,8 @@ jobs:
           cd android-rs
           echo "=== Building APK ONLINE ONLY (no --offline) ==="
           echo "Building with Slint 1.8.0 + android-activity + hterm as iOS..."
-          cargo apk build --release 2>&1 | tail -n 200 || echo "cargo apk build failed, will try Kotlin fallback"
+          cargo fetch --verbose 2>&1 | tail -n 50
+          cargo apk build --release --verbose 2>&1 | tail -n 300 || echo "cargo apk build failed, will try Kotlin fallback"
           
           # Fallback: Kotlin APK that embeds pure Rust logic + hterm as iOS
           if [ ! -f target/android-artifacts/app/build/outputs/apk/release/app-release.apk ]; then
