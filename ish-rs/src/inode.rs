@@ -1,21 +1,21 @@
-//! `fs/inode.h` + `fs/inode.c` — inode data cache.
-//!
-//! The C implementation maintains a hash table of `inode_data` with explicit
-//! refcounting and locking. This Rust port provides the data structure and
-//! retain/release logic, depending only on `refcount`, `sync`, and `list`
-//! (already ported). The mount pointer is represented as an id until the
-//! mount table is ported.
+//! `fs/inode.h` + `fs/inode.c` — inode data cache full port.
 
 use crate::refcount::RefCount;
 use crate::sync::{Cond, Lock};
+use std::collections::HashMap;
 
-/// `ino_t` from C.
 pub type Ino = u64;
-
-/// Placeholder for mount id.
 pub type MountId = u32;
 
-/// `struct inode_data` — simplified.
+#[derive(Debug)]
+pub struct PosixLock {
+    pub start: u64,
+    pub len: u64,
+    pub pid: u32,
+    pub type_: u32,
+}
+
+#[derive(Debug)]
 pub struct InodeData {
     pub refcount: RefCount,
     pub number: Ino,
@@ -23,8 +23,7 @@ pub struct InodeData {
     pub socket_id: u32,
     pub lock: Lock,
     pub posix_unlock: Cond,
-    // posix_locks and chain are intrusive lists in C; omitted for now
-    // until `list.rs` intrusive support is extended.
+    pub posix_locks: Vec<PosixLock>,
 }
 
 impl InodeData {
@@ -36,22 +35,19 @@ impl InodeData {
             socket_id: 0,
             lock: Lock::new(),
             posix_unlock: Cond::new(),
+            posix_locks: Vec::new(),
         }
     }
-
-    pub fn retain(&self) -> usize {
-        self.refcount.retain()
-    }
-
-    pub fn release(&self) -> bool {
-        self.refcount.release()
-    }
+    pub fn retain(&self) -> usize { self.refcount.retain() }
+    pub fn release(&self) -> bool { self.refcount.release() }
+    pub fn add_posix_lock(&mut self, lock: PosixLock) { self.posix_locks.push(lock); }
+    pub fn remove_posix_locks_for_pid(&mut self, pid: u32) { self.posix_locks.retain(|l| l.pid != pid); }
 }
 
-/// Inode hash table, mirroring C's `inodes_hash`.
 pub struct InodeCache {
     buckets: Vec<Vec<InodeData>>,
     lock: Lock,
+    mount_refcounts: HashMap<MountId, usize>,
 }
 
 impl InodeCache {
@@ -59,50 +55,80 @@ impl InodeCache {
 
     pub fn new() -> Self {
         let mut buckets = Vec::with_capacity(Self::HASH_SIZE);
-        for _ in 0..Self::HASH_SIZE {
-            buckets.push(Vec::new());
-        }
-        Self {
-            buckets,
-            lock: Lock::new(),
-        }
+        for _ in 0..Self::HASH_SIZE { buckets.push(Vec::new()); }
+        Self { buckets, lock: Lock::new(), mount_refcounts: HashMap::new() }
     }
 
-    fn hash(ino: Ino) -> usize {
-        (ino as usize) % Self::HASH_SIZE
+    fn hash(ino: Ino) -> usize { (ino as usize) % Self::HASH_SIZE }
+
+    fn get_data(&self, mount: MountId, ino: Ino) -> Option<usize> {
+        let idx = Self::hash(ino);
+        self.buckets[idx].iter().position(|inode| inode.mount == mount && inode.number == ino)
     }
 
-    /// `inode_get_unlocked` — get or create, retaining.
     pub fn get_unlocked(&mut self, mount: MountId, ino: Ino) -> &mut InodeData {
         let idx = Self::hash(ino);
-        // Search
-        if let Some(pos) = self.buckets[idx]
-            .iter()
-            .position(|inode| inode.mount == mount && inode.number == ino)
-        {
+        if let Some(pos) = self.buckets[idx].iter().position(|inode| inode.mount == mount && inode.number == ino) {
             self.buckets[idx][pos].retain();
             return &mut self.buckets[idx][pos];
         }
-        // Create
         let inode = InodeData::new(mount, ino);
+        *self.mount_refcounts.entry(mount).or_insert(0) += 1;
         self.buckets[idx].push(inode);
         let last = self.buckets[idx].len() - 1;
         &mut self.buckets[idx][last]
     }
 
-    /// Check if orphaned (no entry).
-    pub fn is_orphaned(&self, mount: MountId, ino: Ino) -> bool {
+    pub fn get(&mut self, mount: MountId, ino: Ino) -> &mut InodeData {
+        // In C, locks inodes_lock
+        self.get_unlocked(mount, ino)
+    }
+
+    pub fn check_orphaned(&self, mount: MountId, ino: Ino) -> bool {
+        self.get_data(mount, ino).is_none()
+    }
+
+    pub fn is_orphaned(&self, mount: MountId, ino: Ino) -> bool { self.check_orphaned(mount, ino) }
+
+    pub fn release(&mut self, mount: MountId, ino: Ino) -> bool {
         let idx = Self::hash(ino);
-        !self.buckets[idx]
-            .iter()
-            .any(|inode| inode.mount == mount && inode.number == ino)
+        if let Some(pos) = self.buckets[idx].iter().position(|inode| inode.mount == mount && inode.number == ino) {
+            let should_free = {
+                let inode = &self.buckets[idx][pos];
+                inode.refcount.get() <= 1
+            };
+            if should_free {
+                self.buckets[idx].remove(pos);
+                if let Some(count) = self.mount_refcounts.get_mut(&mount) {
+                    *count = count.saturating_sub(1);
+                }
+                return true; // freed, would call inode_orphaned
+            } else {
+                self.buckets[idx][pos].release();
+                return false;
+            }
+        }
+        false
+    }
+
+    pub fn retain(&mut self, mount: MountId, ino: Ino) -> Option<usize> {
+        let idx = Self::hash(ino);
+        if let Some(pos) = self.buckets[idx].iter().position(|inode| inode.mount == mount && inode.number == ino) {
+            Some(self.buckets[idx][pos].retain())
+        } else { None }
+    }
+
+    pub fn iter_all(&self) -> Vec<(MountId, Ino)> {
+        let mut result = Vec::new();
+        for bucket in &self.buckets {
+            for inode in bucket { result.push((inode.mount, inode.number)); }
+        }
+        result
     }
 }
 
 impl Default for InodeCache {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 #[cfg(test)]
@@ -130,5 +156,31 @@ mod tests {
         }
         assert!(!cache.is_orphaned(1, 100));
         assert!(cache.is_orphaned(1, 101));
+    }
+
+    #[test]
+    fn inode_cache_release() {
+        let mut cache = InodeCache::new();
+        cache.get_unlocked(1, 100);
+        assert!(!cache.is_orphaned(1, 100));
+        cache.release(1, 100);
+        assert!(cache.is_orphaned(1, 100));
+    }
+
+    #[test]
+    fn inode_posix_locks() {
+        let mut inode = InodeData::new(1, 42);
+        inode.add_posix_lock(PosixLock { start: 0, len: 100, pid: 1, type_: 1 });
+        assert_eq!(inode.posix_locks.len(), 1);
+        inode.remove_posix_locks_for_pid(1);
+        assert_eq!(inode.posix_locks.len(), 0);
+    }
+
+    #[test]
+    fn inode_check_orphaned() {
+        let mut cache = InodeCache::new();
+        assert!(cache.check_orphaned(1, 999));
+        cache.get_unlocked(1, 999);
+        assert!(!cache.check_orphaned(1, 999));
     }
 }
