@@ -15,9 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 graphitesql = { path = "vendor/graphitesql", default-features = false, features = ["std"] }
 memmap2 = { path = "vendor/memmap2", version = "0.9" }
-
-[patch.crates-io]
-libc = { path = "vendor/libc" }
+libc = "0.2"
 
 [profile.release]
 opt-level = 3

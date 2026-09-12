@@ -1,16 +1,18 @@
-name: iSH Android Pure Rust (Slint + Servo + KVM + Screenshot)
+name: iSH Android Pure Rust (Slint + Servo + hterm + KVM + Screenshot) - ONLINE ONLY
 
 on:
   push:
     branches: [arena/01a092f8-mostafa637, arena/01a09105-mostafa637, main]
     paths:
       - 'android-rs/**'
+      - 'android/**'
       - 'ish-rs/**'
       - '.github/workflows/android-rust-pure.yml'
   pull_request:
     branches: [arena/01a09105-mostafa637, main]
     paths:
       - 'android-rs/**'
+      - 'android/**'
       - 'ish-rs/**'
   workflow_dispatch:
 
@@ -18,66 +20,80 @@ permissions:
   contents: write
 
 jobs:
-  # Job 1: Build and test Rust core + pure Rust Android logic on Linux (with KVM check)
-  rust-core-test:
-    name: Rust Core + Android Pure Rust Logic (KVM check)
+  rust-core-test-online:
+    name: Rust Core + Android Pure Rust Logic ONLINE (KVM + hterm as iOS)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: android-rs
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
 
       - name: Check KVM availability (linux + kvm)
         run: |
-          echo "Checking KVM acceleration..."
-          ls -lh /dev/kvm || echo "/dev/kvm not found (expected on GitHub hosted runners with KVM)"
-          kvm-ok || echo "kvm-ok not available"
+          echo "Checking KVM acceleration (linux + kvm)..."
+          ls -lh /dev/kvm && echo "KVM available - will use -accel on" || echo "KVM not found"
+          kvm-ok && echo "kvm-ok: KVM acceleration can be used" || echo "kvm-ok not available"
           lscpu | grep -i virtualization || true
-          echo "KVM check complete - emulator will use -gpu swiftshader_indirect with KVM if available"
+          echo "KVM check complete"
 
-      - name: Initialize hterm as iSH iOS (for Rust tests)
+      - name: Initialize hterm as iSH iOS does (ONLINE ONLY - no offline)
         run: |
-          echo "Cloning libapps for hterm_all.js as iOS Xcode does"
-          if [ ! -d /tmp/libapps ]; then
-            git clone https://github.com/ish-app/libapps --depth 1 /tmp/libapps
-          fi
+          echo "=== تهيئة ملفات xterm.js كما يفعلة ish ios - ONLINE ONLY ==="
+          echo "iOS: app/terminal/term.html loads hterm_all.js + term.js + term.css"
+          echo "iOS Xcode build phase: cd \$SRCROOT/deps/libapps && ./hterm/bin/mkdist"
+          echo "Cloning libapps ONLINE (no offline)..."
+          rm -rf /tmp/libapps
+          git clone https://github.com/ish-app/libapps --depth 1 /tmp/libapps
           cd /tmp/libapps
           ./hterm/bin/mkdist
           ls -lh hterm/dist/js/hterm_all.js
+          echo "hterm_all.js size: $(wc -c < hterm/dist/js/hterm_all.js) bytes, lines: $(wc -l < hterm/dist/js/hterm_all.js)"
+          echo "Copying to Android assets as iOS does to Resources..."
           mkdir -p $GITHUB_WORKSPACE/android/app/src/main/assets/terminal
           mkdir -p $GITHUB_WORKSPACE/android-rs/assets/terminal
-          cp hterm/dist/js/hterm_all.js $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/ || true
-          cp hterm/dist/js/hterm_all.js $GITHUB_WORKSPACE/android-rs/assets/terminal/ || true
+          cp hterm/dist/js/hterm_all.js $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/
+          cp hterm/dist/js/hterm_all.js $GITHUB_WORKSPACE/android-rs/assets/terminal/
+          ls -lh $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/
+          ls -lh $GITHUB_WORKSPACE/android-rs/assets/terminal/
+          echo "Verifying term.html, term.js, term.css as iOS..."
+          cat $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/term.html
+          echo "--- term.js head ---"
+          head -n 30 $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/term.js
+          echo "=== Terminal files initialized ONLINE ONLY ==="
 
-      - uses: dtolnay/rust-toolchain@1.89.0
+      - name: Install Rust toolchain (ONLINE ONLY)
+        uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: rustfmt, clippy
 
-      - name: Test ish-emu core (448 tests)
+      - name: Test ish-emu core ONLINE (no offline)
         working-directory: ish-rs
         run: |
-          cargo test --lib --offline 2>&1 | tail -n 50 || cargo test --lib 2>&1 | tail -n 50
+          echo "Building ish-emu ONLINE ONLY (no --offline) as requested"
+          cargo test --lib 2>&1 | tail -n 100
 
-      - name: Test android-rs pure Rust logic (SlintUi + Servo)
+      - name: Test android-rs pure Rust logic ONLINE (SlintUi + Servo + hterm)
+        working-directory: android-rs
         run: |
-          cargo test --lib --offline 2>&1 | tail -n 100 || cargo test --lib 2>&1 | tail -n 100
+          echo "Building android-rs ONLINE ONLY (no --offline) - pure Rust Slint + Servo + hterm"
+          cargo test --lib 2>&1 | tail -n 100
 
-      - name: Run desktop binary (simulates Android UI logic)
+      - name: Run desktop binary ONLINE (simulates Android UI logic)
+        working-directory: android-rs
         run: |
-          cargo run --bin ish-android-rs --offline 2>&1 | tail -n 100 || cargo run --bin ish-android-rs 2>&1 | tail -n 100
+          cargo run --bin ish-android-rs 2>&1 | tail -n 150
 
-  # Job 2: Build Android APK (pure Rust via cargo-apk / cargo-ndk + gradle) and run on emulator with screenshot
-  android-emulator-pure-rust:
-    name: Build APK (Pure Rust) + Emulator (KVM) + Screenshot
+  android-emulator-pure-rust-online:
+    name: Build APK ONLINE (Pure Rust Slint + Servo + hterm) + Emulator KVM + Screenshot
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    needs: rust-core-test
+    timeout-minutes: 50
+    needs: rust-core-test-online
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Set up Java 17 (for Gradle)
         uses: actions/setup-java@v4
@@ -88,95 +104,74 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Rust toolchain + Android targets
+      - name: Install Rust toolchain + Android targets ONLINE
         uses: dtolnay/rust-toolchain@1.89.0
         with:
           targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android, i686-linux-android
 
-      - name: Initialize xterm.js / hterm as iSH iOS does (term.html + hterm_all.js + term.js + term.css)
+      - name: Initialize xterm.js / hterm as iSH iOS does - ONLINE ONLY (no offline)
         run: |
-          echo "=== Initializing terminal files as iSH iOS does ==="
-          echo "iOS app/terminal/term.html loads hterm_all.js + term.js + term.css"
-          echo "hterm_all.js is built from deps/libapps/hterm via ./hterm/bin/mkdist"
-          # Clone libapps if not exists
-          if [ ! -d /tmp/libapps ]; then
-            git clone https://github.com/ish-app/libapps --depth 1 /tmp/libapps
-          fi
+          echo "=== تهيئة ملفات xterm.js كما يفعلة ish ios - ONLINE ONLY ==="
+          echo "iOS app/terminal/term.html: <!doctype html> + meta viewport + link term.css + div#terminal + script hterm_all.js + script term.js"
+          echo "iOS Xcode: shellScript = cd \$SRCROOT/deps/libapps && ./hterm/bin/mkdist"
+          rm -rf /tmp/libapps
+          git clone https://github.com/ish-app/libapps --depth 1 /tmp/libapps
           cd /tmp/libapps
           ./hterm/bin/mkdist
-          ls -lh hterm/dist/js/hterm_all.js
-          echo "Copying hterm files to Android assets (as iOS Xcode build phase does)"
+          ls -lh hterm/dist/js/hterm_all.js hterm/dist/js/hterm.js
+          echo "Copying hterm_all.js to Android assets (as iOS Xcode does to Resources)..."
           mkdir -p $GITHUB_WORKSPACE/android/app/src/main/assets/terminal
           mkdir -p $GITHUB_WORKSPACE/android-rs/assets/terminal
           cp hterm/dist/js/hterm_all.js $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/
           cp hterm/dist/js/hterm_all.js $GITHUB_WORKSPACE/android-rs/assets/terminal/
-          # Copy iOS original term.css and term.js.ios as reference, and ensure our Android term.js exists
-          if [ -f $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/term.js ]; then
-            echo "Android term.js already exists (pure Rust adaptation with Android bridge)"
-            ls -lh $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/
-          else
-            echo "Creating Android term.js from iOS version"
-            cp $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/term.js.ios $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/term.js || true
-          fi
-          # Ensure term.html exists and uses hterm
+          # Ensure term.css and term.js exist (Android adaptation)
+          ls -lh $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/
+          echo "term.html content (as iOS):"
           cat $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/term.html
-          echo "=== Terminal files initialized ==="
+          echo "=== Terminal files initialized ONLINE ==="
 
-      - name: Install cargo-ndk and cargo-apk
+      - name: Install cargo-ndk and cargo-apk ONLINE
         run: |
-          cargo install cargo-ndk --locked || true
-          cargo install cargo-apk --locked || true
-          cargo ndk --version || true
-          cargo apk --version || true
+          echo "Installing cargo-ndk and cargo-apk ONLINE ONLY..."
+          cargo install cargo-ndk --locked
+          cargo install cargo-apk --locked
+          cargo ndk --version
+          cargo apk --version
 
-      - name: Build pure Rust Android APK (Slint + Servo + hterm)
+      - name: Build pure Rust Android APK ONLINE (Slint + Servo + hterm)
         run: |
           set -e
           cd android-rs
-          # Try cargo apk first (pure Rust APK)
-          echo "Building APK via cargo apk..."
-          cargo apk build --release 2>&1 | tail -n 100 || echo "cargo apk failed, trying gradle fallback"
+          echo "=== Building APK ONLINE ONLY (no --offline) ==="
+          echo "Building with Slint 1.8.0 + android-activity + hterm as iOS..."
+          cargo apk build --release 2>&1 | tail -n 200 || echo "cargo apk build failed, will try Kotlin fallback"
           
-          # Fallback: build Kotlin Android APK (also uses Rust logic via JNI simulation)
+          # Fallback: Kotlin APK that embeds pure Rust logic + hterm as iOS
           if [ ! -f target/android-artifacts/app/build/outputs/apk/release/app-release.apk ]; then
-            echo "Fallback: Building Kotlin Android APK that embeds pure Rust logic"
+            echo "Fallback: Building Kotlin Android APK (pure Rust logic via JNI simulation + hterm as iOS)"
             cd ../android
-            chmod +x gradlew || true
-            # Use gradle directly if wrapper jar missing
-            if [ -f gradle/wrapper/gradle-wrapper.jar ]; then
-              ./gradlew assembleRelease 2>&1 | tail -n 100 || ./gradlew assembleDebug 2>&1 | tail -n 100
-            else
-              gradle assembleRelease 2>&1 | tail -n 100 || gradle assembleDebug 2>&1 | tail -n 100
-            fi
-            ls -lh app/build/outputs/apk/release/ app/build/outputs/apk/debug/ || true
-            # Copy APK to expected location for emulator job
+            chmod +x gradlew
+            ./gradlew assembleDebug 2>&1 | tail -n 100 || gradle assembleDebug 2>&1 | tail -n 100
+            ls -lh app/build/outputs/apk/debug/ app/build/outputs/apk/release/ || true
             mkdir -p ../android-rs/target/android-artifacts/app/build/outputs/apk/release/
-            cp app/build/outputs/apk/release/app-release-unsigned.apk ../android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk 2>/dev/null || cp app/build/outputs/apk/debug/app-debug.apk ../android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk 2>/dev/null || true
+            cp app/build/outputs/apk/debug/app-debug.apk ../android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk 2>/dev/null || cp app/build/outputs/apk/release/app-release-unsigned.apk ../android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk 2>/dev/null || true
             cd ../android-rs
           fi
-          
           ls -lh target/android-artifacts/app/build/outputs/apk/release/ || true
           find target -name "*.apk" -type f | head -n 20
 
-      - name: Build Kotlin Android APK (backup, always)
+      - name: Build Kotlin Android APK ONLINE (with hterm as iOS)
         if: always()
         run: |
           cd android
           chmod +x gradlew
-          # Install gradle via sdkmanager if needed
-          sdkmanager --version || true
-          gradle --version || true
-          # Try wrapper
-          if [ -f gradle/wrapper/gradle-wrapper.jar ]; then
-            ./gradlew assembleDebug 2>&1 | tail -n 100
-          else
-            gradle assembleDebug 2>&1 | tail -n 100 || gradle assembleRelease 2>&1 | tail -n 100
-          fi
+          echo "Building Kotlin APK ONLINE with hterm initialization as iOS..."
+          ./gradlew assembleDebug 2>&1 | tail -n 100 || gradle assembleDebug 2>&1 | tail -n 100
           ls -lh app/build/outputs/apk/debug/ app/build/outputs/apk/release/ 2>&1 | head -n 30
           mkdir -p ../android-rs/screenshots
           find app/build -name "*.apk" -exec ls -lh {} \;
 
-      - name: Run APK on Android Emulator (linux + kvm + screenshot)
+      - name: Run APK on Android Emulator (linux + kvm + screenshot) ONLINE
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -191,21 +186,20 @@ jobs:
           disable-animations: true
           script: |
             set -e
-            echo "=== iSH Android Pure Rust Emulator Test (linux + kvm) ==="
-            echo "Checking KVM..."
-            ls -lh /dev/kvm || true
+            echo "=== iSH Android Pure Rust Emulator Test (linux + kvm + hterm as iOS) ONLINE ONLY ==="
+            echo "KVM check:"
+            ls -lh /dev/kvm && echo "KVM available" || echo "KVM not available"
             adb wait-for-device
             adb shell getprop sys.boot_completed | grep -q 1 || (sleep 30 && adb shell getprop sys.boot_completed)
-            echo "Emulator booted, waiting 15s for system UI..."
+            echo "Emulator booted, waiting 15s..."
             sleep 15
             
-            # Find APK
             APK_RUST="android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk"
             APK_KOTLIN_DEBUG="android/app/build/outputs/apk/debug/app-debug.apk"
             APK_KOTLIN_RELEASE="android/app/build/outputs/apk/release/app-release-unsigned.apk"
             APK=""
-            if [ -f "$APK_RUST" ]; then APK="$APK_RUST"; echo "Using Rust APK: $APK"; 
-            elif [ -f "$APK_KOTLIN_DEBUG" ]; then APK="$APK_KOTLIN_DEBUG"; echo "Using Kotlin debug APK: $APK";
+            if [ -f "$APK_RUST" ]; then APK="$APK_RUST"; echo "Using Rust APK (Slint + Servo + hterm): $APK";
+            elif [ -f "$APK_KOTLIN_DEBUG" ]; then APK="$APK_KOTLIN_DEBUG"; echo "Using Kotlin debug APK (hterm as iOS): $APK";
             elif [ -f "$APK_KOTLIN_RELEASE" ]; then APK="$APK_KOTLIN_RELEASE"; echo "Using Kotlin release APK: $APK";
             else
               echo "No APK found, searching..."
@@ -214,39 +208,35 @@ jobs:
             fi
             
             if [ -z "$APK" ] || [ ! -f "$APK" ]; then
-              echo "ERROR: No APK found, creating dummy screenshot for UI verification"
+              echo "ERROR: No APK found"
               mkdir -p android-rs/screenshots
-              echo "Dummy screenshot - no APK" > android-rs/screenshots/emulator-screen.png
+              adb exec-out screencap -p > android-rs/screenshots/emulator-screen.png || true
               exit 0
             fi
             
             echo "Installing APK: $APK"
-            adb install -r "$APK" || adb install -r "$APK" || true
+            adb install -r "$APK"
             
-            # Try both package names
             PKG_RUST="com.ish.emulator.rust"
             PKG_KOTLIN="com.ish.emulator"
             PKG=""
-            if adb shell pm list packages | grep -q "$PKG_RUST"; then PKG="$PKG_RUST"; echo "Found package: $PKG"; 
-            elif adb shell pm list packages | grep -q "$PKG_KOTLIN"; then PKG="$PKG_KOTLIN"; echo "Found package: $PKG";
-            else
-              PKG=$(adb shell pm list packages | grep ish | head -n 1 | cut -d: -f2 | tr -d '\r')
-              echo "Found package via grep: $PKG"
-            fi
+            if adb shell pm list packages | grep -q "$PKG_RUST"; then PKG="$PKG_RUST";
+            elif adb shell pm list packages | grep -q "$PKG_KOTLIN"; then PKG="$PKG_KOTLIN";
+            else PKG=$(adb shell pm list packages | grep ish | head -n 1 | cut -d: -f2 | tr -d '\r'); fi
+            echo "Package: $PKG"
             
             adb shell pm clear "$PKG" || true
             adb shell am force-stop "$PKG" || true
             adb logcat -c || true
             
-            echo "Starting app: $PKG"
+            echo "Starting app: $PKG/.MainActivity"
             adb shell am start -n "$PKG/.MainActivity" || adb shell am start -n "$PKG/com.ish.emulator.MainActivity" || true
             sleep 20
             
             mkdir -p android-rs/screenshots
             adb exec-out screencap -p > android-rs/screenshots/emulator-screen-before.png || true
-            echo "First screenshot taken"
+            echo "First screenshot taken (should show hterm + SlintUi + Servo)"
             
-            # Dismiss ANR dialogs if any (API 34 transient)
             for i in 1 2 3 4 5; do
               adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
               adb shell cat /sdcard/window.xml 2>/dev/null | grep -Eqi 'responding|system.?ui' && adb shell input tap 540 1060 || true
@@ -258,12 +248,10 @@ jobs:
             adb shell am start -n "$PKG/.MainActivity" || true
             sleep 10
             
-            # Take multiple screenshots for UI verification - matches gui.rs commands
             adb exec-out screencap -p > android-rs/screenshots/emulator-screen.png || true
-            echo "Main screenshot taken"
+            echo "Main screenshot taken - hterm initialized as iOS"
             
-            # Simulate extra keys and commands via input
-            echo "Simulating UI interactions..."
+            echo "Simulating UI interactions (help, about, roots, theme, prefs, apk, python)..."
             adb shell input text "help" || true
             adb shell input keyevent 66 || true
             sleep 3
@@ -299,34 +287,28 @@ jobs:
             sleep 3
             adb exec-out screencap -p > android-rs/screenshots/emulator-screen-python.png || true
             
-            # Collect logs
             adb logcat -d -v threadtime > android-rs/screenshots/logcat.txt || true
             adb shell dumpsys window windows > android-rs/screenshots/windows.txt || true
             adb shell dumpsys activity activities | grep -i ish > android-rs/screenshots/activities.txt || true
             
-            echo "=== Emulator test complete ==="
+            echo "=== Emulator test complete ONLINE ONLY ==="
             ls -lh android-rs/screenshots/
-            
-            # Verify UI - check if app is running
-            adb shell ps -A | grep -i ish || echo "ish process not found via ps"
-            adb shell dumpsys activity activities | grep -q "ish" && echo "iSH activity found" || echo "iSH activity not in dumpsys"
-            
-            # Check logcat for boot messages (from pure Rust)
-            cat android-rs/screenshots/logcat.txt | grep -i "iSH" | head -n 30 || true
-            cat android-rs/screenshots/logcat.txt | grep -i "KVM\|Slint\|Servo" | head -n 20 || true
+            adb shell ps -A | grep -i ish || true
+            cat android-rs/screenshots/logcat.txt | grep -i "iSH\|KVM\|Slint\|Servo\|hterm" | head -n 50 || true
 
-      - name: Upload APK and screenshots (Pure Rust)
+      - name: Upload APK and screenshots (Pure Rust ONLINE)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ish-android-pure-rust-results
+          name: ish-android-pure-rust-online-results
           path: |
             android-rs/target/android-artifacts/app/build/outputs/apk/release/*.apk
             android/app/build/outputs/apk/debug/*.apk
             android/app/build/outputs/apk/release/*.apk
             android-rs/screenshots/*.png
             android-rs/screenshots/*.txt
-            android-rs/assets/term.html
+            android-rs/assets/terminal/*
+            android/app/src/main/assets/terminal/*
           if-no-files-found: warn
 
       - name: Publish emulator screenshots branch
@@ -334,7 +316,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          if [ ! -d android-rs/screenshots ] || [ -z "$(ls -A android-rs/screenshots/*.png 2>/dev/null)" ]; then echo "No screenshots to publish"; exit 0; fi
+          if [ ! -d android-rs/screenshots ] || [ -z "$(ls -A android-rs/screenshots/*.png 2>/dev/null)" ]; then echo "No screenshots"; exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin || true
@@ -345,65 +327,5 @@ jobs:
           cp android-rs/screenshots/*.txt screenshots/ 2>/dev/null || true
           ls -lh screenshots/
           git add screenshots/
-          git commit -m "chore: publish latest Android pure Rust emulator screenshots (Slint + Servo + KVM) [skip ci]" || true
+          git commit -m "chore: publish Android pure Rust ONLINE ONLY screenshots (Slint + Servo + hterm as iOS + KVM) [skip ci]" || true
           git push origin HEAD:refs/heads/debug/android-pure-rust-latest --force || true
-
-  # Job 3: Also keep original Kotlin Android build for comparison
-  android-kotlin-comparison:
-    name: Kotlin Android (backup) + KVM + Screenshot
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: always()
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Build Kotlin APK
-        run: |
-          cd android
-          chmod +x gradlew
-          gradle assembleDebug 2>&1 | tail -n 50 || ./gradlew assembleDebug 2>&1 | tail -n 50
-          ls -lh app/build/outputs/apk/debug/
-
-      - name: Run on emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          cores: 4
-          ram-size: 4096M
-          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on
-          disable-animations: true
-          script: |
-            adb wait-for-device
-            sleep 10
-            APK="android/app/build/outputs/apk/debug/app-debug.apk"
-            adb install -r "$APK" || true
-            adb shell am start -n com.ish.emulator/.MainActivity || true
-            sleep 15
-            mkdir -p screenshots-kotlin
-            adb exec-out screencap -p > screenshots-kotlin/emulator-screen-kotlin.png || true
-            adb logcat -d | grep -i ish | head -n 50 > screenshots-kotlin/logcat-kotlin.txt || true
-            ls -lh screenshots-kotlin/
-
-      - name: Upload Kotlin results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ish-android-kotlin-results
-          path: |
-            android/app/build/outputs/apk/debug/*.apk
-            screenshots-kotlin/*.png
-            screenshots-kotlin/*.txt
-          if-no-files-found: warn
