@@ -1,76 +1,59 @@
-//! `fs/proc.h` + `fs/proc.c` — proc filesystem entries and helpers.
+//! `fs/proc.c` — procfs constants and helpers.
 
-pub const PROC_MODE_FILE: u32 = 0o100444;
-pub const PROC_MODE_DIR: u32 = 0o040555;
-pub const PROC_MODE_SYMLINK: u32 = 0o120777;
+pub const PROC_PID_MAX: u32 = 4194304;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcEntryType {
-    File,
     Dir,
-    Symlink,
+    File,
+    Link,
+    PidDir,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProcDirEntry {
+#[derive(Debug, Clone)]
+pub struct ProcEntry {
     pub name: String,
+    pub entry_type: ProcEntryType,
     pub mode: u32,
 }
 
-impl ProcDirEntry {
-    pub fn new(name: impl Into<String>, mode: u32) -> Self {
-        Self { name: name.into(), mode }
+impl ProcEntry {
+    pub fn new(name: &str, entry_type: ProcEntryType, mode: u32) -> Self {
+        Self { name: name.to_string(), entry_type, mode }
     }
-    pub fn is_dir(&self) -> bool { (self.mode & 0o170000) == 0o040000 }
-    pub fn is_file(&self) -> bool { (self.mode & 0o170000) == 0o100000 }
-    pub fn is_symlink(&self) -> bool { (self.mode & 0o170000) == 0o120000 }
+    pub fn is_dir(&self) -> bool { matches!(self.entry_type, ProcEntryType::Dir | ProcEntryType::PidDir) }
+    pub fn is_file(&self) -> bool { matches!(self.entry_type, ProcEntryType::File) }
 }
 
-/// Proc data buffer, matching C `struct proc_data`
-#[derive(Debug, Clone, Default)]
-pub struct ProcData {
-    pub data: Vec<u8>,
+pub fn proc_pid_path(pid: u32) -> String { format!("/proc/{}", pid) }
+pub fn proc_self_path() -> &'static str { "/proc/self" }
+
+pub fn is_proc_path(path: &str) -> bool { path.starts_with("/proc/") || path == "/proc" || path == "/proc/self" }
+
+pub fn parse_proc_pid(path: &str) -> Option<u32> {
+    let stripped = path.strip_prefix("/proc/")?;
+    let first = stripped.split('/').next()?;
+    if first == "self" { return None; }
+    first.parse::<u32>().ok().filter(|&pid| pid > 0 && pid <= PROC_PID_MAX)
 }
 
-impl ProcData {
-    pub fn new() -> Self { Self { data: Vec::new() } }
-    pub fn from_string(s: &str) -> Self { Self { data: s.as_bytes().to_vec() } }
-    pub fn as_string(&self) -> String { String::from_utf8_lossy(&self.data).to_string() }
-    pub fn len(&self) -> usize { self.data.len() }
-    pub fn is_empty(&self) -> bool { self.data.is_empty() }
-
-    pub fn write(&mut self, offset: usize, buf: &[u8]) -> usize {
-        if offset > self.data.len() {
-            self.data.resize(offset, 0);
-        }
-        let needed = offset + buf.len();
-        if needed > self.data.len() {
-            self.data.resize(needed, 0);
-        }
-        self.data[offset..offset + buf.len()].copy_from_slice(buf);
-        buf.len()
-    }
-
-    pub fn read(&self, offset: usize, buf: &mut [u8]) -> usize {
-        if offset >= self.data.len() {
-            return 0;
-        }
-        let available = self.data.len() - offset;
-        let to_read = available.min(buf.len());
-        buf[..to_read].copy_from_slice(&self.data[offset..offset + to_read]);
-        to_read
-    }
+/// Proc status fields, simplified
+#[derive(Debug, Default)]
+pub struct ProcStatus {
+    pub pid: u32,
+    pub ppid: u32,
+    pub name: String,
+    pub state: char,
 }
 
-/// Common proc entries
-pub fn proc_root_entries() -> Vec<ProcDirEntry> {
-    vec![
-        ProcDirEntry::new("self", PROC_MODE_SYMLINK),
-        ProcDirEntry::new("cpuinfo", PROC_MODE_FILE),
-        ProcDirEntry::new("meminfo", PROC_MODE_FILE),
-        ProcDirEntry::new("version", PROC_MODE_FILE),
-        ProcDirEntry::new("uptime", PROC_MODE_FILE),
-    ]
+impl ProcStatus {
+    pub fn new(pid: u32, ppid: u32, name: &str, state: char) -> Self {
+        Self { pid, ppid, name: name.to_string(), state }
+    }
+    pub fn format(&self) -> String {
+        format!("Name:\t{}\nState:\t{} (state)\nTgid:\t{}\nPid:\t{}\nPPid:\t{}\n",
+            self.name, self.state, self.pid, self.pid, self.ppid)
+    }
 }
 
 #[cfg(test)]
@@ -78,31 +61,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn proc_entry_type_checks() {
-        let dir = ProcDirEntry::new("test", PROC_MODE_DIR);
-        assert!(dir.is_dir());
-        assert!(!dir.is_file());
-        let file = ProcDirEntry::new("test", PROC_MODE_FILE);
-        assert!(file.is_file());
-        let link = ProcDirEntry::new("self", PROC_MODE_SYMLINK);
-        assert!(link.is_symlink());
+    fn proc_entry_type() {
+        let e = ProcEntry::new("self", ProcEntryType::Link, 0o777);
+        assert!(!e.is_dir());
+        assert!(!e.is_file());
+        let d = ProcEntry::new("1", ProcEntryType::PidDir, 0o555);
+        assert!(d.is_dir());
     }
 
     #[test]
-    fn proc_data_read_write() {
-        let mut data = ProcData::from_string("hello world");
-        assert_eq!(data.len(), 11);
-        let mut buf = [0u8; 5];
-        assert_eq!(data.read(0, &mut buf), 5);
-        assert_eq!(&buf, b"hello");
-        assert_eq!(data.write(6, b"Rust"), 4);
-        assert_eq!(data.as_string(), "hello Rustd");
+    fn proc_path_helpers() {
+        assert_eq!(proc_pid_path(1), "/proc/1");
+        assert_eq!(proc_self_path(), "/proc/self");
+        assert!(is_proc_path("/proc/self"));
+        assert!(is_proc_path("/proc/1/status"));
+        assert!(!is_proc_path("/etc/passwd"));
     }
 
     #[test]
-    fn proc_root_entries_list() {
-        let entries = proc_root_entries();
-        assert!(entries.iter().any(|e| e.name == "self"));
-        assert!(entries.iter().any(|e| e.name == "cpuinfo"));
+    fn parse_pid() {
+        assert_eq!(parse_proc_pid("/proc/1/status"), Some(1));
+        assert_eq!(parse_proc_pid("/proc/self/status"), None);
+        assert_eq!(parse_proc_pid("/proc/abc"), None);
+        assert_eq!(parse_proc_pid("/etc/passwd"), None);
+    }
+
+    #[test]
+    fn proc_status_format() {
+        let s = ProcStatus::new(1, 0, "init", 'S');
+        let f = s.format();
+        assert!(f.contains("Name:\tinit"));
+        assert!(f.contains("Pid:\t1"));
     }
 }
