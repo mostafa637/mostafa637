@@ -4,6 +4,7 @@ pub mod calls;
 pub mod cmsg;
 pub mod cpu;
 pub mod cpuid;
+pub mod cpuset;
 pub mod decode;
 pub mod decode_table;
 pub mod dev;
