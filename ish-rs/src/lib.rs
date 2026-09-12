@@ -1,77 +1,4 @@
 //! Rust port of the iSH emulator core (`emu/`).
-//!
-//! iSH (<https://github.com/ish-app/ish>) is a userspace x86 Linux emulator for
-//! iOS. Its "core" is the host-independent part under `emu/`: the CPU state,
-//! the MMU/TLB, the x86 decoder, and the software FPU. This crate is a
-//! line-by-line Rust translation of that core, module by module.
-//!
-//! # Modules
-//!
-//! | Rust module     | C original                | Status |
-//! |-----------------|---------------------------|--------|
-//! | [`float80`]     | `emu/float80.h` + `.c`    | ported, bit-exact against the C reference |
-//! | [`cpu`]         | `emu/cpu.h`               | ported, flag logic checked against the C macros |
-//! | [`fpu`]         | `emu/fpu.h` + `.c`        | ported, full state compared after every op |
-//! | [`mmu`]         | `emu/mmu.h`               | ported, page arithmetic and the translate interface |
-//! | [`tlb`]         | `emu/tlb.h` + `.c`        | ported, cache behaviour compared against the C |
-//! | [`vec`]         | `emu/vec.{h,c}` + `mmx.c` | ported, all 166 operations compared against the C |
-//! | [`modrm`]       | `emu/modrm.h`             | ported, decode results compared against the C |
-//! | [`decode`]      | `emu/decode.h`            | ported dispatch, opcode table generated from the C |
-//! | [`memory`]      | `kernel/memory.{h,c}`     | ported, the guest address space behind `mmu`/`tlb` |
-//! | [`user`]        | `kernel/user.c`           | ported, the guest<->kernel byte copies, faults included |
-//! | [`errno`]       | `kernel/errno.{h,c}`      | ported, host to guest errno translation, table generated |
-//! | [`ipc`]         | `kernel/ipc.c`            | ported, legacy System V IPC multiplexor compatibility stub |
-//! | [`log`]         | `kernel/log.c` + `util/fifo.c` | ported, kernel log FIFO and old syslog ABI |
-//! | [`fake_db`]     | `fs/fake-db.c`                 | metadata primitives, schema migration, and host-inode initialization ported over vendored pure-Rust SQLite-3-compatible graphitesql |
-//! | [`fake_rebuild`]| `fs/fake-rebuild.c`            | host-inode metadata rebuild ported through an explicit rooted-host adapter |
-//! | [`mmap`]        | `kernel/mmap.c` + `mm.h`  | ported, the address-space syscalls on top of `memory` |
-//! | [`resource`]    | `kernel/resource.{h,c}`   | ported, limits, rusage ABI, affinity, and scheduler compatibility calls |
-//! | [`random`]      | `kernel/random.{h,c}`     | ported, bounded guest getrandom over an explicit platform entropy source |
-//! | [`uname`]       | `kernel/uname.c`          | ported, guest uname/sysinfo layouts over explicit platform data |
-//! | [`task`]        | `kernel/task.{h,c}`       | ported state/PID-table foundation; host execution waits for the engine |
-//! | [`group`]       | `kernel/group.c`          | ported, sessions and process groups |
-//! | [`getset`]      | `kernel/getset.c`         | ported, identity and credential syscalls |
-//! | [`tls`]         | `kernel/tls.c`            | ported, i386 TLS descriptor calls |
-//! | [`misc`]        | `kernel/misc.c`           | ported, prctl and host-safe reboot policy |
-//! | [`personality`] | `kernel/personality.h`    | ported, ADDR_NO_RANDOMIZE and personality constants |
-//! | [`bits`]        | `util/bits.h`             | ported, bitset helpers (C vs Rust differential) |
-//! | [`fifo`]        | `util/fifo.{h,c}`         | ported, circular FIFO with quirk preservation (C vs Rust differential) |
-//! | [`elf`]         | `kernel/elf.h`            | ported, ELF32 constants and parsing |
-//! | [`vdso`]        | `kernel/vdso.{h,c}`       | ported, vdso symbol lookup over ELF image |
-//! | [`stat`]        | `fs/stat.h` + `fs/stat.c` | ported, stat buffer ABIs + stat_convert_newstat64 + statx conversion |
-//! | [`time`]        | `kernel/time.h` + `time.c` | ported, time syscalls with host abstraction |
-//! | [`ptrace`]      | `kernel/ptrace.h`         | ported, ptrace constants and reg layouts |
-//! | [`futex`]       | `kernel/futex.{h,c}`      | ported, futex constants and queue types (host sync pending) |
-//! | [`signal`]      | `kernel/signal.h`         | ported, signal numbers, masks, and siginfo layouts (delivery pending) |
-//! | [`list`]        | `util/list.h`             | ported, intrusive doubly-linked list and safe wrapper |
-//! | [`refcount`]    | `util/refcount.h`         | ported, explicit refcounting helpers |
-//! | [`sync`]        | `util/sync.{h,c}`         | ported, lock, condvar, and rwlock abstractions |
-//! | [`timer`]       | `util/timer.{h,c}`        | ported, interval timer spec and state machine |
-//! | [`fix_path`]    | `fs/fix_path.h`           | ported, path normalization (trivial) (C vs Rust differential) |
-//! | [`mm`]          | `kernel/mm.h`             | ported, full mm descriptor with procfs fields |
-//! | [`fs_info`]     | `kernel/fs.h` + `fs_info.c` | ported, cwd/root/umask with refcount |
-//! | [`path`]        | `fs/path.h` + `path.c`    | ported, path_is_normalized, next_component, simple normalize (C vs Rust differential) |
-//! | [`inode`]       | `fs/inode.h` + `inode.c`  | ported, inode cache and retain/release |
-//! | [`devices`]     | `fs/devices.h`            | ported, device major/minor constants |
-//! | [`dev`]         | `fs/dev.h`                | ported, dev_t encoding dev_make/major/minor |
-//! | [`poll`]        | `fs/poll.h` + `kernel/epoll.c` | ported, poll/epoll constants and event types |
-//! | [`eventfd`]     | `kernel/eventfd.c`        | ported, eventfd read/write/poll logic |
-//! | [`fd`]          | `fs/fd.h`                 | ported, fd flags, file types, dir entry, fd table helpers |
-//! | [`mount`]       | `kernel/fs.h` mount       | ported, mount flags and param parsing |
-//! | [`lock`]        | `fs/lock.h`               | ported, file locking constants and structures |
-//! | [`calls`]       | `kernel/calls.h` + `calls.c` | ported, syscall numbers and dispatch |
-//! | [`tty`]         | `fs/tty.h`                | ported, winsize and termios constants |
-//! | [`sock`]        | `fs/sock.h`               | ported, socket families and guest ABIs |
-//! | [`proc`]        | `fs/proc.h`               | ported, proc entry types and modes |
-//! | [`generic`]     | `fs/generic.c`            | ported, generic seek and access helpers |
-//! | [`fchdir`]      | `util/fchdir.h` + `.c`    | ported, fchdir host abstraction |
-//! | [`cpuid`]       | `emu/cpuid.h`             | ported |
-//! | [`interrupt`]   | `emu/interrupt.h`         | ported |
-//!
-//! # Provenance and license
-//!
-//! This is a translation of GPLv3 / GPLv2-or-later code, so it carries the same
-//! license: `GPL-2.0-or-later`. See `README.md`.
 
 pub mod bits;
 pub mod calls;
@@ -85,6 +12,8 @@ pub mod elf;
 pub mod errno;
 pub mod errno_table;
 pub mod eventfd;
+pub mod exec;
+pub mod exit;
 pub mod fake_db;
 pub mod fake_rebuild;
 pub mod fchdir;
@@ -92,6 +21,7 @@ pub mod fd;
 pub mod fifo;
 pub mod fix_path;
 pub mod float80;
+pub mod fork;
 pub mod fpu;
 pub mod fs_info;
 pub mod futex;
