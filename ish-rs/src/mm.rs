@@ -1,92 +1,91 @@
-//! `kernel/mm.h` — memory descriptor.
-//!
-//! `struct mm` is the container for `struct mem` plus brk, vdso, and procfs
-//! info. The address-space syscalls in `mmap.rs` already implemented a
-//! simplified `Mm` with `mem`, `start_brk`, `brk`, and `refcount`. This module
-//! extends it with the remaining fields and provides the full `mm_new`,
-//! `mm_copy`, `mm_retain`, `mm_release` API, depending only on `memory`
-//! (already ported).
+//! `kernel/mm.h` + `kernel/mm.c` — memory management constants and helpers.
 
-use crate::memory::Mem;
-use crate::refcount::RefCount;
+pub const PAGE_SIZE: usize = 4096;
+pub const PAGE_MASK: u32 = !(PAGE_SIZE as u32 - 1);
 
-/// `struct mm` — full version with procfs fields.
-pub struct MmFull {
-    /// `refcount`
-    pub refcount: RefCount,
-    /// `mem`
-    pub mem: Mem,
-    /// `vdso` — immutable after exec
-    pub vdso: u32,
-    /// `start_brk` — immutable
-    pub start_brk: u32,
-    /// `brk`
+pub const PROT_NONE: u32 = 0;
+pub const PROT_READ: u32 = 1;
+pub const PROT_WRITE: u32 = 2;
+pub const PROT_EXEC: u32 = 4;
+
+pub const MAP_SHARED: u32 = 1;
+pub const MAP_PRIVATE: u32 = 2;
+pub const MAP_FIXED: u32 = 0x10;
+pub const MAP_ANONYMOUS: u32 = 0x20;
+pub const MAP_GROWSDOWN: u32 = 0x0100;
+pub const MAP_DENYWRITE: u32 = 0x0800;
+pub const MAP_EXECUTABLE: u32 = 0x1000;
+pub const MAP_LOCKED: u32 = 0x2000;
+pub const MAP_NORESERVE: u32 = 0x4000;
+pub const MAP_POPULATE: u32 = 0x8000;
+pub const MAP_NONBLOCK: u32 = 0x10000;
+pub const MAP_STACK: u32 = 0x20000;
+pub const MAP_HUGETLB: u32 = 0x40000;
+
+pub fn page_align(addr: u32) -> u32 { addr & PAGE_MASK }
+pub fn page_align_up(addr: u32) -> u32 { (addr + PAGE_SIZE as u32 - 1) & PAGE_MASK }
+pub fn is_page_aligned(addr: u32) -> bool { (addr & (PAGE_SIZE as u32 - 1)) == 0 }
+pub fn pages_needed(size: usize) -> usize { (size + PAGE_SIZE - 1) / PAGE_SIZE }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct VmArea {
+    pub start: u32,
+    pub end: u32,
+    pub prot: u32,
+    pub flags: u32,
+    pub offset: u32,
+}
+
+impl VmArea {
+    pub fn new(start: u32, end: u32, prot: u32, flags: u32) -> Self {
+        Self { start, end, prot, flags, offset: 0 }
+    }
+    pub fn len(&self) -> u32 { self.end - self.start }
+    pub fn contains(&self, addr: u32) -> bool { addr >= self.start && addr < self.end }
+    pub fn is_writable(&self) -> bool { (self.prot & PROT_WRITE) != 0 }
+    pub fn is_readable(&self) -> bool { (self.prot & PROT_READ) != 0 }
+    pub fn is_executable(&self) -> bool { (self.prot & PROT_EXEC) != 0 }
+    pub fn is_shared(&self) -> bool { (self.flags & MAP_SHARED) != 0 }
+    pub fn overlaps(&self, other: &VmArea) -> bool {
+        self.start < other.end && other.start < self.end
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MmStruct {
+    pub areas: Vec<VmArea>,
+    pub brk_start: u32,
     pub brk: u32,
-    /// `argv_start`, `argv_end`, `env_start`, `env_end`, `auxv_start`,
-    /// `auxv_end`, `stack_start` — for procfs
-    pub argv_start: u32,
-    pub argv_end: u32,
-    pub env_start: u32,
-    pub env_end: u32,
-    pub auxv_start: u32,
-    pub auxv_end: u32,
     pub stack_start: u32,
 }
 
-impl MmFull {
-    /// `mm_new`
-    pub fn new() -> Self {
-        Self {
-            refcount: RefCount::new(),
-            mem: Mem::new(),
-            vdso: 0,
-            start_brk: 0,
-            brk: 0,
-            argv_start: 0,
-            argv_end: 0,
-            env_start: 0,
-            env_end: 0,
-            auxv_start: 0,
-            auxv_end: 0,
-            stack_start: 0,
+impl MmStruct {
+    pub fn new() -> Self { Self::default() }
+
+    pub fn add_area(&mut self, area: VmArea) -> Result<(), i32> {
+        if !is_page_aligned(area.start) || !is_page_aligned(area.end) { return Err(-22); }
+        if area.start >= area.end { return Err(-22); }
+        // Check overlap
+        for existing in &self.areas {
+            if existing.overlaps(&area) { return Err(-12); } // ENOMEM
         }
+        self.areas.push(area);
+        self.areas.sort_by_key(|a| a.start);
+        Ok(())
     }
 
-    /// `mm_copy` — COW copy.
-    pub fn copy(&mut self) -> Self {
-        let mut new_mm = Self {
-            refcount: RefCount::new(),
-            mem: Mem::new(),
-            vdso: self.vdso,
-            start_brk: self.start_brk,
-            brk: self.brk,
-            argv_start: self.argv_start,
-            argv_end: self.argv_end,
-            env_start: self.env_start,
-            env_end: self.env_end,
-            auxv_start: self.auxv_start,
-            auxv_end: self.auxv_end,
-            stack_start: self.stack_start,
-        };
-        Mem::copy_on_write(&mut self.mem, &mut new_mm.mem, 0, crate::mmu::MEM_PAGES);
-        new_mm
+    pub fn find_area(&self, addr: u32) -> Option<&VmArea> {
+        self.areas.iter().find(|a| a.contains(addr))
     }
 
-    /// `mm_retain`
-    pub fn retain(&self) -> usize {
-        self.refcount.retain()
+    pub fn remove_area(&mut self, start: u32) -> Result<(), i32> {
+        if let Some(idx) = self.areas.iter().position(|a| a.start == start) {
+            self.areas.remove(idx);
+            Ok(())
+        } else { Err(-2) }
     }
 
-    /// `mm_release` — returns true if refcount hit zero.
-    pub fn release(&self) -> bool {
-        self.refcount.release()
-    }
-}
-
-impl Default for MmFull {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub fn total_mapped(&self) -> u32 { self.areas.iter().map(|a| a.len()).sum() }
 }
 
 #[cfg(test)]
@@ -94,30 +93,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mm_new_has_refcount_one() {
-        let mm = MmFull::new();
-        assert_eq!(mm.refcount.get(), 1);
-        assert_eq!(mm.brk, 0);
+    fn page_align_helpers() {
+        assert_eq!(page_align(0x1234), 0x1000);
+        assert_eq!(page_align_up(0x1234), 0x2000);
+        assert!(is_page_aligned(0x1000));
+        assert!(!is_page_aligned(0x1234));
+        assert_eq!(pages_needed(4096), 1);
+        assert_eq!(pages_needed(4097), 2);
     }
 
     #[test]
-    fn mm_copy_preserves_brk_and_vdso() {
-        let mut mm = MmFull::new();
-        mm.start_brk = 0x1000;
-        mm.brk = 0x2000;
-        mm.vdso = 0x3000;
-        let copy = mm.copy();
-        assert_eq!(copy.start_brk, 0x1000);
-        assert_eq!(copy.brk, 0x2000);
-        assert_eq!(copy.vdso, 0x3000);
-        assert_eq!(copy.refcount.get(), 1);
+    fn vm_area_checks() {
+        let area = VmArea::new(0x1000, 0x2000, PROT_READ | PROT_WRITE, MAP_PRIVATE);
+        assert!(area.contains(0x1000));
+        assert!(area.contains(0x1fff));
+        assert!(!area.contains(0x2000));
+        assert!(area.is_writable());
+        assert!(area.is_readable());
+        assert!(!area.is_executable());
+        assert!(!area.is_shared());
+        assert_eq!(area.len(), 0x1000);
     }
 
     #[test]
-    fn mm_retain_release() {
-        let mm = MmFull::new();
-        assert_eq!(mm.retain(), 2);
-        assert!(!mm.release());
-        assert!(mm.release());
+    fn mm_struct_add_find_remove() {
+        let mut mm = MmStruct::new();
+        let area = VmArea::new(0x1000, 0x2000, PROT_READ, MAP_PRIVATE);
+        assert!(mm.add_area(area).is_ok());
+        assert!(mm.find_area(0x1500).is_some());
+        assert!(mm.find_area(0x2500).is_none());
+        assert_eq!(mm.total_mapped(), 0x1000);
+        // Overlap should fail
+        let overlap = VmArea::new(0x1500, 0x2500, PROT_READ, MAP_PRIVATE);
+        assert!(mm.add_area(overlap).is_err());
+        assert!(mm.remove_area(0x1000).is_ok());
+        assert!(mm.find_area(0x1500).is_none());
     }
 }
