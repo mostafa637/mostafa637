@@ -1,4 +1,5 @@
 pub mod adhoc;
+pub mod alpine;
 pub mod bits;
 pub mod calls;
 pub mod cmsg;

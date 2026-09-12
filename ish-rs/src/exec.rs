@@ -1,4 +1,4 @@
-//! `kernel/exec.c` — exec argument handling and ELF loading full port.
+//! `kernel/exec.c` — exec argument handling and ELF loading full port for Alpine.
 
 pub const ARGV_MAX: usize = 32 * 4096;
 pub const ENOEXEC: i32 = -8;
@@ -60,7 +60,6 @@ impl ExecStack {
     }
 }
 
-/// ELF header, matching C's Elf32_Ehdr
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ElfHeader {
     pub magic: [u8; 4],
@@ -90,7 +89,6 @@ impl ElfHeader {
     pub fn is_shared(&self) -> bool { self.elf_type == 3 }
 }
 
-/// Program header
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ProgramHeader {
     pub p_type: u32,
@@ -118,7 +116,6 @@ impl ProgramHeader {
     pub fn is_executable(&self) -> bool { (self.flags & 1) != 0 }
 }
 
-/// Exec context, matching C's exec state
 #[derive(Debug, Default)]
 pub struct ExecContext {
     pub header: ElfHeader,
@@ -139,7 +136,6 @@ impl ExecContext {
         let bitness = data[4];
         let endian = data[5];
         if bitness != 1 || endian != 1 { return Err(ENOEXEC); }
-        // Simplified parsing: read e_type, e_machine, e_entry, phoff, phnum
         let elf_type = u16::from_le_bytes([data[16], data[17]]);
         let machine = u16::from_le_bytes([data[18], data[19]]);
         if !is_valid_elf_header(&magic, elf_type, bitness, endian, machine) {
@@ -155,7 +151,6 @@ impl ExecContext {
         self.header.phnum = u16::from_le_bytes([data[42], data[43]]);
         self.entry = self.header.entry;
 
-        // Parse program headers
         self.phdrs.clear();
         let phoff = self.header.phoff as usize;
         for i in 0..self.header.phnum as usize {
@@ -190,11 +185,33 @@ impl ExecContext {
     }
 
     pub fn has_interpreter(&self) -> bool { self.interp.is_some() }
+
+    /// Simulate loading Alpine binary from fakefs
+    pub fn load_from_fakefs(&mut self, fakefs: &crate::fake::FakeFs, path: &str) -> Result<(), i32> {
+        let data = fakefs.read_file(path).map_err(|_| -2)?;
+        self.load_elf(&data)
+    }
+
+    /// Setup stack for Alpine binary execution, matching C's exec stack setup
+    pub fn setup_stack(&mut self, args: &ExecArgs, env: &ExecArgs, stack_top: u32) -> Result<ExecStack, i32> {
+        let mut stack = ExecStack::new(stack_top);
+        // Push env
+        for e in env.args.iter().rev() {
+            let addr = stack.push_string(e);
+            stack.envp.push(addr);
+        }
+        stack.envp.reverse();
+        // Push args
+        stack.push_args(args)?;
+        self.stack_top = stack.sp;
+        Ok(stack)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fake::{FakeFs, IshStat};
 
     #[test]
     fn align_stack_matches_c() {
@@ -241,23 +258,20 @@ mod tests {
 
     #[test]
     fn elf_load_minimal() {
-        // Minimal ELF header for i386 EXEC
         let mut data = vec![0u8; 100];
         data[0..4].copy_from_slice(b"\x7fELF");
-        data[4] = 1; // 32-bit
-        data[5] = 1; // little endian
-        data[16] = 2; data[17] = 0; // ET_EXEC
-        data[18] = 3; data[19] = 0; // EM_386
-        data[24] = 0x00; data[25] = 0x80; data[26] = 0x04; data[27] = 0x08; // entry 0x08048000
-        data[28] = 52; // phoff
-        data[42] = 1; // phnum
-        // Program header at 52
-        data[52] = 1; // PT_LOAD
-        data[56] = 0; // offset 0
-        data[60] = 0x00; data[61] = 0x80; data[62] = 0x04; data[63] = 0x08; // vaddr
-        data[68] = 100; // filesz
-        data[72] = 100; // memsz
-        data[76] = 5; // flags R+X
+        data[4] = 1; data[5] = 1;
+        data[16] = 2; data[17] = 0;
+        data[18] = 3; data[19] = 0;
+        data[24] = 0x00; data[25] = 0x80; data[26] = 0x04; data[27] = 0x08;
+        data[28] = 52;
+        data[42] = 1;
+        data[52] = 1;
+        data[56] = 0;
+        data[60] = 0x00; data[61] = 0x80; data[62] = 0x04; data[63] = 0x08;
+        data[68] = 100;
+        data[72] = 100;
+        data[76] = 5;
 
         let mut ctx = ExecContext::new();
         assert!(ctx.load_elf(&data).is_ok());
@@ -272,5 +286,26 @@ mod tests {
         let ph = ProgramHeader { p_type: PT_LOAD, flags: 2, ..Default::default() };
         assert!(ph.is_writable());
         assert!(!ph.is_executable());
+    }
+
+    #[test]
+    fn load_from_fakefs_alpine() {
+        let mut fs = FakeFs::new();
+        fs.load_alpine_mock();
+        let mut ctx = ExecContext::new();
+        assert!(ctx.load_from_fakefs(&fs, "/bin/busybox").is_ok());
+        assert!(ctx.header.is_executable());
+        assert!(ctx.load_from_fakefs(&fs, "/nonexistent").is_err());
+    }
+
+    #[test]
+    fn setup_stack_for_alpine() {
+        let mut ctx = ExecContext::new();
+        let args = ExecArgs::new(vec!["/bin/sh".to_string(), "-c".to_string(), "echo hi".to_string()]);
+        let env = ExecArgs::new(vec!["PATH=/bin".to_string(), "HOME=/root".to_string()]);
+        let stack = ctx.setup_stack(&args, &env, 0xbffff000).unwrap();
+        assert_eq!(stack.argc, 3);
+        assert_eq!(stack.envp.len(), 2);
+        assert!(stack.sp < 0xbffff000);
     }
 }
