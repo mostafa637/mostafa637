@@ -45,7 +45,7 @@ def integral(f, a, b, dx):
 #idx("lambda expression", sub: "function definition vs.")
 #idx("function definition", sub: "lambda expression vs.")
 
-باستثناء أنه لا يُحدَّد اسم للدالة وتُحذَف الأقواس حول المعلمات وكلمة #py("return") المفتاحية.
+باستثناء أنه لا يُحدَّد اسم للدالة وتُحذَف #idx("parentheses", sub: "around parameters of lambda expression") الأقواس حول المعلمات وكلمة #py("return") المفتاحية.
 
 #snippet(```python
 lambda parameters: expression

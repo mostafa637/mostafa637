@@ -124,7 +124,7 @@ return 25
 
 في القسم @sec:environment-model سنرى كيف تلعب البيئات دور "المكان" في نموذجنا الحسابي.
 
-=== التماثل والتغير
+#subheading([التماثل والتغير])
 
 #idx("sameness and change", sub: "meaning of")
 #idx("change and sameness", sub: "meaning of")
@@ -218,7 +218,7 @@ paul_acc = peter_acc
 #idx("sameness and change", sub: "meaning of")
 #idx("change and sameness", sub: "meaning of")
 
-=== مخاطر البرمجة الأمرية
+#subheading([مخاطر البرمجة الأمرية])
 
 تُعرف البرمجة التي تستخدم الإسناد بشكل مكثف، بـ التباين مع البرمجة الوظيفية، بـ
 #idx("imperative programming")

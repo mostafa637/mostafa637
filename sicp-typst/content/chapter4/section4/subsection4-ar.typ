@@ -610,6 +610,136 @@ job($x, llist("computer", "wizard"))
 
 #subheading([الدالة #py("unparse")])
 
+تحوّل الدالة #py("unparse") مكوِّنًا معطىً بتمثيل بناء جملة #en[Python] إلى سلسلة نصية بتطبيق قواعد بناء الجملة
+الخاصة بالقسم @sec:representing-expressions.
+سنصف #py("unparse") فقط
+لتلك الأنواع من التعبيرات التي تظهر في أمثلة
+القسم @sec:deductive-info-retrieval، تاركين التعليمات
+والبقية من أنواع التعبيرات
+في التمرين @ex:parse. يتحول الحرفي بـ #py("stringify") لقيمته، ويتحول الاسم إلى #idx("symbol(s)", sub: "in unparse")
+رمزه.
+ويُنسَّق التطبيق بإلغاء تحليل تعبير الدالة، الذي يمكننا أن نفترضه هنا اسمًا، يليه سلاسل تعبيرات الوسائط المفصولة بفواصل محصورةً بين قوسين. وتُنسَّق تركيبات العامل الثنائي باستخدام العرض الإقحامي.
+#idx("unparse", sub: "in query interpreter", decl: true)
+#syntax("
+function unparse(exp) {
+    return is_literal(exp)
+           ? stringify(literal_value(exp))
+           : is_name(exp)
+           ? symbol_of_name(exp)
+           : is_list_construction(exp)
+           ? unparse(make_application(make_name(\"list\"),
+                                      element_expressions(exp)))
+           : is_application(exp) && is_name(function_expression(exp))
+           ? symbol_of_name(function_expression(exp)) +
+                 \"(\" +
+                 comma_separated(map(unparse, arg_expressions(exp))) +
+                 \")\"
+           : is_binary_operator_combination(exp)
+           ? \"(\" + unparse(first_operand(exp)) +
+             \" \" + operator_symbol(exp) +
+             \" \" + unparse(second_operand(exp)) +
+             \")\"
+           ", metaphrase[إلغاء تحليل الأنواع الأخرى من مكونات بايثون], "
+           : error(exp, \"unknown syntax -- unparse\")
+}
+	    ")
+
+#snippet(```python
+def comma_separated(strings):
+    return reduce(lambda s, acc: (s + ("" if acc == "" else ", " + acc)), "", strings)
+```)
+
+وستعمل الدالة
+#py("unparse")
+بصورة سليمة دون البند
+
+#snippet(```python
+: is_list_construction(exp)
+? unparse(make_application(make_name("list"),
+                           element_expressions(exp)))
+```)
+
+ولكن كانت سلسلة الخرج ستكون مفعمة بالتفصيل بلا داعٍ في الحالات التي تُجسَّد فيها متغيرات الأنماط بقوائم. في المثال أعلاه، حيث كانت معالجة الاستعلام
+
+#snippet(```python
+job($x, llist("computer", "wizard"))
+```)
+
+تولّد إطارًا يربط
+#py("$x")
+بـ $[mono("\"Bitdiddle\""), [mono("\"Ben\""), mono("null")]]$،
+تنتج #py("unparse")
+
+#output(```python
+job($x, llist("computer", "wizard"))
+```)
+
+ومع ذلك، دون البند كانت ستنتج
+
+#output(```python
+job($x, llist("computer", "wizard"))
+```)
+
+الذي يبني صراحةً الزوجين المكوِّنين للقائمة الأولى. وبتحقُّق التنسيق الأكثر إيجازًا المستخدم في جميع أنحاء
+القسم @sec:deductive-info-retrieval،
+أدخلنا البند ليفحص
+ما إذا كان التعبير يبني قائمة، وذلك الحالة نسّقها كتطبيقٍ واحد لـ
+#py("list") على قائمة تعبيرات
+العناصر التي نستخرجها من التعبير. وبناء القائمة هو الحرفي
+#py("null") أو
+تطبيقٌ لـ
+#py("pair")
+يكون وسيطه الثاني هو نفسه بناءَ قائمة.
+#idx("islistconstruction", decl: true)
+#snippet(```python
+def is_list_construction(exp):
+    return (is_literal(exp) and is_none(literal_value(exp))) or (is_application(exp) and is_name(function_expression(exp)) and symbol_of_name(function_expression(exp)) == "pair" and is_list_construction(head(tail(arg_expressions(exp)))))
+```)
+
+واستخراج تعبيرات العناصر من بناء قائمة معطى يعني جمع الوسائط الأولى لتطبيقات
+#py("pair") حتى الوصول إلى الحرفي
+#py("null").
+#idx("elementexpressions", decl: true)
+#syntax("
+def element_expressions(list_constr):
+    return None if is_literal(list_constr) else pair(head(arg_expressions(list_constr)), element_expressions(head(tail(arg_expressions(list_constr)))))
+")
+
+#subheading([المحمولات والمحدِّدات للتمثيل الخاص بلغة الاستعلام])
+
+الدالتان #py("type")
+و #py("contents")، المستخدمتان بوساطة
+#py("evaluate_query")
+(القسم @sec:query-eval)، تحددان أن الشكل النحوي للتمثيل الخاص بلغة الاستعلام
+يُعرَّف بالسلسلة النصية في رأسه.
+وهما نفس
+#idx("type in query system", decl: true)#idx("contents", decl: true)
+الدالتين #py("type_tag")
+و #py("contents")
+في القسم @sec:manifest-types، باستثناء رسالة الخطأ.
+#snippet(```python
+def type(exp):
+    return head(exp) if is_pair(exp) else error("unknown expression type", exp)
+def contents(exp):
+    return tail(exp) if is_pair(exp) else error("unknown expression contents", exp)
+```)
+
+الدوال التالية، المستخدمة بوساطة
+#py("query_driver_loop")
+(في القسم @sec:query-driver)،
+تحدد أن القواعد والتقريرات تُضاف إلى قاعدة البيانات بأمر
+#py("assert")، الذي تحوّله الدالة
+#py("convert_to_query_syntax")
+إلى زوج من الشكل
+#py("[\"assert\",")#meta("rule-or-assertion")#py("]"):
+#idx("isassertion", decl: true)#idx("assertionbody", decl: true)
+#snippet(```python
+def is_assertion(exp):
+    return type(exp) == "assert"
+def assertion_body(exp):
+    return head(contents(exp))
+```)
+
 فيما يلي إعلانات المحمولات والمحدات للأشكال النحوية #py("and") و #py("or") و #py("not") و #py("javascript_predicate") (القسم @sec:query-eval):
 #idx("isemptyconjunction", decl: true)#idx("firstconjunct", decl: true)#idx("restconjuncts", decl: true)#idx("isemptydisjunction", decl: true)#idx("firstdisjunct", decl: true)#idx("restdisjuncts", decl: true)#idx("negatedquery", decl: true)#idx("javascriptpredicateexpression", decl: true)
 #snippet(```python

@@ -84,7 +84,9 @@ primitive_constant_values = \\
 
 لتطبيق دالة أولية، نكتفي بتطبيق دالة التنفيذ على الوسائط، باستخدام نظام Python الأساسي:#footnote[#anchor(<foot:vector-array>)
 طريقة #py("apply") في Python تتوقع وسائط الدالة في #emph[متجه] (#en[vector]). (تُسمى المتجهات "مصفوفات" في Python).
-وبالتالي، تُحول #py("arglist") إلى متجه—وهنا باستخدام حلقة طالما (انظر التمرين @ex:while_loop):
+وبالتالي، تُحول #py("arglist")
+#idx("vector (data structure)", sub: "for arguments of apply")
+إلى متجه—وهنا باستخدام حلقة طالما (انظر التمرين @ex:while_loop):
 #idx("applyinunderlyingjavascript", decl: true)#idx("apply (primitive method)")
 #syntax("
 def apply_in_underlying_javascript(prim, arglist):

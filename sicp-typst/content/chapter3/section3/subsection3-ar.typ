@@ -81,7 +81,7 @@ def make_table():
 
 #idx("table", sub: "one-dimensional")
 
-=== الجداول ثنائية الأبعاد
+#subheading([الجداول ثنائية الأبعاد])
 
 #idx("table", sub: "two-dimensional")
 
@@ -137,7 +137,7 @@ def insert(key_1, key_2, value, table):
 
 #idx("table", sub: "two-dimensional")
 
-=== إنشاء الجداول المحلية
+#subheading([إنشاء الجداول المحلية])
 
 #idx("table", sub: "local")
 

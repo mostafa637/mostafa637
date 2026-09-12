@@ -198,7 +198,10 @@ $ (frac(N_(1), D_(1) + frac(N_(2), dots.down + frac(N_(K), D_(K))))) $
 في عام 1737، نشر عالم الرياضيات السويسري
 #idx("Euler, Leonhard")
 ليونارد أيلر #en[(Leonhard Euler)] مذكرات
-#emph[De Fractionibus Continuis]، والتي تضمنت تفكيك كسر مستمر لـ $e-2$، حيث $e$ هي أساس اللوغاريتمات الطبيعية. وفي هذا الكسر، تكون $N_(i)$ كلها 1، وتكون $D_(i)$ بالتتابع 1، 2، 1، 1، 4، 1، 1، 6، 1، 1، 8، …. اكتب برنامجاً يستخدِم دالة #py("cont_frac") لديك من التمرين @ex:continued-fractions لتقريب $e$، بناءً على تفكيك أيلر.
+#emph[De Fractionibus Continuis]، والتي تضمنت
+#idx("continued fraction", sub: "e as")
+#idx("e", sub: "as continued fraction", sort: "e")
+تفكيكَ كسر مستمر لـ $e-2$، حيث $e$ هي أساس اللوغاريتمات الطبيعية. وفي هذا الكسر، تكون $N_(i)$ كلها 1، وتكون $D_(i)$ بالتتابع 1، 2، 1، 1، 4، 1، 1، 6، 1، 1، 8، …. اكتب برنامجاً يستخدِم دالة #py("cont_frac") لديك من التمرين @ex:continued-fractions لتقريب $e$، بناءً على تفكيك أيلر.
 ])
 
 #exercise(label-name: <ex:1_39>, [

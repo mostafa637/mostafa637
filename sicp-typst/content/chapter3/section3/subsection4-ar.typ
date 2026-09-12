@@ -128,7 +128,7 @@ def full_adder(a, b, c_in, sum, c_out):
 
 في الجوهر، يقدم محاكينا الأدوات لبناء لغة دوائر. وإذا اعتمدنا المنظور العام على اللغات الذي اقتربنا به من دراسة بايثون في القسم @sec:elements-of-programming، فيمكننا القول إن صناديق الدوال الأولية تشكل العناصر الأولية للغة، وإن ربط الصناديق معاً يوفر وسيلة التركيب، وإن تحديد أنماط الربط كدوال يخدم كوسيلة للتجريد.
 
-=== صناديق الدوال الأولية
+#subheading([صناديق الدوال الأولية])
 
 صناديق الدوال الأولية
 #idx("digital-circuit simulation", sub: "primitive function boxes")
@@ -205,7 +205,7 @@ def and_gate(a1, a2, output):
 
 #idx("digital-circuit simulation", sub: "primitive function boxes")
 
-=== تمثيل الأسلاك
+#subheading([تمثيل الأسلاك])
 
 سيكون السلك
 #idx("digital-circuit simulation", sub: "representing wires")
@@ -271,7 +271,7 @@ def add_action(wire, action_function):
 
 #idx("digital-circuit simulation", sub: "representing wires")
 
-=== أجندة المواعيد
+#subheading([أجندة المواعيد])
 
 #idx("digital-circuit simulation", sub: "agenda")
 
@@ -313,7 +313,7 @@ def propagate():
 
 #idx("digital-circuit simulation", sub: "agenda")
 
-=== عينة من المحاكاة
+#subheading([عينة من المحاكاة])
 
 #idx("digital-circuit simulation", sub: "sample simulation")
 #idx("half-adder", sub: "simulation of")
@@ -427,7 +427,7 @@ def accept_action_function(fun):
 ```)
 ])
 
-=== تنفيذ الأجندة
+#subheading([تنفيذ الأجندة])
 
 #idx("digital-circuit simulation", sub: "agenda implementation")
 
@@ -456,7 +456,10 @@ def segment_queue(s):
 #idx("table", sub: "used in simulation agenda")
 من الشرائح الزمنية. وهو يختلف عن الجداول الموصوفة في القسم @sec:tables في أن الشرائح ستكون مرتبة حسب ترتيب زيادة الوقت. وبالإضافة إلى ذلك، فإننا نخزن
 #idx("current time, for simulation agenda")
-#emph[الوقت الحالي] (أي وقت الفعل الأخير الذي عولج) عند رأس الأجندة. والأجندة المنشأة حديثاً ليس لها شرائح زمنية ووقتها الحالي 0:#footnote[الأجندة هي قائمة مروَّسة، مثل الجداول في القسم @sec:tables، ولكن بما أن القائمة مروَّسة بالوقت، فلا نحتاج لـ مروِّس وهمي إضافي (مثل السلسلة النصية #py("\"*table*\"") المستخدمة مع الجداول).]
+#emph[الوقت الحالي] (أي وقت الفعل الأخير الذي عولج) عند رأس الأجندة. والأجندة المنشأة حديثاً ليس لها شرائح زمنية ووقتها الحالي 0:#footnote[الأجندة هي
+#idx("headed list")
+#idx("list(s)", sub: "headed")
+قائمة مروَّسة، مثل الجداول في القسم @sec:tables، ولكن بما أن القائمة مروَّسة بالوقت، فلا نحتاج لمروِّس وهمي إضافي (مثل السلسلة النصية #py("\"*table*\"") المستخدمة مع الجداول).]
 #idx("makeagenda", decl: true)#idx("currenttime", decl: true)#idx("setcurrenttime", decl: true)#idx("segments", decl: true)#idx("setsegments", decl: true)#idx("firstsegment", decl: true)#idx("restsegments", decl: true)
 #snippet(```python
 def make_agenda():
