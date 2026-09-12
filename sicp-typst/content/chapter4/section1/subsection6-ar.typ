@@ -3,10 +3,10 @@
 
 #subsection([التصريحات الداخلية], label-name: <sec:internal-definitions>)
 
-#idx("بنية الكتل")
+#idx("block structure")
 
-#idx("تصريح داخلي", sub: "نطاق الاسم")
-#idx("نطاق الاسم", sub: "تصريح داخلي")
+#idx("internal declaration", sub: "scope of name")
+#idx("scope of a name", sub: "internal declaration")
 
 في لغة #en[Python]، يكون نطاق التصريح
 هو الكتلة الكاملة التي تحيط بالتصريح مباشرةً،
@@ -55,8 +55,8 @@ def f(x):
 يحقق تقييم الكتل في المُقيِّم دائري التجريد من
 القسم @sec:core-of-evaluator مثل
 هذا النطاق الآني للأسباب المحلية عن طريق
-#idx("مسح التصريحات", sub: "في المُقيِّم دائري التجريد")
-#idx("تصريح داخلي", sub: "مسح")
+#idx("scanning out declarations", sub: "in metacircular evaluator")
+#idx("internal declaration", sub: "scanning out")
 مسح التصريحات في الكتلة وتوسيع البيئة الحالية بإطار يحتوي على رابطات لجميع الأسماء المصرَّح عنها قبل تقييم التصريحات. ومن ثَمَّ فإن البيئة الجديدة التي يُقَيَّم فيها متن الكتلة تحتوي بالفعل على رابطات لـ
 #py("is_even") و
 #py("is_odd")، وأي ظهور
@@ -89,7 +89,7 @@ def f_3(x, y):
 تكتب #en[Eva Lu Ator] برامج تتداخل فيها
 تعريفات الدوال مع العبارات الأخرى.
 وتحتاج إلى التأكد من تقييم التصريحات قبل
-تطبيق الدوال. فتشتكي: «لماذا لا يتولى المُقيِّم هذه المهمة، ويقوم بـ #idx("رفع تعريفات الدوال", sort: "raf'") #idx("تعريف الدالة", sub: "رفع") رفع جميع تصريحات الدوال إلى بداية الكتلة التي تظهر فيها؟ يجب رفع تعريفات الدوال خارج الكتل إلى بداية البرنامج.»
+تطبيق الدوال. فتشتكي: «لماذا لا يتولى المُقيِّم هذه المهمة، ويقوم بـ #idx("hoisting of function definitions", sort: "raf'") #idx("function definition", sub: "hoisting of") رفع جميع تصريحات الدوال إلى بداية الكتلة التي تظهر فيها؟ يجب رفع تعريفات الدوال خارج الكتل إلى بداية البرنامج.»
 
 + عدّل المُقيِّم متتبعًا اقتراح إيفا.
 + قرر مصممو #en[Python] اتباع نهج إيفا. ناقش هذا القرار.
@@ -98,15 +98,15 @@ def f_3(x, y):
 
 #exercise(label-name: <ex:lambda_calculus>, [
 نحصل على الدوال العودية بطريقة
-#idx("دالة عودية", sub: "تحديدها بدون تصريح")
+#idx("recursive function", sub: "specifying without declaration")
 غير مباشرة في مفسرنا:
 أولاً نصرّح عن الاسم الذي سيشير إلى الدالة العودية ونعّين له القيمة الخاصة
 #py("\"*unassigned*\"")؛ ثم نعرّف الدالة العودية في نطاق ذلك الاسم؛ وأخيرًا نعيّن الدالة المُعرَّفة للاسم. وبحلول الوقت الذي تُطبَّق فيه الدالة العودية، تشير أي ظهورات للاسم في المتن بشكل صحيح إلى الدالة العودية. ومن المدهش أنه من الممكن تحديد دوال عودية دون استخدام التصريحات أو التعيين. يحسب البرنامج التالي
 مضروب 10 عن طريق تطبيق دالة
-#idx("مضروب", sub: "بدون تصريح أو تعيين")
+#idx("factorial", sub: "without declaration or assignment")
 مضروب عودية:#footnote[يوضح هذا المثال حيلة برمجة لصياغة دوال عودية دون استخدام التعيين. والحيلة الأكثر عمومية من هذا النوع هي
-#idx("مُعامل Y", sort: "Y")
-#idx("Scheme", sub: "مُعامل Y مكتوب بلغة")
+#idx("Y operator", sort: "Y")
+#idx("Scheme", sub: "Y operator written in")
 #emph[مُعامل] $Y$،
 والذي يمكن استخدامه لإعطاء تنفيذ «حساب $lambda$ خالص» للعودية. (انظر
 #idx("Stoy, Joseph E.")#idx("Gabriel, Richard P.")
@@ -122,8 +122,8 @@ def f_3(x, y):
 
 #subheading([معالجة التصريحات المتسلسلة])
 
-#idx("معالجة التصريحات المتسلسلة مقابل مسحها")
-#idx("مسح التصريحات", sub: "مقابل معالجة التصريحات المتسلسلة")
+#idx("sequential declaration processing vs. scanning out")
+#idx("scanning out declarations", sub: "sequential declaration processing vs.")
 #anchor(<add_binding_to_frame>)
 يفرض تصميم مُمَيِّمنا في
 القسم @sec:core-of-evaluator عبئًا
@@ -180,7 +180,7 @@ def add_binding_to_frame(symbol, value, frame):
 القسم @sec:core-of-evaluator
 لأي دالة
 تأتي فيها
-#idx("تصريح داخلي", sub: "قيود على")
+#idx("internal declaration", sub: "restrictions on")
 التصريحات الداخلية أولاً في المتن ولا يستخدم تقييم تعبيرات القيمة للأسماء المصرَّح عنها أيًا
 من الأسماء المصرَّح عنها في الواقع.
 يعرض التمرين @ex:simultaneous-def
@@ -195,8 +195,8 @@ def add_binding_to_frame(symbol, value, frame):
 وفي التمرين @ex:simultaneous-def، نرى أن
 الآراء قد تختلف حول ما إذا كان ذلك مرغوبًا فيه.
 
-#idx("معالجة التصريحات المتسلسلة مقابل مسحها")
-#idx("مسح التصريحات", sub: "مقابل معالجة التصريحات المتسلسلة")
+#idx("sequential declaration processing vs. scanning out")
+#idx("scanning out declarations", sub: "sequential declaration processing vs.")
 
 #exercise(label-name: <ex:simultaneous-def>, [
 يجادل #en[Ben Bitdiddle] و#en[Alyssa P. Hacker] و#en[Eva Lu Ator] بشأن
@@ -234,6 +234,6 @@ f(10)
 لتنفيذ التصريحات الداخلية بحيث تتصرف كما تفضل إيفا؟#footnote[يدعم مصممو #en[Python] أليسا بناءً على المبررات التالية: إيفا على حق من حيث المبدأ — يجب اعتبار التصريحات آنية. ولكن يبدو من الصعب تنفيذ آلية عامة وفعالة تفعل ما تتطلبه إيفا. وفي غياب مثل هذه الآلية، فمن الأفضل إنشاء خطأ في الحالات الصعبة للتصريحات الآنية (فكرة أليسا) بدلاً من إنتاج إجابة غير صحيحة (كما يرغب بن).]
 ])
 
-#idx("بنية الكتل")
-#idx("تصريح داخلي", sub: "نطاق الاسم")
-#idx("نطاق الاسم", sub: "تصريح داخلي")
+#idx("block structure")
+#idx("internal declaration", sub: "scope of name")
+#idx("scope of a name", sub: "internal declaration")

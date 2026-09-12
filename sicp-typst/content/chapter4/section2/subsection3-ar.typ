@@ -3,25 +3,25 @@
 
 #subsection([التدفقات كقوائم كسولة], label-name: <sec:lazy-cons>)
 
-#idx("تدفق (تدفقات)", sub: "منفذة كقوائم كسولة")
-#idx("قائمة كسولة")
-#idx("قائمة (قوائم)", sub: "كسولة")
-#idx("زوج كسول")
-#idx("زوج (أزواج)", sub: "كسول")
+#idx("stream(s)", sub: "implemented as lazy lists")
+#idx("lazy list")
+#idx("list(s)", sub: "lazy")
+#idx("lazy pair")
+#idx("pair(s)", sub: "lazy")
 
 في القسم @sec:delayed-lists، أظهرنا كيفية تنفيذ التدفقات كقوائم مؤجلة.
-#idx("تعبير مؤجل", sub: "التقييم الكسول و")
-واستخدمنا #idx("تعبير لامدا", sub: "التقييم الكسول و") تعبير #en[lambda] لإنشاء
-#idx("وعد بالتقييم", sub: "التقييم الكسول و")
+#idx("delayed expression", sub: "lazy evaluation and")
+واستخدمنا #idx("lambda expression", sub: "lazy evaluation and") تعبير #en[lambda] لإنشاء
+#idx("promise to evaluate", sub: "lazy evaluation and")
 «وعد» لحساب ذيل التدفق، دون الوفاء بهذا الوعد فعليًا إلا لاحقًا.
 
 وكنا مضطرين لإنشاء التدفقات كنوع جديد من كائنات البيانات المشابهة للقوائم دون أن تكون مطابقة لها، وهذا يتطلب منا إعادة تنفيذ العديد من عمليات القوائم الاعتيادية (#py("map")، و#py("append")، وما إلى ذلك) لاستخدامها مع التدفقات.
 
 ومع التقييم الكسول، يمكن أن تكون التدفقات والقوائم متطابقة، لذا لا داعي لعمليات منفصلة للقوائم والتدفقات. كل ما نحتاج إلى فعله هو ترتيب الأمور بحيث تكون #py("pair") غير صارمة. إحدى الطرق لتحقيق ذلك هي توسيع المُقيِّم الكسول للسماح بأوليات غير صارمة، وتنفيذ #py("pair") كإحدى هذه الأوليات. والطريقة الأسهل هي أن نتذكر (القسم @sec:data-) أنه لا يوجد احتياج أساسي لتنفيذ #py("pair") كدالة أولية على الإطلاق. وبدلاً من ذلك، يمكننا تمثيل
-#idx("زوج (أزواج)", sub: "تمثيل دالي لـ")
+#idx("pair(s)", sub: "functional representation of")
 الأزواج كدوال:#footnote[هذا هو التمثيل الدالي الموصوف في التمرين @ex:lambda-cons. وحقيقةً، سيفيد أي تمثيل دالي (مثل تنفيذ يمرر الرسائل). لاحظ أنه يمكننا تثبيت هذه التعاريف في المُقيِّم الكسول ببساطة عن طريق كتابتها في حلقة المحرك. وإذا كنا قد ضمنّا في الأصل #py("pair") و#py("head") و#py("tail") كأوليات في البيئة العالمية، فستُعاد إعادة تعريفها. (انظر أيضًا التمارين @ex:lazy-list-input و @ex:lazy-list-printing).]
 
-#idx("pair (primitive function)", sub: "تنفيذ دالي لـ", decl: true)#idx("head (primitive function)", sub: "تنفيذ دالي لـ", decl: true)#idx("tail (primitive function)", sub: "تنفيذ دالي لـ", decl: true)
+#idx("pair (primitive function)", sub: "functional implementation of", decl: true)#idx("head (primitive function)", sub: "functional implementation of", decl: true)#idx("tail (primitive function)", sub: "functional implementation of", decl: true)
 #snippet(```python
 def pair(x, y):
     return lambda m: (m(x, y))
@@ -33,7 +33,7 @@ def tail(z):
 
 بدلالة هذه العمليات الأساسية، ستعمل التعاريف المعيارية لعمليات القوائم مع القوائم اللانهائية (التدفقات) وكذلك القوائم المتناهية، ويمكن تنفيذ عمليات التدفقات كعمليات قوائم. إليك بعض الأمثلة:
 
-#idx("listref", decl: true)#idx("map", decl: true)#idx("scalelist", decl: true)#idx("addlists", decl: true)#idx("ones (infinite stream)", sub: "نسخة القائمة الكسولة", decl: true)#idx("integers (infinite stream)", sub: "نسخة القائمة الكسولة", decl: true)
+#idx("listref", decl: true)#idx("map", decl: true)#idx("scalelist", decl: true)#idx("addlists", decl: true)#idx("ones (infinite stream)", sub: "lazy-list version", decl: true)#idx("integers (infinite stream)", sub: "lazy-list version", decl: true)
 #snippet(```python
 def llist_ref(items, n):
     return head(items) if n == 0 else llist_ref(tail(items), n - 1)
@@ -60,13 +60,13 @@ llist_ref(integers, 17)
 ```)
 
 لاحظ أن هذه القوائم الكسولة هي أكثر كسلًا حتى من تدفقات الفصل @chap:state: رأس القائمة، بالإضافة إلى ذيلها، مؤجَّل.#footnote[يتيح لنا هذا إنشاء نسخ مؤجلة من أنواع أكثر عمومية من بنيات القوائم، وليس فقط المتتاليات. يناقش #idx("Hughes, R. J. M.") #en[Hughes 1990] بعض تطبيقات
-#idx("شجرة كسولة")#idx("شجرة", sub: "كسولة")
+#idx("lazy tree")#idx("tree", sub: "lazy")
 «الأشجار الكسولة».]
 وفي الواقع، حتى الوصول إلى #py("head") أو #py("tail") لزوج كسول لا يتطلب فرض قيمة عنصر القائمة. فستُفْرَض القيمة فقط عندما تكون هناك حاجة إليها حقًا — مثل استغلالها كوسيط لدالة أولية، أو لطباعتها كإجابة.
 
-تساعد الأزواج الكسولة أيضًا في المشكلة التي نشأت مع التدفقات في القسم @sec:streams-and-delayed-evaluation، حيث وجدنا أن صياغة نماذج التدفق للأنظمة ذات الحلقات قد تتطلب منا نثر تعبيرات #en[lambda] إضافية لـ #idx("تقييم مؤجل", sub: "صريح مقابل تلقائي") #idx("تعبير مؤجل", sub: "صريح مقابل تلقائي") التأجيل في برامجنا، بالإضافة إلى تلك المطلوبة لبناء زوج تدفق. ومع التقييم الكسول، يُؤَجَّل جميع الوسائط للدوال بشكل موحد. على سبيل المثال، يمكننا تنفيذ دوال لمكاملة القوائم وحل المعادلات التفاضلية كما قصدنا أصلاً في القسم @sec:streams-and-delayed-evaluation:
+تساعد الأزواج الكسولة أيضًا في المشكلة التي نشأت مع التدفقات في القسم @sec:streams-and-delayed-evaluation، حيث وجدنا أن صياغة نماذج التدفق للأنظمة ذات الحلقات قد تتطلب منا نثر تعبيرات #en[lambda] إضافية لـ #idx("delayed evaluation", sub: "explicit vs. automatic") #idx("delayed expression", sub: "explicit vs. automatic") التأجيل في برامجنا، بالإضافة إلى تلك المطلوبة لبناء زوج تدفق. ومع التقييم الكسول، يُؤَجَّل جميع الوسائط للدوال بشكل موحد. على سبيل المثال، يمكننا تنفيذ دوال لمكاملة القوائم وحل المعادلات التفاضلية كما قصدنا أصلاً في القسم @sec:streams-and-delayed-evaluation:
 
-#idx("integral", sub: "نسخة القائمة الكسولة", decl: true)#idx("solve differential equation", sub: "نسخة القائمة الكسولة", decl: true)
+#idx("integral", sub: "lazy-list version", decl: true)#idx("solve differential equation", sub: "lazy-list version", decl: true)
 #snippet(```python
 def integral(integrand, initial_value, dt):
     int = pair(initial_value, add_lists(scale_list(integrand, dt), int))
@@ -107,9 +107,9 @@ head(llist("a", "b", "c"))
 عدّل حلقة المحرك للمُقَيِّم بحيث تُطبَع الأزواج والقوائم الكسولة بطريقة معقولة. (ماذا ستفعل بشأن القوائم اللانهائية؟) قد تحتاج أيضًا إلى تعديل تمثيل الأزواج الكسولة بحيث يستطيع المُقيِّم التعرف عليها من أجل طباعتها.
 ])
 
-#idx("تقييم مؤجل", sub: "في المُقيِّم الكسول")
-#idx("تدفق (تدفقات)", sub: "منفذة كقوائم كسولة")
-#idx("قائمة كسولة")
-#idx("قائمة (قوائم)", sub: "كسولة")
-#idx("زوج كسول")
-#idx("زوج (أزواج)", sub: "كسول")
+#idx("delayed evaluation", sub: "in lazy evaluator")
+#idx("stream(s)", sub: "implemented as lazy lists")
+#idx("lazy list")
+#idx("list(s)", sub: "lazy")
+#idx("lazy pair")
+#idx("pair(s)", sub: "lazy")

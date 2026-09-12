@@ -8,11 +8,11 @@
 #subsubsection([حلقة المحرك], label-name: <sec:query-driver>)
 
 تقرأ
-#idx("حلقة المحرك", sub: "في مفسر الاستعلام")
-#idx("مفسر الاستعلام", sub: "حلقة المحرك")
+#idx("driver loop", sub: "in query interpreter")
+#idx("query interpreter", sub: "driver loop")
 حلقة المحرك لنظام الاستعلام تعبيرات المدخلات مكررة. وإذا كان التعبير قاعدة أو تقريرًا جازمًا يُرَاد إضافته إلى قاعدة البيانات، تُضاف المعلومات. وإلا يُفْتَرَض أن التعبير استعلام. ويمرر المحرك هذا الاستعلام إلى #py("evaluate_query") جنبًا إلى جنب مع تدفق إطارات أولي يتكون من إطار فارغ واحد. ونتيجة التقييم هي تدفق إطارات متولدة بواسطة استيفاء الاستعلام بقيم المتغيرات الموجودة في قاعدة البيانات. وتُستخدم هذه الإطارات لتشكيل تدفق جديد يتكون من نسخ الاستعلام الأصلي التي تُجَسَّد فيها المتغيرات بالقيم المعطاة بواسطة تدفق الإطارات، ويُعْرَض هذا التدفق النهائي:
 
-#idx("محثات", sub: "مفسر الاستعلام")#idx("querydriverloop", decl: true)
+#idx("prompts", sub: "query interpreter")#idx("querydriverloop", decl: true)
 #snippet(```python
 input_prompt = "Query input:"
 output_prompt = "Query results:"
@@ -33,30 +33,30 @@ def query_driver_loop():
 ```)
 
 وهنا، كما هو الحال في المُقيِّمات الأخرى في هذا الفصل، نستخدم
-#idx("بناء جملة تجريدي", sub: "في مفسر الاستعلام")
-#idx("parse", sub: "في مفسر الاستعلام")
+#idx("abstract syntax", sub: "in query interpreter")
+#idx("parse", sub: "in query interpreter")
 #py("parse") لتحويل مكوّن من لغة الاستعلام يُعْطَى كسلسلة نصية إلى تمثيل بناء جملة #en[Python]. (ونلحق فاصلة منقوطة بسلسلة تعبيرات المدخلات لأن #py("parse") تتوقع عبارة).
 ثم نحول تمثيل بناء الجملة أكثر إلى مستوى مفاهيمي مناسب لنظام الاستعلام باستخدام #py("convert_to_query_syntax")، المصرَّح عنها في القسم @sec:query-syntax جنبًا إلى جنب مع المحمول #py("is_assertion") والمحدد #py("assertion_body").
 والدالة #py("add_rule_or_assertion") مصرَّح عنها في القسم @sec:query-db.
 وتُستخدم الإطارات الناتجة عن تقييم الاستعلام لتجسيد تمثيل بناء الجملة، وتُلْغَى الفهرسة النحوية للنتيجة إلى سلسلة نصية للطباعة. والدالتان
-#idx("مفسر الاستعلام", sub: "تجسيد")
+#idx("query interpreter", sub: "instantiation")
 #idx("instantiateexpression")
 #py("instantiate_expression") و
-#idx("unparse", sub: "في مفسر الاستعلام")
+#idx("unparse", sub: "in query interpreter")
 #py("unparse") مصرَّح عنهما في القسم @sec:query-syntax.
 
-#idx("مفسر الاستعلام", sub: "تجسيد")
-#idx("مفسر الاستعلام", sub: "حلقة المحرك")
+#idx("query interpreter", sub: "instantiation")
+#idx("query interpreter", sub: "driver loop")
 
 #subsubsection([المُقيِّم], label-name: <sec:query-eval>)
 
 الدالة
-#idx("مفسر الاستعلام", sub: "مُقَيِّم الاستعلام")
+#idx("query interpreter", sub: "query evaluator")
 #py("evaluate_query")،
 المستدعاة بواسطة #py("query_driver_loop")، هي المُقيِّم الأساسي لنظام الاستعلام. وتأخذ كمدخلات استعلامًا وتدفق إطارات، وترجع تدفق إطارات مُمَدَّدة.
 وتحدد الأشكال
 النحوية بواسطة
-#idx("برمجة موجهة بالبيانات", sub: "في مفسر الاستعلام")
+#idx("data-directed programming", sub: "in query interpreter")
 توجيه موجه بالبيانات باستخدام #py("get") و#py("put")، تمامًا كما فعلنا في تنفيذ العمليات العامة في الفصل @chap:data. وأي استعلام لا يُحَدَّد كشكل نحوي يُفْتَرَض أنه استعلام بسيط، ليعالج بواسطة #py("simple_query").
 #idx("evaluatequery", decl: true)
 #snippet(```python
@@ -69,7 +69,7 @@ def evaluate_query(query, frame_stream):
 
 #subheading([استعلامات بسيطة])
 
-#idx("استعلام بسيط", sub: "معالجة")
+#idx("simple query", sub: "processing")
 
 تتعامل الدالة
 #py("simple_query")
@@ -84,13 +84,13 @@ def simple_query(query_pattern, frame_stream):
 وتُدْمَج هاتان التدفقان (باستخدام #py("stream_append_delayed")، القسم @sec:query-streams) لإنشاء تدفق بجميع الطرق التي يمكن بها استيفاء النمط المعطى متسقًا مع الإطار الأصلي (انظر التمرين @ex:q-why-not-append).
 وتُدْمَج التدفقات للإطارات الفردية للمدخلات باستخدام #py("stream_flatmap") (القسم @sec:query-streams) لتشكيل تدفق ضخم واحد بجميع الطرق التي يمكن بها تمديد أي من الإطارات في تدفق المدخلات الأصلي لإنتاج مطابقة مع النمط المعطى.
 
-#idx("استعلام بسيط", sub: "معالجة")
+#idx("simple query", sub: "processing")
 
 #subheading([استعلامات مركبة])
 
-#idx("استعلام مركب", sub: "معالجة")
+#idx("compound query", sub: "processing")
 
-نتعامل مع استعلامات #idx("and (لغة الاستعلام)", sub: "تقييم الـ") #py("and") كما هو موضح في الشكل @fig:query-and بالدالة #py("conjoin")، التي تأخذ كمدخلات المقترنات وتدفق الإطارات وترجع تدفق الإطارات المُمَدَّدة. أولاً، تعالج #py("conjoin") تدفق الإطارات للعثور على تدفق جميع توسيعات الإطارات الممكنة التي تستوفي الاستعلام الأول في الإقتران. ثم، باستخدام هذا كتدفق إطارات جديد، تطبق عوديًا #py("conjoin") على باقي الاستعلامات.
+نتعامل مع استعلامات #idx("and (query language)", sub: "evaluation of") #py("and") كما هو موضح في الشكل @fig:query-and بالدالة #py("conjoin")، التي تأخذ كمدخلات المقترنات وتدفق الإطارات وترجع تدفق الإطارات المُمَدَّدة. أولاً، تعالج #py("conjoin") تدفق الإطارات للعثور على تدفق جميع توسيعات الإطارات الممكنة التي تستوفي الاستعلام الأول في الإقتران. ثم، باستخدام هذا كتدفق إطارات جديد، تطبق عوديًا #py("conjoin") على باقي الاستعلامات.
 #idx("conjoin", decl: true)
 #snippet(```python
 def conjoin(conjuncts, frame_stream):
@@ -105,7 +105,7 @@ put("and", "evaluate_query", conjoin)
 
 تعد #py("evaluate_query") للتوجيه إلى #py("conjoin") عند اعتراض #py("and").
 
-ونتعامل مع استعلامات #idx("or (لغة الاستعلام)", sub: "تقييم الـ") #py("or") بنفس الطريقة، كما هو موضح في الشكل @fig:query-or.
+ونتعامل مع استعلامات #idx("or (query language)", sub: "evaluation of") #py("or") بنفس الطريقة، كما هو موضح في الشكل @fig:query-or.
 وتُحْسَب تدفقات المخرجات للمفصلات المختلفة لـ #py("or") بشكل منفصل وتُدْمَج باستخدام الدالة #py("interleave_delayed") من القسم @sec:query-streams. (انظر التمارين @ex:q-why-not-append و @ex:q-why-interleave).
 #idx("disjoin", decl: true)
 #snippet(```python
@@ -118,7 +118,7 @@ put("or", "evaluate_query", disjoin)
 
 #subheading([المرشحات])
 
-الشكل النحوي لـ #idx("not (لغة الاستعلام)", sub: "تقييم الـ") #py("not") يُعَالَج بالطريقة الموضحة خطوطها العريضة في القسم @sec:how-query-works. فنحاول تمديد كل إطار في تدفق المدخلات لـ استيفاء الاستعلام الذي يُنْفَى، ونضمن إطارًا معينًا في تدفق المخرجات فقط إذا لم يكن بالإمكان تمديده.
+الشكل النحوي لـ #idx("not (query language)", sub: "evaluation of") #py("not") يُعَالَج بالطريقة الموضحة خطوطها العريضة في القسم @sec:how-query-works. فنحاول تمديد كل إطار في تدفق المدخلات لـ استيفاء الاستعلام الذي يُنْفَى، ونضمن إطارًا معينًا في تدفق المخرجات فقط إذا لم يكن بالإمكان تمديده.
 
 #idx("negate", decl: true)
 #snippet(```python
@@ -127,12 +127,12 @@ def negate(exps, frame_stream):
 put("not", "evaluate_query", negate)
 ```)
 
-والشكل النحوي لـ #idx("javascriptpredicate (لغة الاستعلام)", sub: "تقييم الـ") #py("javascript_predicate") هو مرشح مماثل لـ #py("not").
+والشكل النحوي لـ #idx("javascriptpredicate (query language)", sub: "evaluation of") #py("javascript_predicate") هو مرشح مماثل لـ #py("not").
 
 ويُستخدم كل إطار في التدفق لتجسيد المتغيرات في المحمول، ويُقَيَّم المحمول المُجَسَّد، وتُصَفَّى الإطارات التي يُقَيَّم المحمول من أجلها إلى خادع من تدفق المدخلات.
 ويُقَيَّم المحمول المُجَسَّد باستخدام #py("evaluate") من القسم @sec:mc-eval مع #py("the_global_environment") وبالتالي يمكنه التعامل مع أي تعبير #en[Python]، طالما أن جميع متغيرات الأنماط مُمَثَّلة ومُجَسَّدة قبل التقييم.
 
-#idx("javascriptpredicate (مفسر الاستعلام)", decl: true)
+#idx("javascriptpredicate (query interpreter)", decl: true)
 #snippet(```python
 def javascript_predicate(exps, frame_stream):
     return stream_flatmap(lambda frame: (singleton_stream(frame) if evaluate(instantiate_expression(javascript_predicate_expression(exps), frame), the_global_environment) else None), frame_stream)
@@ -141,7 +141,7 @@ put("javascript_predicate", "evaluate_query", javascript_predicate)
 
 والشكل النحوي #py("always_true") يوفر استعلامًا يُسْتَوْفَى دائمًا. فهو يتجاهل محتوياته (عادة فارغة) ويمرر ببساطة جميع الإطارات في تدفق المدخلات.
 والمحدد #py("rule_body") (القسم @sec:query-syntax) يستخدم #py("always_true")
-#idx("قاعدة (لغة الاستعلام)", sub: "بدون متن")
+#idx("rule (query language)", sub: "without body")
 لتوفير متون للقواعد التي عُرِّفت بدون متون (أي القواعد التي تُسْتَوْفَى متونها دائمًا).
 #idx("alwaystrue", decl: true)
 #snippet(```python
@@ -152,14 +152,14 @@ put("always_true", "evaluate_query", always_true)
 
 المحددات التي تحدد بناء جملة #py("not") و#py("javascript_predicate") مُعْطَاة في القسم @sec:query-syntax.
 
-#idx("استعلام مركب", sub: "معالجة")
-#idx("مفسر الاستعلام", sub: "مُقَيِّم الاستعلام")
+#idx("compound query", sub: "processing")
+#idx("query interpreter", sub: "query evaluator")
 
 #subsubsection([العثور على التقريرات الجازمة بمطابقة الأنماط], label-name: <sec:query-match>)
 
 الدالة #py("find_assertions")،
-#idx("مفسر الاستعلام", sub: "مطابقة الأنماط")
-#idx("مطابقة الأنماط", sub: "تنفيذ")
+#idx("query interpreter", sub: "pattern matching")
+#idx("pattern matching", sub: "implementation")
 المستدعاة بواسطة #py("simple_query") (القسم @sec:query-eval)، تأخذ كمدخلات نمطًا وإطارًا. وترجع تدفق إطارات، يمدد كل منها الإطار المعطى بمطابقة قاعدة بيانات للنمط المعطى. وتستخدم #py("fetch_assertions") (القسم @sec:query-db) للحصول على تدفق بجميع التقريرات الجازمة في قاعدة البيانات التي ينبغي التحقق منها لمطابقتها مع النمط والإطار. والسبب في استخدام #py("fetch_assertions") هنا هو أنه يمكننا غالبًا تطبيق اختبارات بسيطة ستزيل العديد من الإدخالات في قاعدة البيانات من مجمع المرشحين لمطابقة ناجحة. وسيعمل النظام مع ذلك إذا ألغينا #py("fetch_assertions") وفحصنا ببساطة تدفق جميع التقريرات الجازمة في قاعدة البيانات، لكن الحساب سيكون أقل كفاءة لأننا سنحتاج إلى إجراء استدعاءات أكثر بكثير للمطابق.
 #idx("findassertions", decl: true)
 #snippet(```python
@@ -195,12 +195,12 @@ def extend_if_consistent(variable, data, frame):
 
 والدوال المستخدمة بواسطة #py("extend_if_consistent") لمعالجة الرابطات مُعَرَّفة في القسم @sec:query-bindings.
 
-#idx("مفسر الاستعلام", sub: "مطابقة الأنماط")
-#idx("مطابقة الأنماط", sub: "تنفيذ")
+#idx("query interpreter", sub: "pattern matching")
+#idx("pattern matching", sub: "implementation")
 
 #subsubsection([القواعد والتوحيد], label-name: <sec:query-unify>)
 
-#idx("قاعدة (لغة الاستعلام)", sub: "تطبيق الـ")
+#idx("rule (query language)", sub: "applying")
 
 الدالة #py("apply_rules") هي نظيرة القواعد لـ #py("find_assertions") (القسم @sec:query-match). وتأخذ كمدخلات نمطًا وإطارًا، وتملك تدفق إطارات توسيع عن طريق تطبيق القواعد من قاعدة البيانات. والدالة #py("stream_flatmap") ترسم خرائط #py("apply_a_rule") لأسفل تدفق القواعد القابلة للتطبيق محتملًا (المحددة بواسطة #py("fetch_rules")، القسم @sec:query-db) وتدمج تدفقات الإطارات الناتجة.
 
@@ -234,11 +234,11 @@ def rename_variables_in(rule):
     return tree_walk(rule)
 ```)
 
-#idx("قاعدة (لغة الاستعلام)", sub: "تطبيق الـ")
+#idx("rule (query language)", sub: "applying")
 
 و
-#idx("مفسر الاستعلام", sub: "التوحيد")
-#idx("توحيد", sub: "تنفيذ")
+#idx("query interpreter", sub: "unification")
+#idx("unification", sub: "implementation")
 خوارزمية التوحيد مُنَفَّذة كدالة تأخذ كمدخلات نمطين وإطارًا وترجع إما الإطار المُمَدَّد وإما السلسلة النصية #py("\"failed\"").
 والموحد يشبه مطابق الأنماط باستثناء أنه متناظر — فالمتغيرات مسموح بها على كلا جانبي المطابقة. والدالة #py("unify_match") هي أساسًا نفس #py("pattern_match")، باستثناء وجود بند إضافي (موسوم بـ \*\*\* أدناه) للتعامل مع الحالة التي يكون فيها الكائن الموجود على الجانب الأيمن للمطابقة متغيرًا.
 #idx("unifymatch", decl: true)
@@ -251,11 +251,11 @@ def unify_match(p1, p2, frame):
 
 وفحص التداخل الثاني يتناول محاولات ربط متغير بنمط يتضمن ذلك المتغير. ومثل هذا الموقف قد يحدث كلما تكرر متغير في كلا النمطين. تأمل، على سبيل المثال، توحيد النمطين #py("llist($x, $x)") و#py("llist($y,") $⟨$#meta("expression") #meta("involving") #py("$y")$⟩$#py(")") في إطار يكون فيه كل من #py("$x") و#py("$y") غير مرتبطين. في البداية تُطَابَق #py("$x") مقابل #py("$y")، مما يصنع ربطًا لـ #py("$x") بـ #py("$y").
 وبعد ذلك، تُطَابَق نفس #py("$x") مقابل التعبير المعطى المتضمن #py("$y"). وبما أن #py("$x") مرتبطة بالفعل بـ #py("$y")، ينتج عن ذلك مطابقة #py("$y") مقابل التعبير. وإذا فكرنا في الموحد كمسستكشف لمجموعة قيم لمتغيرات النمط تجعل الأنماط متطابقة، فإن هذه الأنماط تقتضي تعليمات لإيجاد #py("$y") بحيث تكون #py("$y") مساوية للتعبير المتضمن #py("$y"). ونحن نرفض مثل هذه الرابطات؛ وتتعرف المحمول #py("depends_on") على هذه الحالات.#footnote[عمومًا، توحيد #py("$y") مع تعبير يتضمن #py("$y") سيتطلب قدرتنا على العثور على
-#idx("نقطة ثابتة", sub: "التوحيد و")
+#idx("fixed point", sub: "unification and")
 نقطة ثابتة للمعادلة #py("$y") $= ⟨$#meta("expression") #meta("involving") #py("$y")$⟩$.
 ومن الممكن أحيانًا تشكيل تعبير نحويًا يبدو أنه الحل. على سبيل المثال، يبدو أن #py("$y") $=$ #py("llist(\"f\", $y)") يملك النقطة الثابتة #py("llist(\"f\", llist(\"f\", llist(\"f\",") … #py(")))")، والتي يمكننا إنتاجها بالبدء بالتعبير #py("llist(\"f\", $y)") والاستبدال المتكرر لـ #py("llist(\"f\", $y)") محل #py("$y").
 ولسوء الحظ، ليست كل معادلة من هذا القبيل تملك نقطة ثابتة ذات معنى. والقضايا التي تنشأ هنا تشبه قضايا معالجة
-#idx("متسلسلة لانهائية")
+#idx("infinite series")
 المتسلسلات اللانهائية في الرياضيات. على سبيل المثال، نعلم أن 2 هو حل المعادلة $y = 1 + y/2$.
 وبالبدء بالتعبير $1 + y/2$ والاستبدال المتكرر لـ $1 + y/2$ محل $y$ نحصل على
 
@@ -278,8 +278,8 @@ $ -1 space = space 1 + 2 + 4 + 8 + dots.c . $
 ومع ذلك، تتيح معظم أنظمة البرمجة المنطقية اليوم المراجع الدائرية، عن طريق قبول بنية البيانات الدائرية كنتيجة للمطابقة. ويبرر ذلك نظريًا باستخدام #emph[الأشجار الناطقة] (#en[rational trees])
 #idx("Jaffar, Joxan")
 #idx("Stuckey, Peter J.")
-#idx("شجرة", sub: "ناطقة")
-#idx("شجرة ناطقة")
+#idx("tree", sub: "rational")
+#idx("rational tree")
 (#en[Jaffar and Stuckey 1986]).
 وقبول بنية البيانات الدائرية يتيح بيانات ذاتية المرجعية، مثل بنية بيانات الموظف التي تشير إلى صاحب العمل، الذي يشير بدوره إلى الموظف.]
 ومن ناحية أخرى، لا نريد رفض محاولات ربط متغير بنفسه. على سبيل المثال، تأمل توحيد #py("llist($x, $x)") و#py("llist($y, $y)"). المحاولة الثانية لربط #py("$x") بـ #py("$y") تطابق #py("$y") (القيمة المخزنة لـ #py("$x")) مقابل #py("$y") (القيمة الجديدة لـ #py("$x")). ويتكفل بهذا بند #py("equal") في #py("unify_match").
@@ -315,15 +315,15 @@ def depends_on(expression, variable, frame):
     return tree_walk(expression)
 ```)
 
-#idx("مفسر الاستعلام", sub: "التوحيد")
-#idx("توحيد", sub: "تنفيذ")
+#idx("query interpreter", sub: "unification")
+#idx("unification", sub: "implementation")
 
 #subsubsection([صيانة قاعدة البيانات], label-name: <sec:query-db>)
 
 إحدى المشكلات المهمة في تصميم لغات البرمجة المنطقية هي ترتيب الأمور بحيث يُفْحَص أقل عدد ممكن من إدخالات قاعدة البيانات غير ذات الصلة
-#idx("مفسر الاستعلام", sub: "قاعدة بيانات")
-#idx("قاعدة بيانات", sub: "فهرسة")
-#idx("فهرسة قاعدة بيانات")
+#idx("query interpreter", sub: "data base")
+#idx("data base", sub: "indexing")
+#idx("indexing a data base")
 عند التحقق من نمط معين. ولهذا الغرض، سنمثل التقرير الجازم كقائمة رأسها سلسلة نصية تمثل نوع معلومات التقرير الجازم. ونخزن التقريرات الجازمة في تدفقات منفصلة، تدفق لكل نوع معلومات، في جدول مفهرس حسب النوع. ولجلب تقرير جازم قد يطابق نمطًا، نرجع (ليتم اختباره باستخدام المطابق) جميع التقريرات الجازمة المخزنة التي لها نفس الرأس (نفس نوع المعلومات). ويمكن للطرق الأكثر ذكاءً الاستفادة أيضًا من المعلومات الموجودة في الإطار. ونحن نتجنب بناء معاييرنا للفهرسة داخل البرنامج؛ وبدلاً من ذلك نستدعي محمولات ومحددات تجسد معاييرنا.
 #idx("fetchassertions", decl: true)
 #snippet(```python
@@ -385,11 +385,11 @@ def index_key_of(pattern):
     return head(pattern)
 ```)
 
-#idx("مفسر الاستعلام", sub: "قاعدة بيانات")
+#idx("query interpreter", sub: "data base")
 
 #subsubsection([عمليات التدفقات], label-name: <sec:query-streams>)
 
-#idx("مفسر الاستعلام", sub: "عمليات التدفقات")
+#idx("query interpreter", sub: "stream operations")
 
 يستخدم نظام الاستعلام بعض عمليات التدفقات التي لم تُعْرَض في الفصل @chap:state.
 
@@ -418,12 +418,12 @@ def singleton_stream(x):
     return pair(x, lambda : (None))
 ```)
 
-#idx("مفسر الاستعلام", sub: "عمليات التدفقات")
+#idx("query interpreter", sub: "stream operations")
 
 #subsubsection([دوال بناء جملة الاستعلام والتجسيد], label-name: <sec:query-syntax>)
 
-#idx("مفسر الاستعلام", sub: "بناء جملة لغة الاستعلام")
-#idx("تمثيل خاص بلغة الاستعلام")
+#idx("query interpreter", sub: "syntax of query language")
+#idx("query-language-specific representation")
 
 رأينا في القسم @sec:query-driver أن حلقة المحرك تحول أولاً سلسلة نصية للمدخلات إلى تمثيل بناء جملة #en[Python]. وتعتبر المدخلات مصممة لتبدو مثل تعبير #en[Python] بحيث يمكننا استخدام الدالة #py("parse") من القسم @sec:representing-expressions وأيضًا لدعم تدوين #en[Python] في #py("javascript_predicate"). على سبيل المثال،
 
@@ -463,7 +463,7 @@ convert_to_query_syntax(parse('job($x, list("computer", "wizard"));'))
 
 ودوال نظام الاستعلام مثل #py("add_rule_or_assertion") في القسم @sec:query-db و#py("evaluate_query") في القسم @sec:query-eval تعمل على التمثيل الخاص بلغة الاستعلام باستخدام محددات ومحمولات مثل #py("type") و#py("contents") و#py("is_rule") و#py("first_conjunct") المصرَّح عنها أدناه.
 ويوضح الشكل @fig:syntax-abstraction-lp موانع التجريد الثلاثة
-#idx("موانع التجريد", sub: "في لغة الاستعلام")
+#idx("abstraction barriers", sub: "in query language")
 المستخدمة بواسطة نظام الاستعلام وكيف تجسرها دوال التحويل #py("parse") و#py("unparse") و#py("convert_to_query_syntax").
 
 #sicp-figure(image("/images/img_javascript/ch4-syntax-abstraction-logic-programming.svg", width: 70%), caption: [تجريد بناء الجملة في نظام الاستعلام.], label-name: <fig:syntax-abstraction-lp>)
@@ -471,10 +471,10 @@ convert_to_query_syntax(parse('job($x, list("computer", "wizard"));'))
 #subheading([التعامل مع متغيرات الأنماط])
 
 يُسْتَخْدَم المحمول #py("is_variable") على التمثيل الخاص بلغة الاستعلام أثناء معالجة الاستعلام وعلى تمثيل بناء جملة #en[Python] أثناء التجسيد للتعرف على الأسماء التي تبدأ بعلامة الدولار.
-#idx("مفسر الاستعلام", sub: "تمثيل متغير النمط")
-#idx("متغير نمط", sub: "تمثيل الـ")
+#idx("query interpreter", sub: "pattern-variable representation")
+#idx("pattern variable", sub: "representation of")
 ونفترض وجود دالة #py("char_at") ترجع سلسلة نصية تحتوي فقط على المحرف للسلسلة المعطاة في الموضع المعطى.#footnote[الطريقة الفعلية للحصول على السلسلة التي تحتوي على المحرف الأول لسلسلة #py("s") في #en[JavaScript] هي #py("s.charAt(0)").]
-#idx("isvariable", sub: "في نظام الاستعلام", decl: true)
+#idx("isvariable", sub: "in query system", decl: true)
 #snippet(```python
 def is_variable(exp):
     return is_name(exp) and char_at(symbol_of_name(exp), 0) == "$"
@@ -497,7 +497,7 @@ def make_new_variable(variable, rule_application_id):
 
 تُحَوِّل الدالة #py("convert_to_query_syntax")
 عوديًا
-#idx("تمثيل خاص بلغة الاستعلام", sub: "تحويل بناء جملة بايثون إلى")
+#idx("query-language-specific representation", sub: "transforming Python syntax into")
 تمثيل بناء جملة #en[Python] إلى التمثيل الخاص بلغة الاستعلام عن طريق تبسيط التقريرات الجازمة والقواعد والاستعلامات بحيث يصبح رمز الاسم في تعبير الدالة لتطبيق ما وسمًا، باستثناء أنه إذا كان الرمز هو #py("\"pair\"") أو #py("\"list\"")، فإن زوج أو قائمة #en[Python] (بدون وسم) يُبْنَى. وهذا يعني أن #py("convert_to_query_syntax") تُفَسِّر تطبيقات مُنْشِئات #py("pair") و#py("list") أثناء التحويل، ودوال المعالجة مثل #py("pattern_match") في القسم @sec:query-match و#py("unify_match") في القسم @sec:query-unify يمكنها العمل مباشرة على الأزواج والقوائم المقصودة بدلاً من العمل على تمثيل بناء الجملة المتولد بواسطة المحلل.
 وقائمة «الوسائط» (من عنصر واحد) لـ #py("javascript_predicate") تظل غير معالجة، كما هو موضح أدناه.
 والمتغير يظل دون تغيير، والتعبير الحرفي يُبَسَّط إلى القيمة الأولية التي يحتوي عليها.
@@ -536,7 +536,7 @@ and(salary($person, $amount), javascript_predicate($amount > 50000))
 
 #subheading([تجسيد تعبير])
 
-#idx("مفسر الاستعلام", sub: "تجسيد")
+#idx("query interpreter", sub: "instantiation")
 
 تدعو الدالة #py("javascript_predicate") في القسم @sec:query-eval وحلقة المحرك في القسم @sec:query-driver الدالة #py("instantiate_expression") على تعبير ما للحصول على نسخة يستبدل فيها أي متغير في التعبير بقيمته في إطار معطى.
 وتستخدم تعبيرات المدخلات والنتيجة تمثيل بناء جملة #en[Python]، لذا فإن أي قيمة تنتج عن تجسيد متغير تحتاج إلى التحويل من شكلها في الربط إلى تمثيل بناء جملة #en[Python].
@@ -606,7 +606,7 @@ job($x, llist("computer", "wizard"))
 job($x, llist("computer", "wizard"))
 ```)
 
-#idx("مفسر الاستعلام", sub: "تجسيد")
+#idx("query interpreter", sub: "instantiation")
 
 #subheading([الدالة #py("unparse")])
 
@@ -777,13 +777,13 @@ def rule_body(rule):
     return llist("always_true") if is_none(tail(tail(rule))) else head(tail(tail(rule)))
 ```)
 
-#idx("مفسر الاستعلام", sub: "بناء جملة لغة الاستعلام")
-#idx("تمثيل خاص بلغة الاستعلام")
+#idx("query interpreter", sub: "syntax of query language")
+#idx("query-language-specific representation")
 
 #subsubsection([الإطارات والروابط], label-name: <sec:query-bindings>)
 
-#idx("مفسر الاستعلام", sub: "الإطار")
-#idx("إطار (مفسر الاستعلام)", sub: "التمثيل")
+#idx("query interpreter", sub: "frame")
+#idx("frame (query interpreter)", sub: "representation")
 
 تُمَثَّل الإطارات كقوائم من الروابط، والتي هي أزواج من متغير وقيمة:
 #idx("makebinding", decl: true)#idx("bindingvariable", decl: true)#idx("bindingvalue", decl: true)#idx("bindinginframe", decl: true)#idx("extend", decl: true)
@@ -800,12 +800,12 @@ def extend(variable, value, frame):
     return pair(make_binding(variable, value), frame)
 ```)
 
-#idx("مفسر الاستعلام", sub: "الإطار")
+#idx("query interpreter", sub: "frame")
 
 #exercise(label-name: <ex:q-why-not-append>, [
 يتساءل لويس ريزونر لماذا أُدْرِجَت الدالتان #py("simple_query") و #py("disjoin") (القسم @sec:query-eval) باستخدام تعبيرات مؤجلة بدلاً من تعريفها كالتالي:
 
-#idx("simplequery", sub: "بدون تعبير مؤجل", decl: true)#idx("disjoin", sub: "بدون تعبير مؤجل", decl: true)
+#idx("simplequery", sub: "without delayed expression", decl: true)#idx("disjoin", sub: "without delayed expression", decl: true)
 #snippet(```python
 def simple_query(query_pattern, frame_stream):
     return stream_flatmap(lambda frame: (stream_append(find_assertions(query_pattern, frame), apply_rules(query_pattern, frame))), frame_stream)
@@ -837,7 +837,7 @@ def flatten_stream(stream):
 ])
 
 #exercise(label-name: <ex:unique>, [
-نَفِّذ للغة الاستعلام شكلًا نحويًا يُسمّى #idx("لغة الاستعلام", sub: "توسيع لـ") #idx("استعلام مركب", sub: "معالجة") #idx("unique (لغة الاستعلام)") #py("unique").
+نَفِّذ للغة الاستعلام شكلًا نحويًا يُسمّى #idx("query language", sub: "extensions to") #idx("compound query", sub: "processing") #idx("unique (query language)") #py("unique").
 ينبغي أن تنجح تطبيقات #py("unique") إذا كان هناك عنصر واحد فقط في قاعدة البيانات يستوفي استعلامًا مُحدّدًا. على سبيل المثال،
 
 #snippet(```python
@@ -878,22 +878,22 @@ put("unique", "evaluate_query", uniquely_asserted)
 ])
 
 #exercise(label-name: <ex:q-exponential-and>, [
-تطبيقنا لـ #py("and") كتركيب متسلسل للاستعلامات #idx("مفسر الاستعلام", sub: "تحسينات لـ") #idx("and (لغة الاستعلام)", sub: "تقييم") #idx("استعلام مركب", sub: "معالجة") (الشكل @fig:query-and) أنيق، ولكنه غير كفء لأننا في معالجة الاستعلام الثاني لـ #py("and") يجب أن نفحص قاعدة البيانات لكل إطار يُنتجه الاستعلام الأول. إذا كانت قاعدة البيانات تحتوي على $N$ عنصرًا، وكان استعلام نموذجي يُنتج عددًا من إطارات المخرجات يتناسب مع $N$ (مثلاً $N/k$)، فإن فحص قاعدة البيانات لكل إطار يُنتجه الاستعلام الأول سيتطلب $N^(2)/k$ استدعاءً لمُطابق الأنماط.
+تطبيقنا لـ #py("and") كتركيب متسلسل للاستعلامات #idx("query interpreter", sub: "improvements to") #idx("and (query language)", sub: "evaluation of") #idx("compound query", sub: "processing") (الشكل @fig:query-and) أنيق، ولكنه غير كفء لأننا في معالجة الاستعلام الثاني لـ #py("and") يجب أن نفحص قاعدة البيانات لكل إطار يُنتجه الاستعلام الأول. إذا كانت قاعدة البيانات تحتوي على $N$ عنصرًا، وكان استعلام نموذجي يُنتج عددًا من إطارات المخرجات يتناسب مع $N$ (مثلاً $N/k$)، فإن فحص قاعدة البيانات لكل إطار يُنتجه الاستعلام الأول سيتطلب $N^(2)/k$ استدعاءً لمُطابق الأنماط.
 وهناك نهج آخر وهو معالجة بندي #py("and") بشكل منفصل، ثم البحث عن جميع أزواج إطارات المخرجات المتوافقة. إذا كان كل استعلام يُنتج $N/k$ إطار مخرجات، فإن هذا يعني أنه يجب علينا إجراء $N^(2)/k^(2)$ فحص توافق—أي أقل بعامل $k$ من عدد المطابقات المطلوبة في طريقتنا الحالية.
 
 ابتكر تنفيذًا لـ #py("and") يستخدم هذه الاستراتيجية. يجب عليك تنفيذ دالة تأخذ إطارين كمدخلات، وتفحص ما إذا كانت الروابط في الإطارين متوافقة، وإذا كان الأمر كذلك، تُنتج إطارًا يدمج مجموعتي الروابط. هذه العملية مشابهة للتوحيد.
 ])
 
 #exercise(label-name: <ex:not-query-filter>, [
-في القسم @sec:math-logic رأينا أن #idx("مفسر الاستعلام", sub: "تحسينات لـ") #idx("مفسر الاستعلام", sub: "مشكلات مع not و javascriptpredicate") #idx("استعلام مركب", sub: "معالجة") #idx("not (لغة الاستعلام)", sub: "تقييم") #py("not") و #idx("javascriptpredicate (لغة الاستعلام)", sub: "تقييم") #py("javascript_predicate") يمكن أن يسببا إعطاء لغة الاستعلام إجابات "خاطئة" إذا أُطبّقت عمليات التصفية هذه على إطارات تظل فيها المتغيرات غير مرتبطة. ابتكر طريقة لإصلاح هذا القصور. إحدى الأفكار هي إجراء التصفية بطريقة "مؤجلة" عن طريق إلحاق "وعد" بالتصفية بالإطار يُوفّى فقط عندما تُربط متغيرات كافية لجعل العملية ممكنة. يمكننا الانتظار لإجراء التصفية حتى تُنفّذ جميع العمليات الأخرى. ومع ذلك، من أجل الكفاءة، نود إجراء التصفية في أقرب وقت ممكن من أجل تقليل عدد الإطارات المتوسطة المُولَّدة.
+في القسم @sec:math-logic رأينا أن #idx("query interpreter", sub: "improvements to") #idx("query interpreter", sub: "problems with not and javascriptpredicate") #idx("compound query", sub: "processing") #idx("not (query language)", sub: "evaluation of") #py("not") و #idx("javascriptpredicate (query language)", sub: "evaluation of") #py("javascript_predicate") يمكن أن يسببا إعطاء لغة الاستعلام إجابات "خاطئة" إذا أُطبّقت عمليات التصفية هذه على إطارات تظل فيها المتغيرات غير مرتبطة. ابتكر طريقة لإصلاح هذا القصور. إحدى الأفكار هي إجراء التصفية بطريقة "مؤجلة" عن طريق إلحاق "وعد" بالتصفية بالإطار يُوفّى فقط عندما تُربط متغيرات كافية لجعل العملية ممكنة. يمكننا الانتظار لإجراء التصفية حتى تُنفّذ جميع العمليات الأخرى. ومع ذلك، من أجل الكفاءة، نود إجراء التصفية في أقرب وقت ممكن من أجل تقليل عدد الإطارات المتوسطة المُولَّدة.
 ])
 
 #exercise(label-name: <ex:query-lang-amb>, [
-أعد تصميم لغة الاستعلام كبرنامج #idx("مفسر الاستعلام", sub: "كبرنامج غير محدد") غير محدد ليتم تنفيذه باستخدام المُقيِّم في القسم @sec:nondeterministic-evaluation، بدلاً من كونه عملية تدفقية. في هذا النهج، سيعطي كل استعلام إجابة واحدة (بدلاً من تدفق كل الإجابات) ويمكن للمستخدم كتابة #py("retry") لرؤية المزيد من الإجابات. ينبغي أن تجد أن الكثير من الآليات التي بنيناها في هذا القسم تُستبدل بالبحث غير المحدد والتراجع. ومع ذلك، ستجد على الأرجح أن لغتك الجديدة للاستعلام بها اختلافات دقيقة في السلوك عن تلك المُطبَّقة هنا. هل يمكنك إيجاد أمثلة تُوضّح هذا الاختلاف؟
+أعد تصميم لغة الاستعلام كبرنامج #idx("query interpreter", sub: "as nondeterministic program") غير محدد ليتم تنفيذه باستخدام المُقيِّم في القسم @sec:nondeterministic-evaluation، بدلاً من كونه عملية تدفقية. في هذا النهج، سيعطي كل استعلام إجابة واحدة (بدلاً من تدفق كل الإجابات) ويمكن للمستخدم كتابة #py("retry") لرؤية المزيد من الإجابات. ينبغي أن تجد أن الكثير من الآليات التي بنيناها في هذا القسم تُستبدل بالبحث غير المحدد والتراجع. ومع ذلك، ستجد على الأرجح أن لغتك الجديدة للاستعلام بها اختلافات دقيقة في السلوك عن تلك المُطبَّقة هنا. هل يمكنك إيجاد أمثلة تُوضّح هذا الاختلاف؟
 ])
 
 #exercise(label-name: <ex:query-local-names>, [
-عندما نفّذنا مُفسِّر #en[Python] في القسم @sec:mc-eval، رأينا كيفية استخدام البيئات المحلية لتجنب #idx("بيئة", sub: "إعادة تسمية مقابل") #idx("مفسر الاستعلام", sub: "مُفسِّر Python مقابل") تضارب الأسماء بين وسائط الدوال. على سبيل المثال، في تقييم
+عندما نفّذنا مُفسِّر #en[Python] في القسم @sec:mc-eval، رأينا كيفية استخدام البيئات المحلية لتجنب #idx("environment", sub: "renaming vs.") #idx("query interpreter", sub: "Python interpreter vs.") تضارب الأسماء بين وسائط الدوال. على سبيل المثال، في تقييم
 
 #snippet(```python
 def square(x):
@@ -905,5 +905,5 @@ sum_of_squares(3, 4)
 
 لا يوجد خلط بين #py("x") في #py("square") و #py("x") في #py("sum_of_squares")، لأننا نُقيّم جسم كل دالة في بيئة صُمِّمت خصيصًا لتحتوي على روابط للأسماء المحلية. وفي نظام الاستعلام، استخدمنا استراتيجية مختلفة لتجنب تضارب الأسماء في تطبيق القواعد. في كل مرة نُطبّق فيها قاعدة، نُعيد تسمية المتغيرات بأسماء جديدة نضمن أن تكون فريدة. والاستراتيجية المماثلة لـ مُفسِّر #en[Python] هي الاستغناء عن البيئات المحلية وإعادة تسمية المتغيرات في جسم الدالة في كل مرة نُطبّق فيها الدالة.
 
-نَفِّذ للغة الاستعلام طريقة تطبيق قواعد تستخدم البيئات بدلاً من إعادة التسمية. وانظر ما إذا كان بإمكانك البناء على بنية البيئة الخاصة بك لإنشاء تراكيب في لغة الاستعلام للتعامل مع الأنظمة الكبيرة، مثل نظير القاعدة لـ #idx("بنية الكتلة", sub: "في لغة الاستعلام") #idx("بيئة", sub: "في مفسر الاستعلام") #idx("مفسر الاستعلام", sub: "بنية البيئة في") #idx("قاعدة (لغة الاستعلام)", sub: "تطبيق") الدوال ذات بنية الكتلة. هل يمكنك ربط أي من هذا بمسألة إجراء الاستنباطات في سياق ما (مثلاً، "إذا افترضت أن $P$ صحيحة، ففسأكون قادرًا على استنباط $A$ و $B$.") كطريقة لحل المشكلات؟ (هذه المسألة مفتوحة المصدر).
+نَفِّذ للغة الاستعلام طريقة تطبيق قواعد تستخدم البيئات بدلاً من إعادة التسمية. وانظر ما إذا كان بإمكانك البناء على بنية البيئة الخاصة بك لإنشاء تراكيب في لغة الاستعلام للتعامل مع الأنظمة الكبيرة، مثل نظير القاعدة لـ #idx("block structure", sub: "in query language") #idx("environment", sub: "in query interpreter") #idx("query interpreter", sub: "environment structure in") #idx("rule (query language)", sub: "applying") الدوال ذات بنية الكتلة. هل يمكنك ربط أي من هذا بمسألة إجراء الاستنباطات في سياق ما (مثلاً، "إذا افترضت أن $P$ صحيحة، ففسأكون قادرًا على استنباط $A$ و $B$.") كطريقة لحل المشكلات؟ (هذه المسألة مفتوحة المصدر).
 ])

@@ -3,13 +3,13 @@
 
 #subsection([فصل التحليل النحوي عن التنفيذ], label-name: <sec:separating-analysis>)
 
-#idx("تحليل نحوي، مفصول عن التنفيذ", sub: "في المُقيِّم دائري التجريد")
-#idx("مُقَيِّم مُحَلِّل")
-#idx("مُقَيِّم دائري التجريد لـ Python", sub: "النسخة المُحَلِّلة")
+#idx("syntactic analysis, separated from execution", sub: "in metacircular evaluator")
+#idx("analyzing evaluator")
+#idx("metacircular evaluator for Python", sub: "analyzing version")
 
 المُقيِّم المُنَفَّذ أعلاه بسيط، ولكنه غير كفء للغاية
-#idx("مُقَيِّم دائري التجريد لـ Python", sub: "كفاءة")
-#idx("كفاءة", sub: "التقييم")
+#idx("metacircular evaluator for Python", sub: "efficiency of")
+#idx("efficiency", sub: "of evaluation")
 لأن التحليل النحوي للمكونات يتداخل
 مع تنفيذها. وبالتالي، إذا عولِج برنامج مرات عديدة،
 يتم تحليل بناء جملته النحوية مرات عديدة. تأمل، على سبيل المثال، تقييم
@@ -59,7 +59,7 @@ def factorial(n):
 المكوّن.
 وتجري التحليل
 النحوي وترجع دالة جديدة،
-#idx("دالة التنفيذ", sub: "في المُقيِّم المحلل")
+#idx("execution function", sub: "in analyzing evaluator")
 #emph[دالة التنفيذ] (#en[execution function])،
 التي تغلف العمل المطلوب إنجازه في تنفيذ المكوّن المُحَلَّل.
 تأخذ دالة التنفيذ البيئةَ كوسيط لها وتكمل التقييم. وهذا يوفر العمل لأن
@@ -70,7 +70,7 @@ def factorial(n):
 مع الفصل بين التحليل والتنفيذ،
 تصبح #py("evaluate") الآن
 
-#idx("evaluate (metacircular)", sub: "النسخة المُحَلِّلة", decl: true)
+#idx("evaluate (metacircular)", sub: "analyzing version", decl: true)
 #snippet(```python
 def evaluate(component, env):
     return analyze(component)(env)
@@ -258,7 +258,7 @@ def analyze_declaration(component):
 
 #exercise([
 وسع المُقيِّم في هذا القسم لدعم حلقات
-#idx("حلقة while", sub: "تنفيذها في المُقيِّم المحلل")
+#idx("while loop", sub: "implementing in analyzing evaluator")
 #py("while").
 (انظر التمرين @ex:while_loop.)
 ])
@@ -316,6 +316,6 @@ def analyze_sequence(stmts):
 لمختلف الدوال.
 ])
 
-#idx("تحليل نحوي، مفصول عن التنفيذ", sub: "في المُقيِّم دائري التجريد")
-#idx("مُقَيِّم مُحَلِّل")
-#idx("مُقَيِّم دائري التجريد لـ Python", sub: "النسخة المُحَلِّلة")
+#idx("syntactic analysis, separated from execution", sub: "in metacircular evaluator")
+#idx("analyzing evaluator")
+#idx("metacircular evaluator for Python", sub: "analyzing version")

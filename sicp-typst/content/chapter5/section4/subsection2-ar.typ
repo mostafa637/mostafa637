@@ -317,4 +317,4 @@ function count(n) {
 
 #idx("tail recursion", sub: "explicit-control evaluator and")
 
-#idx("explicit-control evaluator for Python", sub: "function application")
+#idx("explicit-control evaluator for Python", sub: "tail recursion")
