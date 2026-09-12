@@ -57,6 +57,7 @@ pub mod poll;
 pub mod proc;
 pub mod pty;
 pub mod ptrace;
+pub mod ram;
 pub mod random;
 pub mod real;
 pub mod refcount;
