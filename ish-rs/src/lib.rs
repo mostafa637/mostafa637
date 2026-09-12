@@ -47,8 +47,11 @@
 //! | [`refcount`]    | `util/refcount.h`         | ported, explicit refcounting helpers |
 //! | [`sync`]        | `util/sync.{h,c}`         | ported, lock, condvar, and rwlock abstractions |
 //! | [`timer`]       | `util/timer.{h,c}`        | ported, interval timer spec and state machine |
-//! | [`fix_path`]    | `fs/fix_path.h`           | ported, path normalization |
+//! | [`fix_path`]    | `fs/fix_path.h`           | ported, path normalization (trivial) |
 //! | [`mm`]          | `kernel/mm.h`             | ported, full mm descriptor with procfs fields |
+//! | [`fs_info`]     | `kernel/fs.h` + `fs_info.c` | ported, cwd/root/umask with refcount |
+//! | [`path`]        | `fs/path.h` + `path.c`    | ported, path_is_normalized, next_component, simple normalize (symlink pending) |
+//! | [`inode`]       | `fs/inode.h` + `inode.c`  | ported, inode cache and retain/release |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -71,9 +74,11 @@ pub mod fifo;
 pub mod fix_path;
 pub mod float80;
 pub mod fpu;
+pub mod fs_info;
 pub mod futex;
 pub mod getset;
 pub mod group;
+pub mod inode;
 pub mod interrupt;
 pub mod ipc;
 pub mod list;
@@ -84,6 +89,7 @@ pub mod mm;
 pub mod mmap;
 pub mod mmu;
 pub mod modrm;
+pub mod path;
 pub mod personality;
 pub mod ptrace;
 pub mod random;
