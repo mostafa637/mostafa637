@@ -14,7 +14,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 
 /**
- * iSH Android Pure Rust - Full port of iOS GUI (36 app/*.m files) to Android
+ * iSH Android Pure Rust - Full port of iOS GUI (36 Objective-C files under app/) to Android
  * 
  * Original iOS initialization (as requested: تهيئة ملفات xterm.js كما يفعلة ish ios):
  * - app/terminal/term.html loads hterm_all.js + term.js + term.css
