@@ -1,5 +1,3 @@
-//! Rust port of the iSH emulator core (`emu/`).
-
 pub mod bits;
 pub mod calls;
 pub mod cpu;
@@ -8,6 +6,7 @@ pub mod decode;
 pub mod decode_table;
 pub mod dev;
 pub mod devices;
+pub mod dir;
 pub mod elf;
 pub mod errno;
 pub mod errno_table;
@@ -43,6 +42,7 @@ pub mod modrm;
 pub mod mount;
 pub mod path;
 pub mod personality;
+pub mod pipe;
 pub mod poll;
 pub mod proc;
 pub mod ptrace;
@@ -58,6 +58,7 @@ pub mod time;
 pub mod timer;
 pub mod tlb;
 pub mod tls;
+pub mod tmp;
 pub mod tty;
 pub mod uname;
 pub mod user;
