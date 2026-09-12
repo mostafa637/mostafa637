@@ -254,6 +254,14 @@ class MainActivity : AppCompatActivity() {
 
     @JavascriptInterface
     fun onLoad() {
+        // term.js reaches this twice: native.load() is routed here by the shim, and
+        // the page also calls window.Android.onLoad() directly as a safety net.
+        // iOS used a one-shot KVO observation on Terminal.loaded for the same reason,
+        // so guard it - otherwise the boot preview is written to the tty twice.
+        if (loaded) {
+            Log.i("iSH", "term.js native.load() ignored - Terminal.loaded already YES")
+            return
+        }
         Log.i("iSH", "term.js native.load() -> Terminal.loaded=YES (KVO) + refreshTask schedule")
         loaded = true
         // As iOS: self.loaded=YES, [self.refreshTask schedule], enableVoiceOverAnnounce
