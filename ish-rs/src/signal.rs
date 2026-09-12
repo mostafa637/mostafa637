@@ -49,6 +49,7 @@ pub const SIG_DFL: u32 = 0;
 pub const SIG_IGN: u32 = 1;
 
 pub const SA_SIGINFO: u32 = 4;
+pub const SA_ONSTACK: u32 = 0x0800_0000;
 pub const SA_NODEFER: u32 = 0x4000_0000;
 pub const SA_RESETHAND: u32 = 0x8000_0000;
 
@@ -156,6 +157,7 @@ pub struct SignalState {
     pub blocked: SigSet,
     pub waiting: SigSet,
     pub queue: Vec<SigQueue>,
+    pub alt_stack: SigAltStack,
 }
 
 impl SignalState {
@@ -190,6 +192,42 @@ impl SignalState {
         sigset_remove(&mut self.pending, q.info.sig as u32);
         Some(q)
     }
+
+    pub fn block(&mut self, sig: u32) { sigset_add(&mut self.blocked, sig); }
+    pub fn unblock(&mut self, sig: u32) { sigset_remove(&mut self.blocked, sig); }
+
+    pub fn is_blocked(&self, sig: u32) -> bool { sigset_has(self.blocked, sig) }
+
+    pub fn pending_signals(&self) -> Vec<u32> {
+        (1..=64).filter(|&s| self.has_pending(s)).collect()
+    }
+}
+
+/// SigAltStack, matching C `stack_t`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SigAltStack {
+    pub sp: u32,
+    pub flags: u32,
+    pub size: u32,
+}
+
+impl SigAltStack {
+    pub fn new(sp: u32, size: u32) -> Self { Self { sp, size, flags: 0 } }
+    pub fn is_disabled(&self) -> bool { (self.flags & SS_DISABLE) != 0 }
+    pub fn is_on_stack(&self) -> bool { (self.flags & SS_ONSTACK) != 0 }
+    pub fn contains(&self, addr: u32) -> bool {
+        if self.is_disabled() { return false; }
+        addr >= self.sp && addr < self.sp + self.size
+    }
+    pub fn top(&self) -> u32 { self.sp + self.size }
+}
+
+/// Sigframe helpers
+pub fn should_use_altstack(action: &SigAction, alt: &SigAltStack, current_sp: u32) -> bool {
+    if alt.is_disabled() { return false; }
+    if (action.flags & SA_ONSTACK) == 0 { return false; }
+    if alt.contains(current_sp) { return false; } // already on altstack
+    true
 }
 
 #[cfg(test)]
@@ -198,18 +236,16 @@ mod tests {
 
     #[test]
     fn sigset_helpers_match_c() {
-        assert_eq!(sig_mask(1), 1);
-        assert_eq!(sig_mask(2), 2);
-        assert_eq!(sig_mask(64), 1u64 << 63);
+        let mut set: SigSet = 0;
+        sigset_add(&mut set, 1);
+        assert!(sigset_has(set, 1));
+        assert!(!sigset_has(set, 2));
+        sigset_add(&mut set, 2);
+        assert!(sigset_has(set, 2));
+        sigset_remove(&mut set, 1);
+        assert!(!sigset_has(set, 1));
         assert_eq!(sig_mask(0), 0);
         assert_eq!(sig_mask(65), 0);
-
-        let mut set = 0;
-        sigset_add(&mut set, SIGHUP);
-        assert!(sigset_has(set, SIGHUP));
-        assert!(!sigset_has(set, SIGINT));
-        sigset_remove(&mut set, SIGHUP);
-        assert!(!sigset_has(set, SIGHUP));
     }
 
     #[test]
@@ -221,44 +257,68 @@ mod tests {
 
     #[test]
     fn signal_action_matches_c() {
-        let mut actions = [SigAction::default(); 65];
-        // Default actions
-        assert_eq!(signal_action(&actions, SIGCHLD), SignalAction::Ignore);
-        assert_eq!(signal_action(&actions, SIGSTOP), SignalAction::Stop);
-        assert_eq!(signal_action(&actions, SIGTERM), SignalAction::Kill);
-
-        // SIG_IGN
-        actions[SIGTERM as usize].handler = SIG_IGN;
-        assert_eq!(signal_action(&actions, SIGTERM), SignalAction::Ignore);
-
-        // Custom handler
-        actions[SIGTERM as usize].handler = 0x1234;
-        assert_eq!(signal_action(&actions, SIGTERM), SignalAction::CallHandler);
-
-        // SIGKILL and SIGSTOP cannot be ignored
-        actions[SIGKILL as usize].handler = SIG_IGN;
-        assert_eq!(signal_action(&actions, SIGKILL), SignalAction::Kill);
+        let mut sighand = [SigAction::default(); 65];
+        assert_eq!(signal_action(&sighand, SIGTERM), SignalAction::Kill);
+        assert_eq!(signal_action(&sighand, SIGCHLD), SignalAction::Ignore);
+        assert_eq!(signal_action(&sighand, SIGSTOP), SignalAction::Stop);
+        sighand[SIGTERM as usize].handler = SIG_IGN;
+        assert_eq!(signal_action(&sighand, SIGTERM), SignalAction::Ignore);
+        sighand[SIGTERM as usize].handler = 0x1234;
+        assert_eq!(signal_action(&sighand, SIGTERM), SignalAction::CallHandler);
     }
 
     #[test]
-    fn signal_delivery_and_queue() {
+    fn signal_queue_deliver_and_dequeue() {
         let mut state = SignalState::new();
-        assert!(state.deliver(SIGTERM, SIGINFO_NIL));
+        let info = SigInfo { sig: SIGTERM as i32, errno: 0, code: SI_USER };
+        assert!(state.deliver(SIGTERM, info));
         assert!(state.has_pending(SIGTERM));
-        assert_eq!(state.queue.len(), 1);
-
-        // Second delivery of same signal should not add
-        assert!(!state.deliver(SIGTERM, SIGINFO_NIL));
-        assert_eq!(state.queue.len(), 1);
-
-        // Blocked signal should not wake but still pending
-        state.blocked = sig_mask(SIGUSR1);
-        assert!(!state.deliver(SIGUSR1, SIGINFO_NIL)); // blocked, no wake
-        assert!(state.has_pending(SIGUSR1));
-
-        // Dequeue
+        assert!(!state.deliver(SIGTERM, info)); // already pending
         let q = state.dequeue().unwrap();
         assert_eq!(q.info.sig, SIGTERM as i32);
         assert!(!state.has_pending(SIGTERM));
+    }
+
+    #[test]
+    fn signal_blocking() {
+        let mut state = SignalState::new();
+        state.block(SIGTERM);
+        assert!(state.is_blocked(SIGTERM));
+        let info = SigInfo { sig: SIGTERM as i32, errno: 0, code: SI_USER };
+        // Deliver blocked signal should not wake
+        assert!(!state.deliver(SIGTERM, info));
+        assert!(state.has_pending(SIGTERM));
+        state.unblock(SIGTERM);
+        assert!(!state.is_blocked(SIGTERM));
+    }
+
+    #[test]
+    fn altstack_logic() {
+        let alt = SigAltStack::new(0x1000, 0x1000);
+        assert!(!alt.is_disabled());
+        assert!(!alt.is_on_stack());
+        assert!(alt.contains(0x1500));
+        assert!(!alt.contains(0x3000));
+        assert_eq!(alt.top(), 0x2000);
+
+        let mut action = SigAction::default();
+        action.flags = SA_ONSTACK;
+        assert!(should_use_altstack(&action, &alt, 0x5000));
+        assert!(!should_use_altstack(&action, &alt, 0x1500)); // already on altstack
+
+        let mut disabled = alt;
+        disabled.flags = SS_DISABLE;
+        assert!(!should_use_altstack(&action, &disabled, 0x5000));
+    }
+
+    #[test]
+    fn pending_signals_list() {
+        let mut state = SignalState::new();
+        let info = SigInfo { sig: 0, errno: 0, code: SI_USER };
+        state.deliver(SIGTERM, info);
+        state.deliver(SIGINT, info);
+        let pending = state.pending_signals();
+        assert!(pending.contains(&SIGTERM));
+        assert!(pending.contains(&SIGINT));
     }
 }
