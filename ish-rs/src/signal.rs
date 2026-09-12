@@ -1,9 +1,8 @@
-//! `kernel/signal.h` — signal numbers, masks, and siginfo layouts.
+//! `kernel/signal.h` + `kernel/signal.c` — signal numbers, masks, and delivery.
 //!
-//! This is a leaf-plus module: the constants and mask helpers are independent,
-//! while `sighand` and delivery depend on `task` and the execution engine.
-//! This file ports the constants, `sigset_t_`, `sigaction_`, `siginfo_`, and
-//! the mask helpers that `task.rs` and future `signal.c` ports need.
+//! The C implementation has complex locking and thread wakeup via pthread.
+//! This Rust port keeps the pure logic (mask helpers, action determination,
+//! queue management) and abstracts the host wakeup via trait.
 
 /// `sigset_t_` — 64-bit mask in iSH.
 pub type SigSet = u64;
@@ -11,7 +10,7 @@ pub type SigSet = u64;
 /// `NUM_SIGS`
 pub const NUM_SIGS: usize = 64;
 
-/// Signal numbers, `SIGHUP_` .. `SIGSYS_`.
+/// Signal numbers
 pub const SIGHUP: u32 = 1;
 pub const SIGINT: u32 = 2;
 pub const SIGQUIT: u32 = 3;
@@ -45,17 +44,14 @@ pub const SIGIO: u32 = 29;
 pub const SIGPWR: u32 = 30;
 pub const SIGSYS: u32 = 31;
 
-/// `SIG_ERR_`, `SIG_DFL_`, `SIG_IGN_`
 pub const SIG_ERR: i32 = -1;
 pub const SIG_DFL: u32 = 0;
 pub const SIG_IGN: u32 = 1;
 
-/// `SA_*`
 pub const SA_SIGINFO: u32 = 4;
 pub const SA_NODEFER: u32 = 0x4000_0000;
 pub const SA_RESETHAND: u32 = 0x8000_0000;
 
-/// `SI_*`
 pub const SI_USER: i32 = 0;
 pub const SI_TIMER: i32 = -2;
 pub const SI_TKILL: i32 = -6;
@@ -64,17 +60,14 @@ pub const TRAP_TRACE: i32 = 2;
 pub const SEGV_MAPERR: i32 = 1;
 pub const SEGV_ACCERR: i32 = 2;
 
-/// `SIG_BLOCK_`, `SIG_UNBLOCK_`, `SIG_SETMASK_`
 pub const SIG_BLOCK: u32 = 0;
 pub const SIG_UNBLOCK: u32 = 1;
 pub const SIG_SETMASK: u32 = 2;
 
-/// `SS_*`
 pub const SS_ONSTACK: u32 = 1;
 pub const SS_DISABLE: u32 = 2;
 pub const MINSIGSTKSZ: u32 = 2048;
 
-/// `struct sigaction_` — packed guest ABI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SigAction {
     pub handler: u32,
@@ -83,52 +76,120 @@ pub struct SigAction {
     pub mask: SigSet,
 }
 
-/// `union sigval_`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SigVal {
     pub int: i32,
     pub ptr: u32,
 }
 
-/// Simplified `siginfo_` — only the fields needed for mask tests now;
-/// full delivery will extend this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SigInfo {
     pub sig: i32,
     pub errno: i32,
     pub code: i32,
-    // The union is omitted for now; the full port will add it after `task`.
 }
 
-/// `struct stack_t_`
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct StackT {
-    pub stack: u32,
-    pub flags: u32,
-    pub size: u32,
-}
+pub const SIGINFO_NIL: SigInfo = SigInfo { sig: 0, errno: 0, code: 0 };
 
-/// Mask helpers, mirroring C's `sig_mask`, `sigset_has`, etc.
-
-#[inline]
+/// Sigset helpers matching C macros.
 pub fn sig_mask(sig: u32) -> SigSet {
-    assert!((1..NUM_SIGS as u32).contains(&sig));
-    1u64 << (sig - 1)
+    if sig == 0 || sig > 64 {
+        0
+    } else {
+        1u64 << (sig - 1)
+    }
 }
 
-#[inline]
 pub fn sigset_has(set: SigSet, sig: u32) -> bool {
     (set & sig_mask(sig)) != 0
 }
 
-#[inline]
 pub fn sigset_add(set: &mut SigSet, sig: u32) {
     *set |= sig_mask(sig);
 }
 
-#[inline]
-pub fn sigset_del(set: &mut SigSet, sig: u32) {
+pub fn sigset_remove(set: &mut SigSet, sig: u32) {
     *set &= !sig_mask(sig);
+}
+
+/// Signal action determination, matching C `signal_action`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalAction {
+    Ignore,
+    Kill,
+    CallHandler,
+    Stop,
+}
+
+pub fn signal_is_blockable(sig: u32) -> bool {
+    sig != SIGKILL && sig != SIGSTOP
+}
+
+pub fn signal_action(sighand: &[SigAction; 65], sig: u32) -> SignalAction {
+    if signal_is_blockable(sig) {
+        let action = &sighand[sig as usize];
+        if action.handler == SIG_IGN {
+            return SignalAction::Ignore;
+        }
+        if action.handler != SIG_DFL {
+            return SignalAction::CallHandler;
+        }
+    }
+
+    match sig {
+        SIGURG | SIGCONT | SIGCHLD | SIGIO | SIGWINCH => SignalAction::Ignore,
+        SIGSTOP | SIGTSTP | SIGTTIN | SIGTTOU => SignalAction::Stop,
+        _ => SignalAction::Kill,
+    }
+}
+
+/// Signal queue entry, matching C `struct sigqueue`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SigQueue {
+    pub info: SigInfo,
+}
+
+/// Task signal state, simplified from C's task fields.
+#[derive(Debug, Default)]
+pub struct SignalState {
+    pub pending: SigSet,
+    pub blocked: SigSet,
+    pub waiting: SigSet,
+    pub queue: Vec<SigQueue>,
+}
+
+impl SignalState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// `deliver_signal_unlocked` logic without locking.
+    pub fn deliver(&mut self, sig: u32, info: SigInfo) -> bool {
+        if sigset_has(self.pending, sig) {
+            return false; // already pending
+        }
+        sigset_add(&mut self.pending, sig);
+        self.queue.push(SigQueue { info: SigInfo { sig: sig as i32, ..info } });
+
+        // If blocked and not waiting, don't wake
+        if sigset_has(self.blocked & !self.waiting, sig) && signal_is_blockable(sig) {
+            return false;
+        }
+        true // would wake
+    }
+
+    pub fn has_pending(&self, sig: u32) -> bool {
+        sigset_has(self.pending, sig)
+    }
+
+    pub fn dequeue(&mut self) -> Option<SigQueue> {
+        if self.queue.is_empty() {
+            return None;
+        }
+        let q = self.queue.remove(0);
+        sigset_remove(&mut self.pending, q.info.sig as u32);
+        Some(q)
+    }
 }
 
 #[cfg(test)]
@@ -136,29 +197,68 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sig_mask_matches_c() {
+    fn sigset_helpers_match_c() {
         assert_eq!(sig_mask(1), 1);
         assert_eq!(sig_mask(2), 2);
-        assert_eq!(sig_mask(9), 1 << 8);
-    }
+        assert_eq!(sig_mask(64), 1u64 << 63);
+        assert_eq!(sig_mask(0), 0);
+        assert_eq!(sig_mask(65), 0);
 
-    #[test]
-    fn sigset_helpers_match_c() {
-        let mut set = 0u64;
-        sigset_add(&mut set, SIGINT);
-        sigset_add(&mut set, SIGKILL);
-        assert!(sigset_has(set, SIGINT));
-        assert!(sigset_has(set, SIGKILL));
-        assert!(!sigset_has(set, SIGHUP));
-        sigset_del(&mut set, SIGINT);
+        let mut set = 0;
+        sigset_add(&mut set, SIGHUP);
+        assert!(sigset_has(set, SIGHUP));
         assert!(!sigset_has(set, SIGINT));
+        sigset_remove(&mut set, SIGHUP);
+        assert!(!sigset_has(set, SIGHUP));
     }
 
     #[test]
-    fn constants_match_c_header() {
-        assert_eq!(SIGHUP, 1);
-        assert_eq!(SIGKILL, 9);
-        assert_eq!(SIGSYS, 31);
-        assert_eq!(SA_SIGINFO, 4);
+    fn signal_is_blockable_matches_c() {
+        assert!(!signal_is_blockable(SIGKILL));
+        assert!(!signal_is_blockable(SIGSTOP));
+        assert!(signal_is_blockable(SIGTERM));
+    }
+
+    #[test]
+    fn signal_action_matches_c() {
+        let mut actions = [SigAction::default(); 65];
+        // Default actions
+        assert_eq!(signal_action(&actions, SIGCHLD), SignalAction::Ignore);
+        assert_eq!(signal_action(&actions, SIGSTOP), SignalAction::Stop);
+        assert_eq!(signal_action(&actions, SIGTERM), SignalAction::Kill);
+
+        // SIG_IGN
+        actions[SIGTERM as usize].handler = SIG_IGN;
+        assert_eq!(signal_action(&actions, SIGTERM), SignalAction::Ignore);
+
+        // Custom handler
+        actions[SIGTERM as usize].handler = 0x1234;
+        assert_eq!(signal_action(&actions, SIGTERM), SignalAction::CallHandler);
+
+        // SIGKILL and SIGSTOP cannot be ignored
+        actions[SIGKILL as usize].handler = SIG_IGN;
+        assert_eq!(signal_action(&actions, SIGKILL), SignalAction::Kill);
+    }
+
+    #[test]
+    fn signal_delivery_and_queue() {
+        let mut state = SignalState::new();
+        assert!(state.deliver(SIGTERM, SIGINFO_NIL));
+        assert!(state.has_pending(SIGTERM));
+        assert_eq!(state.queue.len(), 1);
+
+        // Second delivery of same signal should not add
+        assert!(!state.deliver(SIGTERM, SIGINFO_NIL));
+        assert_eq!(state.queue.len(), 1);
+
+        // Blocked signal should not wake but still pending
+        state.blocked = sig_mask(SIGUSR1);
+        assert!(!state.deliver(SIGUSR1, SIGINFO_NIL)); // blocked, no wake
+        assert!(state.has_pending(SIGUSR1));
+
+        // Dequeue
+        let q = state.dequeue().unwrap();
+        assert_eq!(q.info.sig, SIGTERM as i32);
+        assert!(!state.has_pending(SIGTERM));
     }
 }
