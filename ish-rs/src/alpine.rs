@@ -1,5 +1,5 @@
 //! Alpine rootfs runner — integration of all modules needed to boot Alpine.
-//! Supports both mock and real Alpine rootfs.
+//! Supports both mock and real Alpine rootfs 3.24.1 x86.
 
 use crate::exec::{ExecArgs, ExecContext};
 use crate::fake::{FakeFs, IshStat};
@@ -29,13 +29,9 @@ impl AlpineRunner {
         self.kernel.bootstrap(fake_root, real_root)
     }
 
-    /// Load real Alpine rootfs from a directory on host (if available)
-    /// This is what would be used to boot real Alpine, matching C's real_root
     pub fn load_real_alpine(&mut self, host_path: &str) -> Result<usize, i32> {
         let path = Path::new(host_path);
-        if !path.exists() {
-            return Err(-2); // ENOENT
-        }
+        if !path.exists() { return Err(-2); }
         let mut count = 0;
         self.load_dir_recursive(path, "", &mut count)?;
         Ok(count)
@@ -49,11 +45,15 @@ impl AlpineRunner {
             let file_name = entry.file_name().to_string_lossy().to_string();
             let rel_path = if relative.is_empty() { format!("/{}", file_name) } else { format!("{}/{}", relative, file_name) };
             let guest_path = if rel_path.starts_with('/') { rel_path.clone() } else { format!("/{}", rel_path) };
-            let metadata = entry.metadata().map_err(|_| -2)?;
-            if metadata.is_dir() {
+            let file_type = entry.file_type().map_err(|_| -2)?;
+            if file_type.is_symlink() {
+                let target = std::fs::read_link(entry.path()).map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                self.fakefs.path_create_symlink(&guest_path, &target);
+                *count += 1;
+            } else if file_type.is_dir() {
                 self.fakefs.path_create(&guest_path, IshStat::new(0o040755, 0, 0, 0));
                 self.load_dir_recursive(base, &rel_path.trim_start_matches('/'), count)?;
-            } else if metadata.is_file() {
+            } else if file_type.is_file() {
                 let data = std::fs::read(entry.path()).unwrap_or_default();
                 let mode = if guest_path.contains("/bin/") || guest_path.contains("/sbin/") { 0o100755 } else { 0o100644 };
                 self.fakefs.path_create_file(&guest_path, IshStat::new(mode, 0, 0, 0), data);
@@ -104,7 +104,6 @@ impl AlpineRunner {
         Ok(format!("Alpine /bin/sh loaded at entry {:#x}, stack at {:#x}, {} pages mapped, {} files in fakefs", entry, self.exec_ctx.stack_top, self.mm.areas.len(), self.fakefs.inodes.len()))
     }
 
-    /// Full Alpine boot simulation, matching C's init
     pub fn boot_alpine(&mut self, real_rootfs_path: Option<&str>) -> Result<String, i32> {
         if let Some(path) = real_rootfs_path {
             match self.load_real_alpine(path) {
@@ -118,7 +117,6 @@ impl AlpineRunner {
             self.fakefs.load_alpine_mock();
         }
         self.kernel.bootstrap("/fake", "/real")?;
-        // Try common Alpine shell locations
         for sh_path in &["/bin/sh", "/bin/busybox", "/bin/ash"] {
             if self.fakefs.path_get_inode(sh_path) != 0 {
                 let entry = self.exec(sh_path, vec![sh_path.to_string()], vec!["PATH=/bin:/usr/bin".to_string(), "HOME=/root".to_string()])?;
@@ -186,9 +184,20 @@ mod tests {
     #[test]
     fn alpine_load_real_if_exists() {
         let mut runner = AlpineRunner::new();
-        // This will fail gracefully if /tmp/alpine_real doesn't exist, which is expected in CI
-        let result = runner.load_real_alpine("/tmp/alpine_real");
-        // Should be Err if not exists, Ok if exists
-        println!("load_real result: {:?}", result);
+        // Test with real Alpine 3.24.1 if available
+        if std::path::Path::new("/tmp/alpine_real").exists() {
+            let count = runner.load_real_alpine("/tmp/alpine_real").unwrap();
+            println!("Loaded {} files from /tmp/alpine_real", count);
+            assert!(count > 50);
+            assert!(runner.fakefs.path_get_inode("/bin/sh") != 0);
+            assert!(runner.fakefs.path_get_inode("/bin/busybox") != 0);
+            // Test symlink resolution
+            let sh_data = runner.fakefs.read_file("/bin/sh").unwrap();
+            assert_eq!(&sh_data[0..4], b"\x7fELF");
+            // Test ELF loading of real busybox
+            assert!(runner.load_binary("/bin/busybox").is_ok());
+            assert_eq!(runner.exec_ctx.header.machine, 3); // EM_386
+            println!("Real Alpine busybox: entry {:#x}, {} PHDRs, {} bytes total", runner.exec_ctx.entry, runner.exec_ctx.phdrs.len(), runner.exec_ctx.total_memory());
+        }
     }
 }
