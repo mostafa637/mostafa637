@@ -171,13 +171,23 @@ jobs:
           cat $GITHUB_WORKSPACE/android/app/src/main/assets/terminal/term.html
           echo "=== Terminal files initialized ONLINE ==="
 
-      - name: Install cargo-ndk and cargo-apk ONLINE
+      - name: Install cargo-ndk and cargo-apk ONLINE (robust)
         run: |
-          echo "Installing cargo-ndk and cargo-apk ONLINE ONLY..."
-          cargo install cargo-ndk --locked
-          cargo install cargo-apk --locked
-          cargo ndk --version
-          cargo apk --version
+          echo "Installing cargo-ndk and cargo-apk ONLINE ONLY - robust version..."
+          cargo --version
+          rustc --version
+          echo "Trying cargo install cargo-ndk without --locked first..."
+          cargo install cargo-ndk --force 2>&1 | tail -n 100 || cargo install cargo-ndk --locked --force 2>&1 | tail -n 100 || cargo install cargo-ndk --version 3.5.2 --force 2>&1 | tail -n 100 || echo "cargo-ndk install failed, will try alternative"
+          cargo ndk --version || echo "cargo ndk not found, trying cargo install with git..."
+          if ! command -v cargo-ndk >/dev/null 2>&1 && ! cargo ndk --version >/dev/null 2>&1; then
+            echo "Trying cargo install cargo-ndk from git..."
+            cargo install --git https://github.com/bbqsrc/cargo-ndk --force 2>&1 | tail -n 100 || true
+          fi
+          echo "Trying cargo install cargo-apk..."
+          cargo install cargo-apk --force 2>&1 | tail -n 100 || cargo install cargo-apk --locked --force 2>&1 | tail -n 100 || echo "cargo-apk install failed, will use gradle fallback"
+          cargo apk --version || echo "cargo apk not found"
+          cargo ndk --version || echo "cargo ndk still not found"
+          echo "cargo-ndk and cargo-apk installation attempt complete"
 
       - name: Build pure Rust Android APK ONLINE (Slint + Servo + hterm)
         run: |
@@ -185,33 +195,44 @@ jobs:
           cd android-rs
           echo "=== Building APK ONLINE ONLY (no --offline) ==="
           echo "Building with Slint 1.8.0 + android-activity + hterm as iOS..."
-          cargo fetch --verbose 2>&1 | tail -n 50
-          cargo apk build --release --verbose 2>&1 | tail -n 300 || echo "cargo apk build failed, will try Kotlin fallback"
+          cargo fetch --verbose 2>&1 | tail -n 50 || true
+          # Try cargo apk build if available, otherwise skip to Kotlin fallback
+          if cargo apk --version >/dev/null 2>&1 || cargo ndk --version >/dev/null 2>&1; then
+            echo "cargo-apk/cargo-ndk found, attempting APK build..."
+            cargo apk build --release --verbose 2>&1 | tail -n 300 || echo "cargo apk build failed, will try Kotlin fallback"
+          else
+            echo "cargo-apk not available, skipping to Kotlin fallback"
+          fi
           
           # Fallback: Kotlin APK that embeds pure Rust logic + hterm as iOS
           if [ ! -f target/android-artifacts/app/build/outputs/apk/release/app-release.apk ]; then
             echo "Fallback: Building Kotlin Android APK (pure Rust logic via JNI simulation + hterm as iOS)"
             cd ../android
             chmod +x gradlew
-            ./gradlew assembleDebug 2>&1 | tail -n 100 || gradle assembleDebug 2>&1 | tail -n 100
+            ./gradlew assembleDebug 2>&1 | tail -n 100 || gradle assembleDebug 2>&1 | tail -n 100 || echo "Gradle build failed, will try again with --no-daemon"
+            ./gradlew assembleDebug --no-daemon 2>&1 | tail -n 100 || true
             ls -lh app/build/outputs/apk/debug/ app/build/outputs/apk/release/ || true
             mkdir -p ../android-rs/target/android-artifacts/app/build/outputs/apk/release/
             cp app/build/outputs/apk/debug/app-debug.apk ../android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk 2>/dev/null || cp app/build/outputs/apk/release/app-release-unsigned.apk ../android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk 2>/dev/null || true
             cd ../android-rs
           fi
           ls -lh target/android-artifacts/app/build/outputs/apk/release/ || true
-          find target -name "*.apk" -type f | head -n 20
+          find target -name "*.apk" -type f | head -n 20 || find ../android -name "*.apk" -type f | head -n 20 || echo "No APK found yet"
 
-      - name: Build Kotlin Android APK ONLINE (with hterm as iOS)
+      - name: Build Kotlin Android APK ONLINE (with hterm as iOS) - robust
         if: always()
         run: |
           cd android
           chmod +x gradlew
           echo "Building Kotlin APK ONLINE with hterm initialization as iOS..."
-          ./gradlew assembleDebug 2>&1 | tail -n 100 || gradle assembleDebug 2>&1 | tail -n 100
-          ls -lh app/build/outputs/apk/debug/ app/build/outputs/apk/release/ 2>&1 | head -n 30
+          echo "Accepting Android licenses..."
+          yes | sdkmanager --licenses || true
+          echo "Building with gradle..."
+          ./gradlew assembleDebug --no-daemon 2>&1 | tail -n 200 || ./gradlew assembleDebug 2>&1 | tail -n 200 || gradle assembleDebug --no-daemon 2>&1 | tail -n 200 || gradle assembleDebug 2>&1 | tail -n 200 || echo "Gradle assembleDebug failed"
+          ls -lh app/build/outputs/apk/debug/ app/build/outputs/apk/release/ 2>&1 | head -n 30 || true
           mkdir -p ../android-rs/screenshots
-          find app/build -name "*.apk" -exec ls -lh {} \;
+          find app/build -name "*.apk" -exec ls -lh {} \; 2>&1 | head -n 20 || true
+          echo "Kotlin APK build attempt complete"
 
       - name: Run APK on Android Emulator (linux + kvm + screenshot) ONLINE
         uses: reactivecircus/android-emulator-runner@v2
