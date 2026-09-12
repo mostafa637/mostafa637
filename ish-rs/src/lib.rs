@@ -24,6 +24,7 @@ pub mod fix_path;
 pub mod float80;
 pub mod fork;
 pub mod fpu;
+pub mod fs;
 pub mod fs_info;
 pub mod futex;
 pub mod generic;
