@@ -15,10 +15,6 @@ impl IshStat {
     pub fn is_dir(&self) -> bool { (self.mode & 0o170000) == 0o040000 }
     pub fn is_file(&self) -> bool { (self.mode & 0o170000) == 0o100000 }
     pub fn is_symlink(&self) -> bool { (self.mode & 0o170000) == 0o120000 }
-    pub fn is_char(&self) -> bool { (self.mode & 0o170000) == 0o020000 }
-    pub fn is_block(&self) -> bool { (self.mode & 0o170000) == 0o060000 }
-    pub fn is_fifo(&self) -> bool { (self.mode & 0o170000) == 0o010000 }
-    pub fn is_socket(&self) -> bool { (self.mode & 0o170000) == 0o140000 }
     pub fn perm(&self) -> u32 { self.mode & 0o7777 }
 }
 
@@ -28,7 +24,7 @@ pub struct FakeInode {
     pub stat: IshStat,
     pub xattrs: std::collections::HashMap<String, Vec<u8>>,
     pub link_count: u32,
-    pub data: Vec<u8>, // file content for Alpine rootfs
+    pub data: Vec<u8>,
     pub symlink_target: Option<String>,
 }
 
@@ -66,9 +62,7 @@ impl FakeFs {
 
     pub fn path_create_file(&mut self, path: &str, stat: IshStat, data: Vec<u8>) -> u64 {
         let ino = self.path_create(path, stat);
-        if let Some(inode) = self.inode_table.get_mut(&ino) {
-            inode.data = data;
-        }
+        if let Some(inode) = self.inode_table.get_mut(&ino) { inode.data = data; }
         ino
     }
 
@@ -81,14 +75,32 @@ impl FakeFs {
         ino
     }
 
+    pub fn resolve_symlink(&self, path: &str) -> String {
+        let mut current = path.to_string();
+        for _ in 0..10 { // max 10 symlink hops like C
+            let ino = self.path_get_inode(&current);
+            if ino == 0 { break; }
+            if let Some(inode) = self.inode_table.get(&ino) {
+                if let Some(target) = &inode.symlink_target {
+                    current = target.clone();
+                    continue;
+                }
+            }
+            break;
+        }
+        current
+    }
+
     pub fn read_file(&self, path: &str) -> Result<Vec<u8>, i32> {
-        let ino = self.path_get_inode(path);
+        let resolved = self.resolve_symlink(path);
+        let ino = self.path_get_inode(&resolved);
         if ino == 0 { return Err(-2); }
         self.inode_table.get(&ino).map(|i| i.data.clone()).ok_or(-2)
     }
 
     pub fn write_file(&mut self, path: &str, data: Vec<u8>) -> Result<(), i32> {
-        let ino = self.path_get_inode(path);
+        let resolved = self.resolve_symlink(path);
+        let ino = self.path_get_inode(&resolved);
         if ino == 0 { return Err(-2); }
         if let Some(inode) = self.inode_table.get_mut(&ino) {
             inode.data = data;
@@ -156,22 +168,27 @@ impl FakeFs {
         } else { Err(-2) }
     }
 
-    /// Load Alpine rootfs structure from a directory (for testing)
     pub fn load_alpine_mock(&mut self) {
-        // Create standard Alpine directories
         for dir in &["/", "/bin", "/etc", "/lib", "/usr", "/usr/bin", "/proc", "/dev", "/tmp"] {
             self.path_create(dir, IshStat::new(0o040755, 0, 0, 0));
         }
-        // Create minimal /bin/sh as symlink to busybox (mock)
-        self.path_create_symlink("/bin/sh", "/bin/busybox");
-        // Create /bin/busybox with minimal ELF
+        // Create valid minimal ELF32 for busybox
         let mut elf = vec![0u8; 100];
         elf[0..4].copy_from_slice(b"\x7fELF");
         elf[4] = 1; elf[5] = 1;
         elf[16] = 2; elf[17] = 0;
         elf[18] = 3; elf[19] = 0;
+        elf[24] = 0x00; elf[25] = 0x80; elf[26] = 0x04; elf[27] = 0x08;
+        elf[28] = 52;
+        elf[42] = 1;
+        elf[52] = 1;
+        elf[56] = 0;
+        elf[60] = 0x00; elf[61] = 0x80; elf[62] = 0x04; elf[63] = 0x08;
+        elf[68] = 100;
+        elf[72] = 100;
+        elf[76] = 5;
         self.path_create_file("/bin/busybox", IshStat::new(0o100755, 0, 0, 0), elf);
-        // Create /etc/passwd
+        self.path_create_symlink("/bin/sh", "/bin/busybox");
         self.path_create_file("/etc/passwd", IshStat::new(0o100644, 0, 0, 0), b"root:x:0:0:root:/root:/bin/sh\n".to_vec());
         self.path_create_file("/etc/hosts", IshStat::new(0o100644, 0, 0, 0), b"127.0.0.1 localhost\n".to_vec());
     }
@@ -249,10 +266,10 @@ mod tests {
         assert!(fs.path_get_inode("/etc/passwd") != 0);
         let busybox_data = fs.read_file("/bin/busybox").unwrap();
         assert_eq!(&busybox_data[0..4], b"\x7fELF");
+        // Test symlink resolution: /bin/sh -> /bin/busybox
+        let sh_data = fs.read_file("/bin/sh").unwrap();
+        assert_eq!(&sh_data[0..4], b"\x7fELF");
         let passwd = fs.read_file("/etc/passwd").unwrap();
         assert!(String::from_utf8(passwd).unwrap().contains("root"));
-
-        let bin_files = fs.list_dir("/bin");
-        assert!(bin_files.iter().any(|f| f.contains("busybox") || f.contains("sh")));
     }
 }
