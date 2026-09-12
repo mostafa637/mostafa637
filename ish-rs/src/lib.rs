@@ -37,6 +37,7 @@ pub mod init;
 pub mod inode;
 pub mod interrupt;
 pub mod ipc;
+pub mod kernel;
 pub mod list;
 pub mod lock;
 pub mod log;
