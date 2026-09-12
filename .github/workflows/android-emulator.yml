@@ -92,9 +92,33 @@ jobs:
         with:
           gradle-version: '8.6'   # matches android/gradle/wrapper/gradle-wrapper.properties
 
+      # Pre-install what AGP would otherwise auto-download: /usr/local/lib/android/sdk
+      # is read-only for the runner user, so a missing platform turns into
+      # "Failed to install the following Android SDK components" instead of a build.
+      - name: Install the SDK packages the app declares
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "platforms;android-${API_LEVEL}" "build-tools;34.0.0" 2>&1 | tail -n 3
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+
       - name: Build Kotlin APK (WebView + hterm shell)
         working-directory: android
-        run: gradle --no-daemon assembleDebug
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace assembleDebug 2>&1 | tee "$GITHUB_WORKSPACE/gradle-build.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          # Ship the build log with the evidence artifact (*.txt is already in its path list).
+          mkdir -p "$GITHUB_WORKSPACE/$SCREENSHOT_DIR"
+          tail -n 400 "$GITHUB_WORKSPACE/gradle-build.log" > "$GITHUB_WORKSPACE/$SCREENSHOT_DIR/gradle-build.txt" || true
+          if [ "$rc" -ne 0 ]; then
+            grep -nE 'FAILURE|What went wrong|error:|Caused by|Could not (resolve|find|download)|SDK component' \
+              "$GITHUB_WORKSPACE/gradle-build.log" | tail -n 25 > /tmp/err.txt || true
+            MSG=$(sed 's/%/%25/g; s/:/%3A/g' /tmp/err.txt |
+                   awk '{printf "%s%s", (NR > 1 ? "%0A" : ""), $0}')
+            echo "::error::gradle assembleDebug failed (exit $rc): %0A${MSG}"
+          fi
+          exit "$rc"
 
       - name: Build pure Rust APK (optional - Slint/android-activity via cargo-apk)
         working-directory: android-rs
