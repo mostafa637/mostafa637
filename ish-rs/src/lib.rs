@@ -34,6 +34,7 @@ pub mod futex;
 pub mod generic;
 pub mod getset;
 pub mod group;
+pub mod gui;
 pub mod init;
 pub mod inode;
 pub mod interrupt;
