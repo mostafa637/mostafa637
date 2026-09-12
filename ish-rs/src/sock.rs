@@ -22,6 +22,8 @@ pub const SO_REUSEADDR: u32 = 2;
 pub const SO_TYPE: u32 = 3;
 pub const SO_ERROR: u32 = 4;
 pub const SO_KEEPALIVE: u32 = 9;
+pub const SO_SNDBUF: u32 = 7;
+pub const SO_RCVBUF: u32 = 8;
 
 pub const SOCKADDR_DATA_MAX: usize = 108;
 pub const SOCKET_TYPE_MASK: u32 = 0xf;
@@ -53,6 +55,23 @@ pub struct Msghdr {
     pub msg_control: u32,
     pub msg_controllen: u32,
     pub msg_flags: u32,
+}
+
+/// Unix socket address helpers
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnixAddr {
+    pub path: String,
+    pub is_abstract: bool,
+}
+
+impl UnixAddr {
+    pub fn new(path: impl Into<String>) -> Self {
+        let p = path.into();
+        let is_abstract = p.starts_with('\0');
+        Self { path: p, is_abstract }
+    }
+
+    pub fn is_unnamed(&self) -> bool { self.path.is_empty() }
 }
 
 pub fn sockaddr_size(family: u16) -> usize {
@@ -113,10 +132,10 @@ mod tests {
     #[test]
     fn valid_sock_type() {
         assert!(is_valid_sock_type(SOCK_STREAM));
-        assert!(is_valid_sock_type(SOCK_DGRAM | 0x80000)); // with flags
-        assert!(is_valid_sock_type(99)); // 99 & 0xf = 3 = SOCK_RAW, valid per C masking
-        assert!(!is_valid_sock_type(4)); // base 4 invalid
-        assert!(!is_valid_sock_type(100)); // 100 & 0xf = 4 invalid
+        assert!(is_valid_sock_type(SOCK_DGRAM | 0x80000));
+        assert!(is_valid_sock_type(99));
+        assert!(!is_valid_sock_type(4));
+        assert!(!is_valid_sock_type(100));
     }
 
     #[test]
@@ -124,7 +143,18 @@ mod tests {
         assert_eq!(sock_family_to_real(AF_INET).unwrap(), 2);
         assert!(sock_family_to_real(99).is_err());
         assert_eq!(sock_type_to_real(SOCK_STREAM, 0).unwrap(), 1);
-        assert_eq!(sock_type_to_real(99, 0).unwrap(), 3); // 99 masked to 3 = RAW
+        assert_eq!(sock_type_to_real(99, 0).unwrap(), 3);
         assert!(sock_type_to_real(4, 0).is_err());
+    }
+
+    #[test]
+    fn unix_addr_helpers() {
+        let addr = UnixAddr::new("/tmp/socket");
+        assert!(!addr.is_abstract);
+        assert!(!addr.is_unnamed());
+        let abstract_addr = UnixAddr::new("\0abstract");
+        assert!(abstract_addr.is_abstract);
+        let unnamed = UnixAddr::new("");
+        assert!(unnamed.is_unnamed());
     }
 }
