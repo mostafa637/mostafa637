@@ -1,141 +1,132 @@
-//! `kernel/futex.h` + `kernel/futex.c` — futex constants and queue types.
+//! `kernel/futex.h` + `kernel/futex.c` — futex constants and hash table.
 
-/// `FUTEX_WAIT_`
 pub const FUTEX_WAIT: u32 = 0;
-/// `FUTEX_WAKE_`
 pub const FUTEX_WAKE: u32 = 1;
-/// `FUTEX_REQUEUE_`
+pub const FUTEX_FD: u32 = 2;
 pub const FUTEX_REQUEUE: u32 = 3;
-/// `FUTEX_PRIVATE_FLAG_`
+pub const FUTEX_CMP_REQUEUE: u32 = 4;
+pub const FUTEX_WAKE_OP: u32 = 5;
+pub const FUTEX_LOCK_PI: u32 = 6;
+pub const FUTEX_UNLOCK_PI: u32 = 7;
+pub const FUTEX_TRYLOCK_PI: u32 = 8;
+pub const FUTEX_WAIT_BITSET: u32 = 9;
+pub const FUTEX_WAKE_BITSET: u32 = 10;
+pub const FUTEX_WAIT_REQUEUE_PI: u32 = 11;
+pub const FUTEX_CMP_REQUEUE_PI: u32 = 12;
+
 pub const FUTEX_PRIVATE_FLAG: u32 = 128;
-/// `FUTEX_CMD_MASK_`
-pub const FUTEX_CMD_MASK: u32 = !FUTEX_PRIVATE_FLAG;
+pub const FUTEX_CLOCK_REALTIME: u32 = 256;
 
-pub const FUTEX_HASH_BITS: usize = 12;
-pub const FUTEX_HASH_SIZE: usize = 1 << FUTEX_HASH_BITS;
+pub const FUTEX_TID_MASK: u32 = 0x3fffffff;
+pub const FUTEX_WAITERS: u32 = 0x80000000;
+pub const FUTEX_OWNER_DIED: u32 = 0x40000000;
 
-#[derive(Debug)]
-pub struct FutexWait {
-    pub uaddr: u32,
-    pub val: u32,
-}
+pub const FUTEX_OP_SET: u32 = 0;
+pub const FUTEX_OP_ADD: u32 = 1;
+pub const FUTEX_OP_OR: u32 = 2;
+pub const FUTEX_OP_ANDN: u32 = 3;
+pub const FUTEX_OP_XOR: u32 = 4;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FutexOp {
-    Wait,
-    Wake,
-    Requeue,
-    Unknown(u32),
-}
+pub const FUTEX_OP_CMP_EQ: u32 = 0;
+pub const FUTEX_OP_CMP_NE: u32 = 1;
+pub const FUTEX_OP_CMP_LT: u32 = 2;
+pub const FUTEX_OP_CMP_LE: u32 = 3;
+pub const FUTEX_OP_CMP_GT: u32 = 4;
+pub const FUTEX_OP_CMP_GE: u32 = 5;
 
-impl FutexOp {
-    pub fn from_op(op: u32) -> Self {
-        match op & FUTEX_CMD_MASK {
-            FUTEX_WAIT => Self::Wait,
-            FUTEX_WAKE => Self::Wake,
-            FUTEX_REQUEUE => Self::Requeue,
-            other => Self::Unknown(other),
-        }
-    }
-    pub fn is_private(op: u32) -> bool {
-        op & FUTEX_PRIVATE_FLAG != 0
-    }
-}
+/// Futex hash table size, matching C's FUTEX_BUCKETS
+pub const FUTEX_BUCKETS: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct RobustListHead {
-    pub list: u32,
-    pub offset: u32,
-    pub list_op_pending: u32,
-}
-
-/// Futex table entry, matching C's `struct futex`
-#[derive(Debug)]
-pub struct Futex {
+pub struct FutexKey {
     pub addr: u32,
-    pub refcount: usize,
-    pub queue: Vec<FutexWait>,
+    pub is_private: bool,
+    pub pid: u32,
 }
 
-impl Futex {
-    pub fn new(addr: u32) -> Self {
-        Self {
-            addr,
-            refcount: 1,
-            queue: Vec::new(),
+impl FutexKey {
+    pub fn new(addr: u32, is_private: bool, pid: u32) -> Self {
+        Self { addr, is_private, pid }
+    }
+    pub fn hash(&self) -> usize {
+        let mut h = self.addr as usize;
+        if !self.is_private {
+            h ^= self.pid as usize;
         }
-    }
-
-    pub fn retain(&mut self) {
-        self.refcount += 1;
-    }
-
-    pub fn release(&mut self) -> bool {
-        if self.refcount == 0 {
-            return true;
-        }
-        self.refcount -= 1;
-        self.refcount == 0
-    }
-
-    pub fn wait(&mut self, val: u32) -> FutexWait {
-        let w = FutexWait { uaddr: self.addr, val };
-        self.queue.push(FutexWait { uaddr: self.addr, val });
-        w
-    }
-
-    pub fn wake(&mut self, max: usize) -> usize {
-        let mut woken = 0;
-        while woken < max && !self.queue.is_empty() {
-            self.queue.remove(0);
-            woken += 1;
-        }
-        woken
-    }
-
-    pub fn requeue(&mut self, other: &mut Futex, max: usize) -> usize {
-        let mut requeued = 0;
-        while requeued < max && !self.queue.is_empty() {
-            let wait = self.queue.remove(0);
-            other.queue.push(wait);
-            requeued += 1;
-        }
-        requeued
+        h % FUTEX_BUCKETS
     }
 }
 
-/// Futex hash table, matching C's `futex_hash`
+pub fn futex_op(op: u32) -> u32 { op & 0xf }
+pub fn futex_cmp(op: u32) -> u32 { (op >> 4) & 0xf }
+pub fn futex_op_arg(op: u32) -> u32 { (op >> 8) & 0xfff }
+pub fn futex_cmp_arg(op: u32) -> u32 { (op >> 20) & 0xfff }
+
+pub fn futex_op_apply(op: u32, oparg: u32, oldval: u32) -> u32 {
+    match op {
+        FUTEX_OP_SET => oparg,
+        FUTEX_OP_ADD => oldval.wrapping_add(oparg),
+        FUTEX_OP_OR => oldval | oparg,
+        FUTEX_OP_ANDN => oldval & !oparg,
+        FUTEX_OP_XOR => oldval ^ oparg,
+        _ => oldval,
+    }
+}
+
+pub fn futex_cmp_check(cmp: u32, cmparg: u32, uval: u32) -> bool {
+    match cmp {
+        FUTEX_OP_CMP_EQ => uval == cmparg,
+        FUTEX_OP_CMP_NE => uval != cmparg,
+        FUTEX_OP_CMP_LT => (uval as i32) < (cmparg as i32),
+        FUTEX_OP_CMP_LE => (uval as i32) <= (cmparg as i32),
+        FUTEX_OP_CMP_GT => (uval as i32) > (cmparg as i32),
+        FUTEX_OP_CMP_GE => (uval as i32) >= (cmparg as i32),
+        _ => false,
+    }
+}
+
+#[derive(Debug)]
+pub struct FutexWaiter {
+    pub key: FutexKey,
+    pub bitset: u32,
+}
+
+impl FutexWaiter {
+    pub fn new(key: FutexKey, bitset: u32) -> Self { Self { key, bitset } }
+    pub fn matches(&self, key: &FutexKey, bitset: u32) -> bool {
+        self.key == *key && (self.bitset & bitset) != 0
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct FutexTable {
-    buckets: Vec<Vec<Futex>>,
+    pub waiters: Vec<FutexWaiter>,
 }
 
 impl FutexTable {
-    pub fn new() -> Self {
-        Self {
-            buckets: (0..FUTEX_HASH_SIZE).map(|_| Vec::new()).collect(),
+    pub fn new() -> Self { Self::default() }
+    pub fn add_waiter(&mut self, waiter: FutexWaiter) { self.waiters.push(waiter); }
+    pub fn wake(&mut self, key: &FutexKey, bitset: u32, count: usize) -> usize {
+        let mut woken = 0;
+        self.waiters.retain(|w| {
+            if woken < count && w.matches(key, bitset) {
+                woken += 1;
+                false
+            } else {
+                true
+            }
+        });
+        woken
+    }
+    pub fn requeue(&mut self, from: &FutexKey, to: &FutexKey, count: usize) -> usize {
+        let mut requeued = 0;
+        for waiter in self.waiters.iter_mut() {
+            if waiter.key == *from && requeued < count {
+                waiter.key = *to;
+                requeued += 1;
+            }
         }
-    }
-
-    fn hash(addr: u32) -> usize {
-        (addr as usize) % FUTEX_HASH_SIZE
-    }
-
-    pub fn get_or_create(&mut self, addr: u32) -> &mut Futex {
-        let h = Self::hash(addr);
-        if let Some(pos) = self.buckets[h].iter().position(|f| f.addr == addr) {
-            self.buckets[h][pos].retain();
-            &mut self.buckets[h][pos]
-        } else {
-            self.buckets[h].push(Futex::new(addr));
-            let last = self.buckets[h].len() - 1;
-            &mut self.buckets[h][last]
-        }
-    }
-
-    pub fn get(&mut self, addr: u32) -> Option<&mut Futex> {
-        let h = Self::hash(addr);
-        self.buckets[h].iter_mut().find(|f| f.addr == addr)
+        requeued
     }
 }
 
@@ -144,43 +135,62 @@ mod tests {
     use super::*;
 
     #[test]
-    fn futex_op_decoding_matches_c() {
-        assert_eq!(FutexOp::from_op(FUTEX_WAIT), FutexOp::Wait);
-        assert_eq!(FutexOp::from_op(FUTEX_WAKE), FutexOp::Wake);
-        assert_eq!(FutexOp::from_op(FUTEX_REQUEUE), FutexOp::Requeue);
-        assert_eq!(FutexOp::from_op(99), FutexOp::Unknown(99));
-        assert!(FutexOp::is_private(FUTEX_WAIT | FUTEX_PRIVATE_FLAG));
-        assert!(!FutexOp::is_private(FUTEX_WAIT));
+    fn futex_constants_match_c() {
+        assert_eq!(FUTEX_WAIT, 0);
+        assert_eq!(FUTEX_WAKE, 1);
+        assert_eq!(FUTEX_PRIVATE_FLAG, 128);
+        assert_eq!(FUTEX_BUCKETS, 256);
     }
 
     #[test]
-    fn futex_wait_wake_requeue() {
-        let mut f1 = Futex::new(0x1000);
-        f1.wait(1);
-        f1.wait(2);
-        assert_eq!(f1.queue.len(), 2);
-        assert_eq!(f1.wake(1), 1);
-        assert_eq!(f1.queue.len(), 1);
-
-        let mut f2 = Futex::new(0x2000);
-        assert_eq!(f1.requeue(&mut f2, 1), 1);
-        assert_eq!(f1.queue.len(), 0);
-        assert_eq!(f2.queue.len(), 1);
+    fn futex_key_hash() {
+        let k1 = FutexKey::new(0x1000, true, 1);
+        let k1b = FutexKey::new(0x1000, true, 2);
+        assert_eq!(k1.hash(), k1b.hash(), "private ignores pid");
+        let k2 = FutexKey::new(0x1000, false, 1);
+        let k3 = FutexKey::new(0x1000, false, 2);
+        assert_ne!(k2.hash(), k3.hash(), "non-private differs by pid");
+        assert!(k1.hash() < FUTEX_BUCKETS);
     }
 
     #[test]
-    fn futex_table_hash_and_refcount() {
+    fn futex_op_decode() {
+        let op = FUTEX_OP_ADD | (FUTEX_OP_CMP_EQ << 4) | (10 << 8) | (20 << 20);
+        assert_eq!(futex_op(op), FUTEX_OP_ADD);
+        assert_eq!(futex_cmp(op), FUTEX_OP_CMP_EQ);
+        assert_eq!(futex_op_arg(op), 10);
+        assert_eq!(futex_cmp_arg(op), 20);
+    }
+
+    #[test]
+    fn futex_op_apply_test() {
+        assert_eq!(futex_op_apply(FUTEX_OP_SET, 5, 10), 5);
+        assert_eq!(futex_op_apply(FUTEX_OP_ADD, 5, 10), 15);
+        assert_eq!(futex_op_apply(FUTEX_OP_OR, 0b01, 0b10), 0b11);
+        assert_eq!(futex_op_apply(FUTEX_OP_ANDN, 0b01, 0b11), 0b10);
+        assert_eq!(futex_op_apply(FUTEX_OP_XOR, 0b11, 0b01), 0b10);
+    }
+
+    #[test]
+    fn futex_cmp_check_test() {
+        assert!(futex_cmp_check(FUTEX_OP_CMP_EQ, 5, 5));
+        assert!(!futex_cmp_check(FUTEX_OP_CMP_EQ, 5, 6));
+        assert!(futex_cmp_check(FUTEX_OP_CMP_LT, 10, 5));
+        assert!(futex_cmp_check(FUTEX_OP_CMP_GT, 5, 10));
+    }
+
+    #[test]
+    fn futex_table_wake_and_requeue() {
         let mut table = FutexTable::new();
-        {
-            let f = table.get_or_create(0x1000);
-            assert_eq!(f.addr, 0x1000);
-            assert_eq!(f.refcount, 1);
-        }
-        {
-            let f = table.get_or_create(0x1000);
-            assert_eq!(f.refcount, 2);
-        }
-        assert!(table.get(0x1000).is_some());
-        assert!(table.get(0x2000).is_none());
+        let k1 = FutexKey::new(0x1000, true, 1);
+        let k2 = FutexKey::new(0x2000, true, 1);
+        table.add_waiter(FutexWaiter::new(k1, 0xffffffff));
+        table.add_waiter(FutexWaiter::new(k1, 0xffffffff));
+        table.add_waiter(FutexWaiter::new(k2, 0xffffffff));
+        assert_eq!(table.waiters.len(), 3);
+        assert_eq!(table.wake(&k1, 0xffffffff, 1), 1);
+        assert_eq!(table.waiters.len(), 2);
+        assert_eq!(table.requeue(&k1, &k2, 1), 1);
+        assert_eq!(table.waiters.iter().filter(|w| w.key == k2).count(), 2);
     }
 }
