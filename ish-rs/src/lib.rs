@@ -38,8 +38,8 @@
 //! | [`fifo`]        | `util/fifo.{h,c}`         | ported, circular FIFO with quirk preservation (C vs Rust differential) |
 //! | [`elf`]         | `kernel/elf.h`            | ported, ELF32 constants and parsing |
 //! | [`vdso`]        | `kernel/vdso.{h,c}`       | ported, vdso symbol lookup over ELF image |
-//! | [`stat`]        | `fs/stat.h`               | ported, stat buffer ABIs |
-//! | [`time`]        | `kernel/time.h`           | ported, time structures and conversions |
+//! | [`stat`]        | `fs/stat.h` + `fs/stat.c` | ported, stat buffer ABIs + stat_convert_newstat64 + statx conversion |
+//! | [`time`]        | `kernel/time.h` + `time.c` | ported, time syscalls with host abstraction |
 //! | [`ptrace`]      | `kernel/ptrace.h`         | ported, ptrace constants and reg layouts |
 //! | [`futex`]       | `kernel/futex.{h,c}`      | ported, futex constants and queue types (host sync pending) |
 //! | [`signal`]      | `kernel/signal.h`         | ported, signal numbers, masks, and siginfo layouts (delivery pending) |
@@ -56,6 +56,10 @@
 //! | [`dev`]         | `fs/dev.h`                | ported, dev_t encoding dev_make/major/minor |
 //! | [`poll`]        | `fs/poll.h` + `kernel/epoll.c` | ported, poll/epoll constants and event types |
 //! | [`eventfd`]     | `kernel/eventfd.c`        | ported, eventfd read/write/poll logic |
+//! | [`fd`]          | `fs/fd.h`                 | ported, fd flags, file types, dir entry, fd table helpers |
+//! | [`mount`]       | `kernel/fs.h` mount       | ported, mount flags and param parsing |
+//! | [`lock`]        | `fs/lock.h`               | ported, file locking constants and structures |
+//! | [`calls`]       | `kernel/calls.h` + `calls.c` | ported, syscall numbers and dispatch |
 //! | [`cpuid`]       | `emu/cpuid.h`             | ported |
 //! | [`interrupt`]   | `emu/interrupt.h`         | ported |
 //!
@@ -65,6 +69,7 @@
 //! license: `GPL-2.0-or-later`. See `README.md`.
 
 pub mod bits;
+pub mod calls;
 pub mod cpu;
 pub mod cpuid;
 pub mod decode;
@@ -77,6 +82,7 @@ pub mod errno_table;
 pub mod eventfd;
 pub mod fake_db;
 pub mod fake_rebuild;
+pub mod fd;
 pub mod fifo;
 pub mod fix_path;
 pub mod float80;
@@ -89,6 +95,7 @@ pub mod inode;
 pub mod interrupt;
 pub mod ipc;
 pub mod list;
+pub mod lock;
 pub mod log;
 pub mod memory;
 pub mod misc;
@@ -96,6 +103,7 @@ pub mod mm;
 pub mod mmap;
 pub mod mmu;
 pub mod modrm;
+pub mod mount;
 pub mod path;
 pub mod personality;
 pub mod poll;
