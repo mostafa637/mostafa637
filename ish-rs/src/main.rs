@@ -52,12 +52,14 @@ fn main() {
             // Create minimal ELF that does exit(42)
             let mut minimal_elf = vec![0u8; 200];
             minimal_elf[0..4].copy_from_slice(b"\x7fELF");
-            minimal_elf[4] = 1; minimal_elf[5] = 1;
+            minimal_elf[4] = 1; minimal_elf[5] = 1; minimal_elf[6] = 1;
             minimal_elf[16] = 2; minimal_elf[17] = 0;
             minimal_elf[18] = 3; minimal_elf[19] = 0;
             minimal_elf[24] = 0x54; minimal_elf[25] = 0x80; minimal_elf[26] = 0x04; minimal_elf[27] = 0x08;
             minimal_elf[28] = 52;
-            minimal_elf[42] = 1;
+            minimal_elf[40] = 52; minimal_elf[41] = 0;
+            minimal_elf[42] = 32; minimal_elf[43] = 0;
+            minimal_elf[44] = 1; minimal_elf[45] = 0;
             minimal_elf[52] = 1;
             minimal_elf[56] = 0;
             minimal_elf[60] = 0x54; minimal_elf[61] = 0x80; minimal_elf[62] = 0x04; minimal_elf[63] = 0x08;

@@ -175,12 +175,13 @@ impl FakeFs {
         // Create valid minimal ELF32 for busybox
         let mut elf = vec![0u8; 100];
         elf[0..4].copy_from_slice(b"\x7fELF");
-        elf[4] = 1; elf[5] = 1;
+        elf[4] = 1; elf[5] = 1; elf[6] = 1;
         elf[16] = 2; elf[17] = 0;
         elf[18] = 3; elf[19] = 0;
         elf[24] = 0x00; elf[25] = 0x80; elf[26] = 0x04; elf[27] = 0x08;
         elf[28] = 52;
-        elf[42] = 1;
+        elf[42] = 32; elf[43] = 0;
+        elf[44] = 1; elf[45] = 0;
         elf[52] = 1;
         elf[56] = 0;
         elf[60] = 0x00; elf[61] = 0x80; elf[62] = 0x04; elf[63] = 0x08;
