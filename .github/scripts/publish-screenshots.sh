@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
-# Publish emulator evidence (screenshots + log dumps) to an orphan branch so each
-# run has a stable raw.githubusercontent.com URL to link from the job summary.
+# Publish evidence (screenshots, log dumps, patches) to an orphan branch so each run
+# has a stable raw.githubusercontent.com URL to link from the job summary - and so a
+# machine-readable artifact can be read back through the contents API on hosts where
+# the raw job log and the artifact zip are not reachable.
 #
 # Deliberately non-fatal: CI must never go red because a documentation-only push
 # failed. Any caller should keep `continue-on-error: true` anyway.
@@ -13,7 +15,7 @@ BRANCH="${2:-debug/android-emulator-latest}"
 [ -n "${GITHUB_TOKEN:-}" ] || { echo "GITHUB_TOKEN unset - skipping screenshot publish"; exit 0; }
 [ -d "$SRC" ] || { echo "no evidence dir ($SRC) - skipping"; exit 0; }
 
-mapfile -t FILES < <(find "$SRC" -maxdepth 1 -type f \( -name '*.png' -o -name '*.txt' -o -name '*.xml' \) | sort)
+mapfile -t FILES < <(find "$SRC" -maxdepth 1 -type f \( -name '*.png' -o -name '*.txt' -o -name '*.xml' -o -name '*.patch' -o -name '*.diff' \) | sort)
 if [ "${#FILES[@]}" -eq 0 ]; then
   echo "no files in $SRC - skipping"
   exit 0

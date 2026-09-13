@@ -63,93 +63,74 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
 
-      # --- terminal assets -------------------------------------------------
-      # hterm_all.js must exist in the app's assets before Gradle packages it.
+      # --- terminal assets (packaged into the APK) -------------------------------
+      # Must run before the build so the files land inside the archive.
       - name: Prepare hterm terminal assets
         run: bash .github/scripts/init-hterm-assets.sh
 
-      # --- build -----------------------------------------------------------
-      - name: Set up Java 17
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
-
+      # --- build the one and only APK: pure Rust via cargo-apk -------------------
+      # The Kotlin/Gradle shell module (android/) is gone from the repo, so this job
+      # builds the crate that ships the app: android-rs, a cdylib loaded by
+      # android.app.NativeActivity through the android_main symbol.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
-      # Pinned so the optional cargo-apk build below does not depend on whatever
-      # Rust version the runner image happens to ship this month.
-      - name: Set up Rust
+      - name: Set up Rust with the Android target
         uses: dtolnay/rust-toolchain@1.89.0
         with:
-          targets: aarch64-linux-android, x86_64-linux-android
+          targets: x86_64-linux-android
 
-      # Installs a matching Gradle and caches ~/.gradle - the repo's gradlew is a
-      # stand-in wrapper with no gradle-wrapper.jar, so it relies on this.
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: '8.6'   # matches android/gradle/wrapper/gradle-wrapper.properties
-
-      # Pre-install what AGP would otherwise auto-download: /usr/local/lib/android/sdk
-      # is read-only for the runner user, so a missing platform turns into
-      # "Failed to install the following Android SDK components" instead of a build.
-      - name: Install the SDK packages the app declares
+      # cargo-ndk finds the NDK under $ANDROID_HOME/ndk/<version> on its own, but
+      # nothing installs it by default and there is no aapt without build-tools.
+      - name: Install NDK and build-tools
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager --install "platform-tools" "platforms;android-${API_LEVEL}" "build-tools;34.0.0" 2>&1 | tail -n 3
-          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+          sdkmanager --install "ndk;26.1.10909125" "build-tools;34.0.0" "platforms;android-${API_LEVEL}" 2>&1 | tail -n 2
+          ls "$ANDROID_HOME/ndk" && ls "$ANDROID_HOME/build-tools"
 
-      - name: Build Kotlin APK (WebView + hterm shell)
-        working-directory: android
+      - name: Install cargo-apk and cargo-ndk
+        run: |
+          cargo install cargo-ndk cargo-apk --force --locked
+          cargo apk --version && cargo ndk --version
+
+      # Cargo.toml pins build_targets to x86_64 only, so this builds one ABI; a debug
+      # build is deliberate - opt-level 3 + a full Slint/femtovg graph for a smoke
+      # test would buy nothing but minutes.
+      - name: Build the pure Rust APK
+        working-directory: android-rs
         run: |
           set +e
-          gradle --no-daemon --stacktrace assembleDebug 2>&1 | tee "$GITHUB_WORKSPACE/gradle-build.log"
+          cargo apk build 2>&1 | tee "$GITHUB_WORKSPACE/cargo-apk.log"
           rc=${PIPESTATUS[0]}
           set -e
-          # Ship the build log with the evidence artifact (*.txt is already in its path list).
           mkdir -p "$GITHUB_WORKSPACE/$SCREENSHOT_DIR"
-          tail -n 400 "$GITHUB_WORKSPACE/gradle-build.log" > "$GITHUB_WORKSPACE/$SCREENSHOT_DIR/gradle-build.txt" || true
+          tail -n 400 "$GITHUB_WORKSPACE/cargo-apk.log" > "$GITHUB_WORKSPACE/$SCREENSHOT_DIR/cargo-apk.txt" || true
           if [ "$rc" -ne 0 ]; then
-            LOG="$GITHUB_WORKSPACE/gradle-build.log"
             {
-              # `^e: ` is how kotlinc reports real compile errors; javac/AAPT use `error:`.
-              grep -E '^e: |^[0-9]+: error: |error: ' "$LOG" | head -n 15
-              grep -E 'What went wrong' -A 5 "$LOG" | head -n 12
-              grep -E '> Task .*FAILED' "$LOG" | head -n 5
+              grep -E '^error(\[|:)|^error: |undefined reference|No such file|error: could not compile' "$GITHUB_WORKSPACE/cargo-apk.log" | head -n 15
+              grep -E 'cargo-apk|keystore|SDK|NDK' "$GITHUB_WORKSPACE/cargo-apk.log" | head -n 8
             } > /tmp/err.txt || true
-            [ -s /tmp/err.txt ] || tail -n 25 "$LOG" > /tmp/err.txt
-            # Annotations are the only channel that survives back to a plain API
-            # client (raw logs and artifacts sit on blob storage), so keep it short.
-            MSG=$(head -c 4500 /tmp/err.txt | sed 's/%/%25/g' |
-                  awk '{printf "%s%s", (NR > 1 ? "%0A" : ""), $0}')
-            echo "::error::gradle assembleDebug failed (exit $rc): %0A${MSG}"
-            {
-              printf '\n### gradle assembleDebug failed\n\n```\n'
-              head -c 4500 /tmp/err.txt
-              printf '\n```\n'
-            } >> "$GITHUB_STEP_SUMMARY"
+            [ -s /tmp/err.txt ] || tail -n 25 "$GITHUB_WORKSPACE/cargo-apk.log" > /tmp/err.txt
+            MSG=$(head -c 4500 /tmp/err.txt | sed 's/%/%25/g' | awk '{printf "%s%s", (NR > 1 ? "%0A" : ""), $0}')
+            echo "::error::cargo apk build failed (exit $rc): %0A${MSG}"
+            { printf '\n### cargo apk build failed\n\n```\n'; head -c 4500 /tmp/err.txt; printf '\n```\n'; } >> "$GITHUB_STEP_SUMMARY"
           fi
           exit "$rc"
 
-      - name: Build pure Rust APK (optional - Slint/android-activity via cargo-apk)
-        working-directory: android-rs
-        continue-on-error: true
-        run: |
-          rustup target add aarch64-linux-android x86_64-linux-android
-          # cargo-apk drives cargo-ndk internally, so both are needed.
-          cargo install cargo-ndk cargo-apk --force --locked
-          cargo apk build --release || echo "::warning::cargo apk build failed - falling back to the Kotlin shell APK"
-
       # Fail here, not 30 emulator-minutes later, when nothing is installable.
-      - name: Verify an APK was produced
+      - name: Verify the APK was produced
         run: |
-          find android android-rs -name '*.apk' -type f | sed 's/^/found: /'
-          if [ -z "$(find android android-rs -name '*.apk' -type f -print -quit)" ]; then
-            echo "::error::No APK was produced by either builder; the emulator would have nothing to install."
+          find android-rs/target -name '*.apk' -type f | sed 's/^/found: /' || true
+          APK=$(find android-rs/target -name '*.apk' -type f -print -quit)
+          if [ -z "$APK" ]; then
+            echo "::error::cargo-apk produced no APK; the emulator would have nothing to install."
             exit 1
           fi
+          # The manifest must carry the NativeActivity entry and the lib name, or the
+          # app installs and dies on launch with an UnsatisfiedLinkError.
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt | head -n 1)
+          "$AAPT" dump badging "$APK" | grep -E "package: name|launchable-activity|native-code|sdkVersion" | sed 's/^/  /'
+          "$AAPT" dump badging "$APK" | grep -q "x86_64" || { echo "::error::APK has no x86_64 native code - the emulator cannot run it"; exit 1; }
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
 
       # --- AVD snapshot cache ----------------------------------------------
       - name: Restore cached AVD

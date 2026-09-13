@@ -10,13 +10,15 @@
 # flaky clone must not take the whole pipeline down: the repo also carries a
 # committed, already-built hterm_all.js, and we fall back to it.
 #
-# What is mandatory either way is the invariant term.html relies on - the four
-# files must exist together, in both the Kotlin and the Rust asset dirs, otherwise
-# the WebView loads a page that throws and the app shows a blank terminal.
+# What is mandatory either way is the packaging invariant: cargo-apk copies this whole
+# folder into the APK via [package.metadata.android] assets = "assets", so a file
+# missing here ships a broken page with no way to notice at runtime. Note the honest
+# scope: the Slint shell renders its own terminal today and does not yet host a
+# WebView over these files - this checks what gets packaged, not what is drawn.
 set -u -o pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ASSET_DIRS="android/app/src/main/assets/terminal android-rs/assets/terminal"
+ASSET_DIRS="android-rs/assets/terminal"
 REQUIRED="hterm_all.js term.js term.css term.html"
 REBUILT=false
 

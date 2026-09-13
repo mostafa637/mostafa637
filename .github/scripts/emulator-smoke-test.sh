@@ -148,11 +148,14 @@ fi
 # ---------------------------------------------------------------------------
 # 2. pick the APK: pure-Rust cargo-apk output first, then the Kotlin build
 # ---------------------------------------------------------------------------
+# cargo-apk writes target/android-artifacts/<profile>/apks/<apk_name>-<profile>.apk.
+# The exact layout has moved between cargo-apk versions, so this is a preference
+# list with a find-based fallback rather than one hardcoded path.
 CANDIDATES="
+android-rs/target/android-artifacts/debug/apks/ish-android-rs-debug.apk
+android-rs/target/android-artifacts/release/apks/ish-android-rs-release.apk
+android-rs/target/android-artifacts/app/build/outputs/apk/debug/app-debug.apk
 android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk
-android-rs/target/android-artifacts/release/ish-android-rs.apk
-android/app/build/outputs/apk/debug/app-debug.apk
-android/app/build/outputs/apk/release/app-release-unsigned.apk
 "
 SELECTED_APK="${APK_PATH:-}"
 if [ -n "$SELECTED_APK" ] && [ ! -f "$SELECTED_APK" ]; then
@@ -199,7 +202,7 @@ AAPT="$(ls "${ANDROID_HOME:-$HOME/Android/Sdk}"/build-tools/*/aapt 2>/dev/null |
 [ -n "$AAPT" ] && PKG="$("$AAPT" dump packagename "$SELECTED_APK" 2>/dev/null | tr -d '\r' || true)"
 PKG_LIST="$(adb_sh pm list packages)"
 if [ -z "$PKG" ]; then
-  for guess in com.ish.emulator.rust com.ish.emulator; do
+  for guess in com.ish.emulator.rust; do
     if grep -qx "package:$guess" <<<"$PKG_LIST"; then PKG="$guess"; break; fi
   done
 fi
@@ -246,15 +249,17 @@ wait_for_log() { # <pattern> <timeout-seconds>
   return 1
 }
 if wait_for_log "iSH Android Pure Rust" "$LOG_TIMEOUT"; then
-  ok "app logged its boot marker"
+  ok "app logged its boot marker (android_main ran, so NativeActivity resolved the symbol)"
 else
   bad "app never logged its boot marker within ${LOG_TIMEOUT}s (logcat tail follows in $OUT_DIR/logcat.txt)"
 fi
-if wait_for_log "Terminal.loaded=YES" 30; then
-  ok "hterm booted inside the WebView (native.load -> Terminal.loaded=YES)"
+# build_ui() reports this on Android through android_logger, i.e. only after
+# AppWindow::new() and the AppDelegate wiring both succeeded. A missing symbol or a
+# panic inside build_ui never prints it.
+if wait_for_log "TerminalBuffer ready" 60; then
+  ok "Slint UI built and wired (AppWindow + AppDelegate ready)"
 else
-  FAIL+=("term.js never reported native.load(), so hterm did not initialize")
-  note "check that assets/terminal/{hterm_all.js,term.js,term.css,term.html} shipped in the APK"
+  FAIL+=("the app never reported a ready UI - AppWindow::new or the wiring did not complete")
 fi
 adb logcat -d -b crash -v threadtime 2>/dev/null | grep -A 12 'FATAL EXCEPTION' > "$OUT_DIR/crash.txt" 2>/dev/null || true
 adb logcat -d 2>/dev/null | grep -A 12 'FATAL EXCEPTION' >> "$OUT_DIR/crash.txt" 2>/dev/null || true
