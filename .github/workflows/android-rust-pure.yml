@@ -72,8 +72,8 @@ jobs:
         run: |
           echo "=== ish-emu: cargo fetch + full lib test, ONLINE ONLY ==="
           cargo --version
-          cargo fetch 2>&1 | tail -n 20
-          cargo test --lib -- --list 2>&1 | tail -n 20
+          cargo fetch 2>&1 | tail -n 20 || true
+          cargo test --lib -- --list 2>&1 | tail -n 20 || true
           rc=0
           timeout 600 cargo test --lib -- --test-threads=1 > /tmp/core-test.log 2>&1 || rc=$?
           if [ "$rc" = "0" ]; then
@@ -81,18 +81,21 @@ jobs:
             tail -n 15 /tmp/core-test.log
             exit 0
           fi
-          tail -n 40 /tmp/core-test.log
+          tail -n 40 /tmp/core-test.log || true
           # With --test-threads=1 the harness prints "test <name> ..." before running it,
           # so the last line of that shape WITHOUT a verdict is the test that hung or blew up.
           # That names the culprit in one pass - no 50-module re-run loop (which cost ~30m).
-          SUSPECT=$(grep -E '^test [^ ]+ \.\.\.$' /tmp/core-test.log | tail -1 | awk '{print $2}')
-          FAILED=$(grep -E '^test .* \.\.\. FAILED$' /tmp/core-test.log | head -5 | awk '{print $2}' | paste -sd ' ' -)
+          # `|| true` is load-bearing: GitHub runs `run:` blocks under `bash -e`, and a
+          # grep that matches nothing returns 1, which would abort the step here -
+          # i.e. the diagnostics step eats its own error message.
+          SUSPECT=$(grep -E '^test [^ ]+ \.\.\.$' /tmp/core-test.log | tail -1 | awk '{print $2}' || true)
+          FAILED=$(grep -E '^test .* \.\.\. FAILED$' /tmp/core-test.log | head -5 | awk '{print $2}' | paste -sd ' ' - || true)
           if [ -n "$FAILED" ]; then
             echo "::error::ish-emu lib tests FAILED: $FAILED"
           elif [ -n "$SUSPECT" ]; then
             echo "::error::ish-emu lib test '$SUSPECT' did not finish within the 600s budget (exit $rc) - it hangs or is extremely slow"
           else
-            echo "::error::ish-emu lib test run failed with exit $rc before reporting any test"
+            echo "::error::ish-emu lib test run failed with exit $rc before reporting any test: $(tr '\n' '|' < /tmp/core-test.log | tail -c 900)"
           fi
           if [ "$RUST_CORE_STRICT" = "true" ]; then
             exit 1
