@@ -16,8 +16,26 @@ use std::sync::{Arc, Mutex};
 #[cfg(feature = "slint-ui")]
 slint::include_modules!();
 
+/// One log line for both targets: stdout on desktop, logcat (tag `iSH`) on Android.
+///
+/// println! is not visible on Android - a NativeActivity has no stdout, which is why
+/// the emulator checks had to grep for Kotlin Log.i output before. Everything the CI
+/// smoke test waits for goes through here.
 #[cfg(feature = "slint-ui")]
-pub fn run_desktop() {
+fn report(msg: &str) {
+    #[cfg(target_os = "android")]
+    log::info!("{}", msg);
+    #[cfg(not(target_os = "android"))]
+    println!("{}", msg);
+}
+
+/// Create the Slint window and wire it to the AppDelegate.
+///
+/// Split out of `run_desktop` so that the Android entry point shows the *same* UI
+/// rather than a parallel copy of the wiring that would drift the moment either side
+/// changed.
+#[cfg(feature = "slint-ui")]
+fn build_ui() -> AppWindow {
     let app_window = AppWindow::new().expect("Failed to create Slint AppWindow");
     
     let app_delegate = Arc::new(Mutex::new(AppDelegate::new()));
@@ -75,8 +93,33 @@ pub fn run_desktop() {
         }
     });
 
-    println!("[Android-RS] SlintUi + Servo WebView + hterm + TerminalBuffer running (ONLINE ONLY)");
-    app_window.run().expect("Slint run failed");
+    report("[Android-RS] SlintUi + Servo WebView + hterm + TerminalBuffer ready (ONLINE ONLY)");
+    app_window
+}
+
+#[cfg(feature = "slint-ui")]
+pub fn run_desktop() {
+    build_ui().run().expect("Slint run failed");
+}
+
+/// cargo-apk compiles this crate into a cdylib that `android.app.NativeActivity`
+/// loads, and that activity resolves the `android_main` symbol at startup. Without
+/// it the APK installs cleanly and dies on launch with an UnsatisfiedLinkError -
+/// which is what happened while the crate only had a desktop `main`.
+///
+/// `slint::android::init` installs Slint's android-activity backend as the platform,
+/// so `build_ui().run()` below is the identical desktop UI, same event loop and all.
+#[cfg(all(target_os = "android", feature = "slint-ui", feature = "android"))]
+#[no_mangle]
+fn android_main(app: slint::android::AndroidApp) {
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_min_level(log::Level::Info)
+            .with_tag("iSH"),
+    );
+    slint::android::init(app).expect("slint::android::init failed");
+    report("=== iSH Android Pure Rust (Slint + Servo + KVM) starting ===");
+    build_ui().run().expect("Slint run on Android failed");
 }
 
 #[cfg(not(feature = "slint-ui"))]
