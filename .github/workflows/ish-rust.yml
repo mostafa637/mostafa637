@@ -18,6 +18,8 @@ jobs:
   test:
     name: Format, test, and lint
     runs-on: ubuntu-latest
+    # No cap here meant a hung test burned the full 6h workflow timeout.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: ish-rs
@@ -33,5 +35,19 @@ jobs:
       - run: >-
           rustfmt --check --edition 2021
           src/cpu.rs src/user.rs src/task.rs src/group.rs src/getset.rs src/tls.rs src/misc.rs src/ipc.rs src/log.rs src/fake_db.rs src/resource.rs src/random.rs src/uname.rs tests/fpu_differential.rs
-      - run: cargo test --all-targets
+      - name: Test all targets (names the offender if it hangs)
+        run: |
+          set +e
+          timeout 1500 cargo test --all-targets > /tmp/all.log 2>&1
+          rc=$?
+          set -e
+          tail -n 25 /tmp/all.log
+          if [ "$rc" -ne 0 ]; then
+            # sequential harness prints 'test <name> ...' before running it, so the
+            # last such line without a verdict is the test that hung.
+            SUSPECT=$(grep -E '^test [^ ]+ \.\.\.$' /tmp/all.log | tail -1 | awk '{print $2}' || true)
+            FAILED=$(grep -E '^test .* \.\.\. FAILED$' /tmp/all.log | head -5 | awk '{print $2}' | paste -sd ' ' - || true)
+            echo "::error::cargo test --all-targets failed (exit $rc): ${FAILED:-${SUSPECT:-see log tail}}"
+            exit "$rc"
+          fi
       - run: cargo clippy --all-targets -- -D warnings

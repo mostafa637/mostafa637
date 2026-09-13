@@ -78,6 +78,26 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
+      # Deliberately BEFORE the pinned 1.89 toolchain, using the runner's own newer
+      # stable: current cargo-apk/cargo-ndk releases need a newer rustc to *build* than
+      # the project's pinned one. The failure used to be invisible because the step ran
+      # under continue-on-error, which is why this repo never had a Rust APK. The tools
+      # only shell out to cargo afterwards, so 1.89 still builds the app.
+      - name: Install cargo-apk and cargo-ndk
+        run: |
+          set +e
+          cargo install cargo-ndk cargo-apk --force --locked > /tmp/tools.log 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            { grep -E 'requires rustc|^error|no matching package|network' /tmp/tools.log | tail -n 12; } > /tmp/e.txt
+            [ -s /tmp/e.txt ] || tail -n 20 /tmp/tools.log > /tmp/e.txt
+            MSG=$(sed 's/%/%25/g' /tmp/e.txt | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
+            echo "::error::cargo install cargo-ndk cargo-apk failed (exit $rc): %0A${MSG}"
+            exit "$rc"
+          fi
+          cargo apk --version && cargo ndk --version
+
       - name: Set up Rust with the Android target
         uses: dtolnay/rust-toolchain@1.89.0
         with:
@@ -89,11 +109,6 @@ jobs:
         run: |
           sdkmanager --install "ndk;26.1.10909125" "build-tools;34.0.0" "platforms;android-${API_LEVEL}" 2>&1 | tail -n 2
           ls "$ANDROID_HOME/ndk" && ls "$ANDROID_HOME/build-tools"
-
-      - name: Install cargo-apk and cargo-ndk
-        run: |
-          cargo install cargo-ndk cargo-apk --force --locked
-          cargo apk --version && cargo ndk --version
 
       # Cargo.toml pins build_targets to x86_64 only, so this builds one ABI; a debug
       # build is deliberate - opt-level 3 + a full Slint/femtovg graph for a smoke
