@@ -80,23 +80,36 @@ jobs:
 
       # Deliberately BEFORE the pinned 1.89 toolchain, using the runner's own newer
       # stable: current cargo-apk/cargo-ndk releases need a newer rustc to *build* than
-      # the project's pinned one. The failure used to be invisible because the step ran
-      # under continue-on-error, which is why this repo never had a Rust APK. The tools
-      # only shell out to cargo afterwards, so 1.89 still builds the app.
+      # the project's pinned one. The failure used to be invisible under
+      # continue-on-error, which is why this repo never had a Rust APK. The installed
+      # binaries only shell out to cargo afterwards, so 1.89 still builds the app.
       - name: Install cargo-apk and cargo-ndk
         run: |
           set +e
-          cargo install cargo-ndk cargo-apk --force --locked > /tmp/tools.log 2>&1
+          {
+            echo "== toolchain on PATH =="
+            cargo --version; rustc --version
+            echo "== installing =="
+            cargo install cargo-ndk cargo-apk --force --locked
+          } > /tmp/tools.log 2>&1
           rc=$?
+          ls -l "$HOME/.cargo/bin" | grep -E "cargo-(ndk|apk)" >> /tmp/tools.log 2>&1
           set -e
+          TAIL=$(tail -n 14 /tmp/tools.log | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
           if [ "$rc" -ne 0 ]; then
-            { grep -E 'requires rustc|^error|no matching package|network' /tmp/tools.log | tail -n 12; } > /tmp/e.txt
-            [ -s /tmp/e.txt ] || tail -n 20 /tmp/tools.log > /tmp/e.txt
-            MSG=$(sed 's/%/%25/g' /tmp/e.txt | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
-            echo "::error::cargo install cargo-ndk cargo-apk failed (exit $rc): %0A${MSG}"
+            echo "::error::cargo install failed (exit $rc): %0A${TAIL}"
             exit "$rc"
           fi
-          cargo apk --version && cargo ndk --version
+          cargo apk --version > /tmp/tools2.log 2>&1; rc2=$?
+          cargo ndk --version >> /tmp/tools2.log 2>&1; rc3=$?
+          if [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ]; then
+            # The crates built but the subcommands do not resolve - usually a
+            # ~/.cargo/bin that is not on PATH for later steps, or a binary that
+            # renamed its CLI. Say which, instead of dying with a bare exit code.
+            echo "::error::cargo-apk/cargo-ndk installed but are not callable (apk=$rc2 ndk=$rc3): %0A$(cat /tmp/tools2.log | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')%0Ainstall log:%0A${TAIL}"
+            exit 1
+          fi
+          echo "cargo-apk and cargo-ndk are on PATH and answering"
 
       - name: Set up Rust with the Android target
         uses: dtolnay/rust-toolchain@1.89.0
