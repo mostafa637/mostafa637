@@ -29,9 +29,12 @@ on:
   workflow_dispatch:
 
 # Emulator jobs are long; two runs at once on the same ref just waste each other.
+# A push replaces a PR run, but never kills a run that is already 15 minutes into an
+# emulator job: with cancel-in-progress the next push cancels the build mid-flight and
+# the AVD cache never gets written. Queuing instead costs a few minutes and keeps both.
 concurrency:
   group: android-emulator-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
