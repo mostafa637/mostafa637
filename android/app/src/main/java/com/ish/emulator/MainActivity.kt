@@ -165,8 +165,13 @@ class MainActivity : AppCompatActivity() {
     private fun updateStyle() {
         // Matches TerminalView._updateStyle: fontFamily, fontSize, foregroundColor, backgroundColor, blinkCursor, cursorShape, colorPaletteOverrides
         val prefs = mapOf(
-            "fontFamily" to "ui-monospace",
-            "fontSize" to 14,
+            // 'ui-monospace' is an SF Mono alias that exists on Apple platforms only;
+            // on Android it resolves to the default proportional face unless a monospace
+            // fallback is present, which breaks hterm's fixed cell width.
+            "fontFamily" to "ui-monospace, monospace",
+            // 12 matches both UserPreferences' default on iOS and the status bar text
+            // this app prints; the old 14 contradicted both.
+            "fontSize" to 12,
             "foregroundColor" to "#ffffff",
             "backgroundColor" to "#000000",
             "blinkCursor" to false,
