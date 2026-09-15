@@ -2505,6 +2505,49 @@ static void test_breakpoint(void)
     assert(x86emu_step(&cpu) == X86EMU_OK);
 }
 
+static void test_movddup(void)
+{
+    uint8_t memory_bytes[128] = {
+        0xF2, 0x0F, 0x12, 0xC1,
+        0xC5, 0xFB, 0x12, 0xC1,
+        0xC5, 0xFF, 0x12, 0xC1,
+        0xC5, 0xFB, 0x12, 0x00
+    };
+    uint64_t source[4] = { UINT64_C(0x1122334455667788), UINT64_C(0x99AABBCCDDEEFF00),
+                           UINT64_C(0x0123456789ABCDEF), UINT64_C(0xFEDCBA9876543210) };
+    uint64_t result[4];
+    x86emu_cpu cpu;
+    x86emu_memory memory = { memory_bytes, sizeof(memory_bytes), 0 };
+    x86emu_init(&cpu, memory, 0);
+    memcpy(cpu.vector_registers[1], source, sizeof(source));
+    memset(cpu.vector_registers[0] + 16, 0xA5, 48);
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    memcpy(result, cpu.vector_registers[0], sizeof(result));
+    assert(result[0] == source[0] && result[1] == source[0]);
+    assert(cpu.vector_registers[0][16] == 0xA5);
+
+    cpu.rip = 4;
+    memset(cpu.vector_registers[0] + 16, 0xA5, 48);
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    memcpy(result, cpu.vector_registers[0], sizeof(result));
+    assert(result[0] == source[0] && result[1] == source[0]);
+    for (unsigned i = 16; i < 64; ++i) assert(cpu.vector_registers[0][i] == 0);
+
+    cpu.rip = 8;
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    memcpy(result, cpu.vector_registers[0], sizeof(result));
+    assert(result[0] == source[0] && result[1] == source[0]);
+    assert(result[2] == source[2] && result[3] == source[2]);
+    for (unsigned i = 32; i < 64; ++i) assert(cpu.vector_registers[0][i] == 0);
+
+    memcpy(memory_bytes + 32, &source[1], sizeof(uint64_t));
+    cpu.registers[X86EMU_RAX] = 32;
+    cpu.rip = 12;
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    memcpy(result, cpu.vector_registers[0], sizeof(result));
+    assert(result[0] == source[1] && result[1] == source[1]);
+}
+
 int main(void)
 {
     test_add_and_flags();
@@ -2575,6 +2618,7 @@ int main(void)
     test_phminposuw();
     test_xop_unsupported();
     test_breakpoint();
+    test_movddup();
     puts("x86emu tests passed");
     return 0;
 }

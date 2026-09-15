@@ -166,3 +166,8 @@ make clean && make check \
 أضيفت صيغ legacy register-only `MOVHLPS` و`MOVLHPS`، مع تمييزها عن صيغ `MOVLPS/MOVHPS` memory-only عند قراءة ModR/M. أضيفت أيضًا صيغ VEX.128 الثلاثية `VMOVHLPS` و`VMOVLHPS`، مع التحقق من register ModR/M و`VEX.L=0` وترتيب المصدرين.
 
 ينفذ legacy partial move مع الحفاظ على النصف غير المنقول والـphysical upper bytes، بينما تنفذ صيغ VEX merge بين low/high quadwords وتصفّر الحالة فوق 128 بت. تغطي الاختبارات source ordering، preservation، upper-zeroing، register validation، وترميزات VEX. اجتازت الدفعة strict C99 وASan/UBSan، ثم نُظفت نواتج البناء. لا يمثل هذا السجل release أو archive جديدًا.
+
+
+### دفعة MOVDDUP/VMOVDDUP
+
+أضيف دعم `MOVDDUP` legacy و`VMOVDDUP` VEX.128/VEX.256 مع تكرار double داخل كل 128-bit lane، وضبط memory widths إلى 8/32 بايت، والحفاظ على upper state في legacy وzeroing في VEX. شملت الاختبارات register وmemory وreserved VEX.vvvv، مع عدم إضافة أي تخصيص ذاكرة.

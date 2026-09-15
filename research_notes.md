@@ -395,3 +395,8 @@
 يستخدم `MOVHPS` و`MOVHPD` opcodes `0F 16/17` و`66 0F 16/17`، ويحمّلان أو يخزّنان high 64 bits مع إبقاء الجزء الآخر وفق المرجع. ستبدأ الدفعة بصيغ legacy memory-only فقط، ولن تُضاف VEX merge forms لأن لها operand ثالثًا VEX.vvvv وسلوكًا مختلفًا يحتاج مسارًا منفصلًا. في نموذج user-mode تُنفذ m64 كـborrowed memory بعرض 8 بايت مع bounds checking، دون ادعاء محاكاة FP exceptions أو alignment faults.
 
 المراجع: https://www.felixcloutier.com/x86/movlps و https://www.felixcloutier.com/x86/movlpd
+
+
+## دفعة MOVDDUP
+
+راجعت مرجع Intel/Felix Cloutier لـ`MOVDDUP`: الترميز legacy هو `F2 0F 12 /r`، وترميزات VEX هي `VEX.128.F2.0F.WIG 12 /r` و`VEX.256.F2.0F.WIG 12 /r`. legacy يكرر low qword إلى qwordين ويحافظ على ما فوق XMM، بينما VEX.128 يمسح ما فوق 128 وVEX.256 يكرر زوجًا داخل كل 128-bit lane ويمسح ما فوق 256. أضيف decoder يدوي وexecutor borrowed-memory واختبارات register/memory وupper-state. صيغ EVEX وmasking غير مفعلة. اجتازت الدفعة strict C99 وASan/UBSan.

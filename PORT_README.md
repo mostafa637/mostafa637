@@ -193,3 +193,8 @@ int main(void)
 أضيفت كذلك صيغ VEX.128 الثلاثية `VMOVHLPS xmm1, xmm2, xmm3` و`VMOVLHPS xmm1, xmm2, xmm3`. في `VMOVHLPS` يأتي low quadword من high quadword للمصدر الثالث ModR/M.r/m، ويأتي high quadword من high quadword للمصدر الثاني VEX.vvvv. في `VMOVLHPS` يأتي low quadword من low quadword للمصدر الثاني، ويأتي high quadword من low quadword للمصدر الثالث. يتحقق decoder من register ModR/M و`VEX.L=0`، ويطبق executor upper-zeroing فوق 128 بت في صيغ VEX، مع preservation للـphysical upper bytes في الصيغ legacy.
 
 لا تحاكي هذه الدفعة floating-point exceptions أو EVEX masking؛ فالتعليمات تنقل bit patterns فقط ضمن نموذج XMM user-mode.
+
+
+## دفعة MOVDDUP وVMOVDDUP
+
+أضيفت `MOVDDUP` legacy SSE3 بصيغة XMM ومصدر XMM أو m64، مع `VMOVDDUP` VEX.128/VEX.256 ومصدر XMM/m64 أو YMM/m256. يكرر التنفيذ قيمة double ذات الفهرس الزوجي داخل كل 128-bit lane: في XMM يكرر low 64-bit، وفي YMM يكرر low وhigh كل lane على حدة. تحافظ صيغة legacy على الحالة الفيزيائية فوق 128-bit، بينما تصفر صيغ VEX ما فوق VL. يتحقق decoder من حقل `VEX.vvvv` المحجوز وفق الترميز، وتبقى صيغ EVEX masked خارج نطاق هذه الدفعة. جميع عمليات الذاكرة تستخدم borrowed memory مع فحص الحدود ودون أي allocator داخلي.
