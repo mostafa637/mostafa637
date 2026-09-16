@@ -176,3 +176,8 @@ make clean && make check \
 ### دفعة MOVSHDUP/VMOVSHDUP
 
 أضيف دعم `MOVSHDUP` legacy و`VMOVSHDUP` VEX.128/VEX.256، مع duplicate للقيم الفردية داخل كل 128-bit lane، memory widths الصحيحة 16/32 بايت، upper-state preservation في legacy وzeroing في VEX، والتحقق من `VEX.vvvv`. شملت الاختبارات register وmemory وXMM/YMM، دون إضافة أي allocator.
+
+
+### دفعة MOVSLDUP/VMOVSLDUP
+
+أضيف دعم `MOVSLDUP` legacy و`VMOVSLDUP` VEX.128/VEX.256، مع duplicate للقيم الزوجية داخل كل 128-bit lane، memory widths الصحيحة 16/32 بايت، upper-state preservation في legacy وzeroing في VEX، والتحقق من `VEX.vvvv`. شملت الاختبارات register وmemory وXMM/YMM، دون إضافة أي allocator.

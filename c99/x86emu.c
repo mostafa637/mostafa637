@@ -1809,6 +1809,32 @@ x86emu_error x86emu_step(x86emu_cpu *cpu)
         }
         break;
     }
+    case X86ASM_OP_MOVSLDUP:
+    case X86ASM_OP_VMOVSLDUP: {
+        bool legacy = instruction->opcode == X86ASM_OP_MOVSLDUP;
+        unsigned vector_bytes = legacy ? 16u : width / 8u;
+        unsigned source_bytes = legacy ? 16u : vector_bytes;
+        uint8_t source[32];
+        uint8_t output[32];
+        if (vector_bytes > sizeof(output) || source_bytes > sizeof(source) ||
+            !read_vector_argument(cpu, instruction, &instruction->arguments[1], source_bytes, source)) {
+            result = X86EMU_ERR_MEMORY;
+        } else {
+            for (unsigned lane = 0; lane < vector_bytes; lane += 16u) {
+                memcpy(output + lane, source + lane, 4u);
+                memcpy(output + lane + 4u, source + lane, 4u);
+                memcpy(output + lane + 8u, source + lane + 8u, 4u);
+                memcpy(output + lane + 12u, source + lane + 8u, 4u);
+            }
+            if (!write_vector_argument(cpu, instruction, &instruction->arguments[0], vector_bytes, output)) {
+                result = X86EMU_ERR_MEMORY;
+            } else {
+                if (!legacy) zero_vector_upper_width(cpu, &instruction->arguments[0], vector_bytes);
+                cpu->rip = next_rip;
+            }
+        }
+        break;
+    }
     case X86ASM_OP_ADDSS:
     case X86ASM_OP_SUBSS:
     case X86ASM_OP_MULSS:

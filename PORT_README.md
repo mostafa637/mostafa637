@@ -203,3 +203,8 @@ int main(void)
 ## دفعة MOVSHDUP وVMOVSHDUP
 
 أضيفت `MOVSHDUP` legacy SSE3 بصيغة XMM ومصدر XMM أو m128، مع `VMOVSHDUP` VEX.128/VEX.256 ومصدر XMM/m128 أو YMM/m256. يكرر التنفيذ القيم ذات الفهارس الفردية من كل 128-bit lane إلى زوجي عناصر متجاورين: 32-bit العنصر 1 إلى 0 و1، و3 إلى 2 و3، مع التكرار نفسه في النصف التالي من YMM. تحافظ صيغة legacy على ما فوق 128-bit، بينما تصفر صيغ VEX ما فوق VL. يدعم decoder التحقق من `VEX.vvvv` المحجوز، وتبقى صيغ EVEX masking خارج النطاق. الذاكرة borrowed بالكامل مع bounds checking ودون allocator داخل المحاكي.
+
+
+## دفعة MOVSLDUP وVMOVSLDUP
+
+أضيفت `MOVSLDUP` legacy SSE3 بصيغة XMM ومصدر XMM أو m128، مع `VMOVSLDUP` VEX.128/VEX.256 ومصدر XMM/m128 أو YMM/m256. يكرر التنفيذ القيم ذات الفهارس الزوجية من كل 128-bit lane: العنصر 0 إلى 0 و1، والعنصر 2 إلى 2 و3، مع التكرار نفسه في النصف التالي من YMM. تحافظ صيغة legacy على ما فوق 128-bit، بينما تصفر صيغ VEX ما فوق VL. يتحقق decoder من `VEX.vvvv` المحجوز، وتبقى صيغ EVEX masking خارج النطاق. الذاكرة borrowed بالكامل مع bounds checking ودون allocator داخل المحاكي.

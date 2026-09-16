@@ -2589,6 +2589,47 @@ static void test_movshdup(void)
     assert(result[0] == 2u && result[1] == 2u && result[2] == 4u && result[3] == 4u);
 }
 
+static void test_movsldup(void)
+{
+    uint8_t code[64] = {
+        0xF3, 0x0F, 0x12, 0xC1,
+        0xC5, 0xFA, 0x12, 0xC1,
+        0xC5, 0xFE, 0x12, 0xC1,
+        0xC5, 0xFA, 0x12, 0x00
+    };
+    uint32_t source[8] = { 1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u };
+    uint32_t result[8];
+    x86emu_cpu cpu;
+    x86emu_memory memory = { code, sizeof(code), 0 };
+    x86emu_init(&cpu, memory, 0);
+    memcpy(cpu.vector_registers[1], source, sizeof(source));
+    memset(cpu.vector_registers[0] + 16, 0xA5, 48);
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    memcpy(result, cpu.vector_registers[0], sizeof(result));
+    assert(result[0] == 1u && result[1] == 1u && result[2] == 3u && result[3] == 3u);
+    assert(cpu.vector_registers[0][16] == 0xA5);
+
+    cpu.rip = 4;
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    memcpy(result, cpu.vector_registers[0], sizeof(result));
+    assert(result[0] == 1u && result[1] == 1u && result[2] == 3u && result[3] == 3u);
+    for (unsigned i = 16; i < 64; ++i) assert(cpu.vector_registers[0][i] == 0);
+
+    cpu.rip = 8;
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    memcpy(result, cpu.vector_registers[0], sizeof(result));
+    assert(result[0] == 1u && result[1] == 1u && result[2] == 3u && result[3] == 3u);
+    assert(result[4] == 5u && result[5] == 5u && result[6] == 7u && result[7] == 7u);
+    for (unsigned i = 32; i < 64; ++i) assert(cpu.vector_registers[0][i] == 0);
+
+    memcpy(code + 32, source, 16);
+    cpu.registers[X86EMU_RAX] = 32;
+    cpu.rip = 12;
+    assert(x86emu_step(&cpu) == X86EMU_OK);
+    memcpy(result, cpu.vector_registers[0], sizeof(result));
+    assert(result[0] == 1u && result[1] == 1u && result[2] == 3u && result[3] == 3u);
+}
+
 int main(void)
 {
     test_add_and_flags();
@@ -2661,6 +2702,7 @@ int main(void)
     test_breakpoint();
     test_movddup();
     test_movshdup();
+    test_movsldup();
     puts("x86emu tests passed");
     return 0;
 }
