@@ -400,3 +400,8 @@
 ## دفعة MOVDDUP
 
 راجعت مرجع Intel/Felix Cloutier لـ`MOVDDUP`: الترميز legacy هو `F2 0F 12 /r`، وترميزات VEX هي `VEX.128.F2.0F.WIG 12 /r` و`VEX.256.F2.0F.WIG 12 /r`. legacy يكرر low qword إلى qwordين ويحافظ على ما فوق XMM، بينما VEX.128 يمسح ما فوق 128 وVEX.256 يكرر زوجًا داخل كل 128-bit lane ويمسح ما فوق 256. أضيف decoder يدوي وexecutor borrowed-memory واختبارات register/memory وupper-state. صيغ EVEX وmasking غير مفعلة. اجتازت الدفعة strict C99 وASan/UBSan.
+
+
+## دفعة MOVSHDUP
+
+راجعت مرجع Intel/Felix Cloutier لـ`MOVSHDUP`: الترميز legacy هو `F3 0F 16 /r`، وترميزات VEX هي `VEX.128.F3.0F.WIG 16 /r` و`VEX.256.F3.0F.WIG 16 /r`. العملية تختار odd-indexed single-precision elements داخل كل 128-bit lane وتكرر كل عنصر في زوج متجاور. legacy يحافظ على ما فوق XMM، وVEX يمسح ما فوق VL، و`VEX.vvvv` محجوز. أضيف decoder يدوي وexecutor borrowed-memory واختبارات register/memory وXMM/YMM وupper-state. صيغ EVEX غير مفعلة. اجتازت الدفعة strict C99 وASan/UBSan.

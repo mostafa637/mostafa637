@@ -41,12 +41,22 @@ int main(void)
     static const uint8_t vmovddup_xmm_mem[] = { 0xC5, 0xFB, 0x12, 0x00 };
     static const uint8_t vmovddup_ymm_mem[] = { 0xC5, 0xFF, 0x12, 0x00 };
     static const uint8_t vmovddup_bad_vvvv[] = { 0xC5, 0xF3, 0x12, 0xC1 };
+    static const uint8_t movshdup_xmm[] = { 0xF3, 0x0F, 0x16, 0xC1 };
+    static const uint8_t vmovshdup_xmm[] = { 0xC5, 0xFA, 0x16, 0xC1 };
+    static const uint8_t vmovshdup_ymm[] = { 0xC5, 0xFE, 0x16, 0xC1 };
+    static const uint8_t vmovshdup_xmm_mem[] = { 0xC5, 0xFA, 0x16, 0x00 };
+    static const uint8_t vmovshdup_ymm_mem[] = { 0xC5, 0xFE, 0x16, 0x00 };
     check(movddup_xmm, sizeof(movddup_xmm), X86ASM_OP_MOVDDUP, "f2 movddup xmm0, xmm1");
     check(vmovddup_xmm, sizeof(vmovddup_xmm), X86ASM_OP_VMOVDDUP, "c5 fb vmovddup xmm0, xmm1");
     check(vmovddup_ymm, sizeof(vmovddup_ymm), X86ASM_OP_VMOVDDUP, "c5 ff vmovddup ymm0, ymm1");
     check(vmovddup_xmm_mem, sizeof(vmovddup_xmm_mem), X86ASM_OP_VMOVDDUP, "c5 fb vmovddup xmm0, [rax]");
     check(vmovddup_ymm_mem, sizeof(vmovddup_ymm_mem), X86ASM_OP_VMOVDDUP, "c5 ff vmovddup ymm0, [rax]");
     check_error(vmovddup_bad_vvvv, sizeof(vmovddup_bad_vvvv), X86ASM_ERR_UNRECOGNIZED);
+    check(movshdup_xmm, sizeof(movshdup_xmm), X86ASM_OP_MOVSHDUP, "f3 movshdup xmm0, xmm1");
+    check(vmovshdup_xmm, sizeof(vmovshdup_xmm), X86ASM_OP_VMOVSHDUP, "c5 fa vmovshdup xmm0, xmm1");
+    check(vmovshdup_ymm, sizeof(vmovshdup_ymm), X86ASM_OP_VMOVSHDUP, "c5 fe vmovshdup ymm0, ymm1");
+    check(vmovshdup_xmm_mem, sizeof(vmovshdup_xmm_mem), X86ASM_OP_VMOVSHDUP, "c5 fa vmovshdup xmm0, [rax]");
+    check(vmovshdup_ymm_mem, sizeof(vmovshdup_ymm_mem), X86ASM_OP_VMOVSHDUP, "c5 fe vmovshdup ymm0, [rax]");
     static const uint8_t mov_rax_imm[] = { 0x48, 0xB8, 0x78, 0x56, 0x34, 0x12,
                                             0x00, 0x00, 0x00, 0x00 };
     static const uint8_t add_rax_rbx[] = { 0x48, 0x01, 0xD8 };
