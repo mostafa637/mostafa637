@@ -111,4 +111,22 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit 0
 
-      - run: cargo clippy --all-targets -- -D warnings
+      - name: Lint, naming every denial
+        run: |
+          # Same treatment as the test step: -D warnings fails the job on lint output that
+          # nobody outside the run can read, and this step only became reachable once the
+          # test deadlock was fixed. De-colour first - the '^error' patterns are otherwise
+          # matched against lines that start with escape codes.
+          set +e
+          CARGO_TERM_COLOR=never cargo clippy --all-targets -- -D warnings > /tmp/clippy.log 2>&1
+          rc=$?
+          set -e
+          sed -i -e 's/\x1b\[[0-9;]*m//g' /tmp/clippy.log || true
+          grep -E '^(error|warning)(\[|:)' /tmp/clippy.log | sort | uniq -c | sort -rn | head -n 12
+          if [ "$rc" -ne 0 ]; then
+            MSG=$(grep -A2 -E '^(error|warning)(\[|:)' /tmp/clippy.log | grep -E '^(error|warning| +-->)' | head -n 14 | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
+            echo ""
+            echo "::error::cargo clippy --all-targets -- -D warnings failed (exit $rc): %0A${MSG}"
+            { printf '\n### clippy (exit %s)\n\n```\n' "$rc"; grep -E '^(error|warning)(\[|:)|^ +-->' /tmp/clippy.log | head -n 40 | sed 's/>/>/'; printf '\n```\n'; } >> "$GITHUB_STEP_SUMMARY"
+            exit "$rc"
+          fi
