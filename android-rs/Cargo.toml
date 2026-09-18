@@ -22,12 +22,18 @@ ish-emu = { path = "../ish-rs" }
 # backend-android-activity-06 is safe to enable on every target: Slint selects the
 # winit backend for desktop builds and the android-activity one when
 # target_os = "android", so the same feature list works for both CI jobs.
-slint = { version = "1.8.0", features = ["backend-winit", "renderer-femtovg", "backend-android-activity-06", "compat-1-2"], optional = true }
+# 1.18, not 1.8: a caret "1.8.0" already allowed every 1.x, so resolution
+# silently picked up whatever is current. Stating it keeps Cargo.lock, the docs you
+# read and the toolchain below in agreement. Slint's workspace rust-version is 1.92,
+# which is why the CI jobs that build this crate use a newer rustc than ish-rs needs.
+# compat-1-18 replaces compat-1-2, which no longer exists in this version (upstream
+# examples/todo/rust uses the same feature).
+slint = { version = "1.18", features = ["backend-winit", "renderer-femtovg", "backend-android-activity-06", "compat-1-18"], optional = true }
 log = { version = "0.4", optional = true }
 android_logger = { version = "0.13", optional = true }
 
 [build-dependencies]
-slint-build = { version = "1.8.0", optional = true }
+slint-build = { version = "1.18", optional = true }
 
 [features]
 default = ["slint-ui", "android"]
