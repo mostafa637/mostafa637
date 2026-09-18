@@ -136,15 +136,22 @@ export component AppWindow inherits Window {
                         command-line := TextInput {
                             // named so the Window can hand it keyboard focus (see forward-focus)
                             height: 100%;
-                            text: root.input-text;
+                            // Two-way, not `text: root.input-text`.  With a one-way
+                            // binding the editor owns its own buffer the moment you type,
+                            // so the `root.input-text = ""` below never reached it: the
+                            // emulator screenshot showed the line still holding
+                            // "apk add python3python3 --version" and every ENTER re-sent
+                            // the whole accumulated buffer.  This is the shape upstream
+                            // LineEditBase uses (`in-out property <string> text <=>
+                            // text-input.text;`), and it is why that file has no `edited`
+                            // handler either - the binding keeps input-text in step.
+                            text <=> root.input-text;
+                            single-line: true;
                             color: #ffffff;
                             font-family: "monospace";
                             accepted => {
                                 root.input-submitted(self.text);
                                 root.input-text = "";
-                            }
-                            edited => {
-                                root.input-text = self.text;
                             }
                         }
                     }

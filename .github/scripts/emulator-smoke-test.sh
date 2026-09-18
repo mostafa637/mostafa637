@@ -355,10 +355,15 @@ for pair in "${UI_PAIRS[@]}"; do
   # on_input_submitted reports every command through android_logger, so this is what
   # distinguishes "the UI processed the keys" from "nothing had focus" - seven identical
   # screenshots could not tell the two apart, which is how the previous run stayed quiet.
-  if wait_for_log "\[Android-RS\] command: $cmd" 20; then
+  # Anchored with $ on purpose.  Without it an input line that is never cleared would
+  # still satisfy every check after the first, because the accumulated buffer *ends*
+  # with the newest command ("command: apk add python3python3 --version" contains
+  # "command: python3 --version").  The anchor makes "the app saw exactly this
+  # command" the assertion, which is the one the screenshots cannot make for us.
+  if wait_for_log "\[Android-RS\] command: $cmd\$" 20; then
     ok "typed input reached the focused input: '$cmd'"
   else
-    bad "typing '$cmd' never reached the app - hardware keys are not driving the UI"
+    bad "the app never logged exactly '$cmd' on its own line - either the keys reached no focused input, or the input line is not cleared and ENTER re-submitted the accumulated buffer (that is what the previous run did: 'command: apk add python3python3 --version')"
   fi
   sleep 2
   shot "screen-$label"
