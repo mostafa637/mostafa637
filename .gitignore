@@ -1,0 +1,6 @@
+# Python bytecode from the test-corpus generator
+__pycache__/
+*.pyc
+
+# Built emulator
+/arm64chroot-go
