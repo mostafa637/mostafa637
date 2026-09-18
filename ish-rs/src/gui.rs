@@ -2429,7 +2429,16 @@ mod tests {
     fn terminal_manager_maps() {
         let t1 = Terminal::terminal_with_type(5, 1);
         let t2 = Terminal::terminal_with_type(5, 1);
-        assert_eq!(t1.lock().unwrap().uuid, t2.lock().unwrap().uuid);
+        // assert_eq! borrows both operands for the whole statement, so the MutexGuard
+        // each side produces is still alive while the other side is evaluated - and t1
+        // and t2 are clones of the SAME Arc, so the second .lock() blocks forever on a
+        // lock the first one still holds. That is the hang CI had been timing out on
+        // (gui::tests::terminal_manager_maps, reproducible with `cargo test --lib
+        // gui::tests::terminal_manager_maps -- --exact`): the test was wrong, not the
+        // manager. Reading both values into locals drops each guard before the next lock.
+        let uuid_t1 = t1.lock().unwrap().uuid.clone();
+        let uuid_t2 = t2.lock().unwrap().uuid.clone();
+        assert_eq!(uuid_t1, uuid_t2);
         let uuid = t1.lock().unwrap().uuid.clone();
         let found = Terminal::terminal_with_uuid(&uuid);
         assert!(found.is_some());
