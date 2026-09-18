@@ -51,7 +51,7 @@ Each group is built and run as its own guest program, so a snippet that traps
 costs one group's results rather than the whole corpus, and every reported word
 carries the name of the group that produced it.
 
-Current status: **219 of 224 results match**, with five documented differences
+Current status: **288 of 293 results match**, with five documented differences
 (see *Feature advertisements* and *Generic timer* below). Passing `-j` in
 `ARM64EMU_FLAGS` runs the same corpus through the JIT, with the same totals.
 
@@ -155,7 +155,7 @@ rather than an oversight:
 
 | C source | lines | state here |
 |---|---|---|
-| `core/exec_fpsimd.c` | 4501 | **ported in three slices.** `core/fpsimd.go` has scalar FP (single and double); `core/fpsimd_simd.go` has the Advanced SIMD integer groups (three-same, modified immediate, copy, shift by immediate). Still missing: half-precision, the FP three-same and FP16 vector groups, the by-element and table/permute groups, the narrowing shifts and the crypto extensions. |
+| `core/exec_fpsimd.c` | 4501 | **ported in four slices.** `core/fpsimd.go` has scalar FP (single and double); `core/fpsimd_simd.go` has the Advanced SIMD integer groups (three-same, modified immediate, copy, shift by immediate); `core/fpsimd_simd_fp.go` has the vector FP three-same group; `core/fpsimd_fp16.go` has scalar half-precision. Still missing: the vector half-precision groups, the by-element and table/permute groups, the narrowing shifts and the crypto extensions. |
 | `jit/backend_a64.c`, `backend_x86_32.c`, `backend_arm32.c` | 8354 | not ported; see *The JIT* |
 | `sys_netlink.c` | 2048 | not ported (NETLINK_ROUTE dumps for `getaddrinfo`) |
 | `sys_procfs.c` | 1991 | not ported (the synthetic `/proc` and `/sys`) |
@@ -170,17 +170,41 @@ rather than an oversight:
 
 ## Floating point
 
-Scalar FP (single and double) is complete, including the fused multiply-add
-family and the FP<->integer conversions with the architecture's saturation
-rules. `core/fpsimd_simd.go` adds the integer half of Advanced SIMD: the
-three-same group (arithmetic, compares, min/max, the halving and saturating
-variants, the register shifts, PMUL, the pairwise forms and the whole-register
-logicals), the modified immediate (MOVI/MVNI/ORR/BIC/FMOV), the copy group
-(DUP/INS/UMOV/SMOV) and the shifts by immediate (SHL/SSHR/USHR/SLI/SRI/SSRA/
-USRA/SRSHR/URSHR/SRSRA/URSRA/SQSHL/UQSHL/SQSHLU/SSHLL/USHLL).
+Scalar FP is complete for all three precisions, including the fused
+multiply-add family and the FP<->integer conversions with the architecture's
+saturation rules. `core/fpsimd_simd.go` adds the integer half of Advanced
+SIMD: the three-same group (arithmetic, compares, min/max, the halving and
+saturating variants, the register shifts, PMUL, the pairwise forms and the
+whole-register logicals), the modified immediate (MOVI/MVNI/ORR/BIC/FMOV), the
+copy group (DUP/INS/UMOV/SMOV) and the shifts by immediate (SHL/SSHR/USHR/
+SLI/SRI/SSRA/USRA/SRSHR/URSHR/SRSRA/URSRA/SQSHL/UQSHL/SQSHLU/SSHLL/USHLL).
 
-Both files compute element-wise, taking the element size and lane count from
+`core/fpsimd_simd_fp.go` is the vector FP three-same group on 32- and 64-bit
+lanes: FADD FSUB FMUL FDIV FMLA FMLS FMAX FMIN FMAXNM FMINNM FMAXP FMINP
+FMAXNMP FMINNMP FADDP FMULX FABD FRECPS FRSQRTS FCMEQ FCMGE FCMGT FACGE FACGT.
+`core/fpsimd_fp16.go` is scalar half-precision, which is never computed in:
+every operation widens to double, computes, and narrows once.
+
+All of them compute element-wise, taking the element size and lane count from
 the encoding exactly as the C does, so the port stays diffable against it.
+
+Two details of the half-precision path are worth recording, because both are
+invisible until a result is wrong:
+
+* Widening goes half -> double *directly*. Going through `float` quiets a
+  signaling NaN, after which the NaN ranking, the comparisons' signaling
+  detection and the fused multiply-add's quiet-addend rule all see the wrong
+  class of NaN.
+* Narrowing *adds* the rounded significand to the exponent field rather than
+  OR-ing it in: the significand carries the leading fraction bit at bit 10, and
+  it is that bit's carry which makes a fraction that rounded up become the next
+  exponent. An `|` there produces a result one exponent too small, which is
+  exactly what `fcvt h0, s0` of pi reported.
+
+Half-precision is advertised as absent — ID_AA64PFR0_EL1's FP field is 0b0000
+and HWCAP_FPHP/ASIMDHP stay clear — because FEAT_FP16 covers the vector
+half-precision groups too, and those are still unported. FP and AdvSIMD
+themselves are advertised: the base FP and the ported vector groups back them.
 
 ## Testing
 

@@ -266,7 +266,7 @@ func execSIMDThreeSame(e *fpEnv, insn uint32) {
 	rd := bits(insn, 4, 0)
 
 	if opc >= 0x18 {
-		undefined(c, insn) // FP three-same: on demand
+		execSIMDThreeSameFP(e, insn) // FP three-same: .2s/.4s/.2d
 		return
 	}
 

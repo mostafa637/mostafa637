@@ -35,8 +35,10 @@ mem/     the guest address space
 elf/     AArch64 ELF loader
 linux/   Linux-user layer: 107 syscalls, process state, guest signals
 jit/     IR + A64 lifter + x86-64 backend
-core/fpsimd.go       scalar floating point (single and double)
+core/fpsimd.go       scalar floating point (single, double and half)
 core/fpsimd_simd.go  the Advanced SIMD integer groups
+core/fpsimd_simd_fp.go  the vector floating-point three-same group
+core/fpsimd_fp16.go  scalar half-precision (widened to double, narrowed once)
 main.go  command line and run loop
 tests/   differential test corpus and runner
 ```
@@ -44,7 +46,7 @@ tests/   differential test corpus and runner
 ## Status
 
 The interpreter is complete except for half-precision, the FP/vector groups
-and the crypto extensions: a 224-result AArch64 corpus, run under both the C
+and the crypto extensions: a 293-result AArch64 corpus, run under both the C
 emulator and this one, matches on all but five words, and those five are the
 feature fields (AdvSIMD, AES, SHA, RDM, DotProd, FHM, JSCVT, FCMA) that are
 deliberately advertised as absent until the executor behind them exists. The

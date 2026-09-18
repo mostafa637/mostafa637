@@ -91,12 +91,19 @@ func (f FeatureSet) HWCap2() uint64 {
 // IDPFR0 is ID_AA64PFR0_EL1: the EL0/EL1 AArch64 fields plus the FP and
 // AdvSIMD fields that say whether the FP/SIMD registers exist at all.
 func (f FeatureSet) IDPFR0() uint64 {
+	// The FP and AdvSIMD fields are not enable bits: a field of 0b0000 already
+	// means "implemented", and 0b0001 adds half-precision (FEAT_FP16). So the
+	// half-precision support is what sets a bit, not the feature itself.
 	v := uint64(0x22) // EL0 = EL1 = AArch64 (+AArch32 at EL0)
+	var fp uint64
+	if f.FP16 {
+		fp = 1
+	}
 	if f.FP {
-		v |= 1 << 16
+		v |= fp << 16
 	}
 	if f.ASIMD {
-		v |= 1 << 20
+		v |= fp << 20
 	}
 	return v
 }

@@ -14,6 +14,7 @@ group's results and the report names the group that produced every word.
 
 Environment:
     ARM64EMU_ORACLE  path to the reference arm64chroot (default
+                     ./.oracle/arm64emu-user/arm64chroot, else
                      /tmp/arm64emu-user/arm64chroot)
     ARM64EMU_GO      path to the Go binary under test (default
                      ./arm64chroot-go, i.e. `go build -o arm64chroot-go .`)
@@ -29,7 +30,12 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mkelf  # noqa: E402
 
-ORACLE = os.environ.get("ARM64EMU_ORACLE", "/tmp/arm64emu-user/arm64chroot")
+# The reference build: the C emulator this port was made from, cloned and
+# built by `.oracle/`-side instructions in docs/PORT.md.
+DEFAULT_ORACLE = "/tmp/arm64emu-user/arm64chroot"
+if os.path.exists("./.oracle/arm64emu-user/arm64chroot"):
+    DEFAULT_ORACLE = "./.oracle/arm64emu-user/arm64chroot"
+ORACLE = os.environ.get("ARM64EMU_ORACLE", DEFAULT_ORACLE)
 GO = os.environ.get("ARM64EMU_GO", "./arm64chroot-go")
 
 

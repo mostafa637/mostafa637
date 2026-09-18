@@ -312,13 +312,7 @@ func (e *fpEnv) arith(op int, a, b float64) float64 {
 // folded into the operands before the NaN processing, because FMSUB of a NaN
 // multiplicand returns it negated.
 func (e *fpEnv) mulAdd(a, n, m float64) float64 {
-	r := math.FMA(n, m, a)
-	if math.IsNaN(a) && !isSNaN64(a) &&
-		((math.IsInf(n, 0) && m == 0) || (n == 0 && math.IsInf(m, 0))) {
-		e.exc |= fpsrIOC
-		return math.NaN()
-	}
-	return e.propagateNaN3(r, a, n, m)
+	return e.propagateMulAdd(math.FMA(n, m, a), a, n, m)
 }
 
 // ---- rounding -------------------------------------------------------------
@@ -454,7 +448,16 @@ func (c *CPU) fpSetFlags(cmp int) {
 // exec_fpsimd weak.
 var FPSIMDExec func(c *CPU, insn uint32)
 
-func init() { FPSIMDExec = execFPSIMD }
+// The FP and AdvSIMD features become advertisable once the families that
+// back them are executable: the scalar single/double (and half) forms, and
+// the vector integer and FP three-same groups. FEAT_FP16 -- and so the FP16
+// field of ID_AA64PFR0_EL1 and HWCAP_FPHP/ASIMDHP -- stays off: the vector
+// half-precision groups are not ported, and the field covers both.
+func init() {
+	Features.FP = true
+	Features.ASIMD = true
+	FPSIMDExec = execFPSIMD
+}
 
 func execFPSIMD(c *CPU, insn uint32) {
 	// FZ and FZ16 are latched for the instruction in flight: they decide a
@@ -510,8 +513,14 @@ func execFPScalar(e *fpEnv, insn uint32) {
 		return
 	}
 
+	// Half-precision: widened to double, computed, and narrowed once. The
+	// FCVT half converts share their encoding page with the single and double
+	// 1-source group, so this runs before the precision is known.
+	if execFPScalarH(e, insn) {
+		return
+	}
 	if ftype != 0 && ftype != 1 {
-		undefined(c, insn) // half-precision: on demand
+		undefined(c, insn)
 		return
 	}
 

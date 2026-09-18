@@ -33,24 +33,6 @@ DATA_OFF = 0x4000   # the corpus grew past a single page
 IMAGE = 0x3000
 
 SCRATCH = DATA_VA + 0x100   # scratch doubleword for the load/store corpus
-BUF = DATA_VA + 0x300       # results buffer
-
-_KS = None
-
-
-_BIG_IMM = re.compile(r"\bmov\s+(x\d+),\s*#(0x[0-9a-fA-F]+|\d+)")
-
-
-def expand_imms(text):
-    """Keystone only accepts a `mov xN, #imm` that fits MOVZ/MOVN or the ORR
-    bitmask form; anything wider has to be spelled out with MOVZ/MOVK."""
-    def repl(m):
-        val = int(m.group(2), 0) & 0xFFFFFFFFFFFFFFFF
-        if val <= 0xFFFF:
-            return m.group(0)
-        return movabs(int(m.group(1)[1:]), val)
-    return _BIG_IMM.sub(repl, text)
-
 
 def asm(text):
     global _KS
@@ -105,6 +87,89 @@ def ldop(opc, rs, rn, rt):
 
 SWP = lambda rs, rn, rt: 0xF8208000 | (rs << 16) | (rn << 5) | rt
 CAS = lambda rs, rn, rt: 0xC8A00000 | (rs << 16) | (rn << 5) | rt
+
+
+# The vector FP corpus builds its operands a doubleword at a time with INS, so
+# the lane bits are exact and independent of how an emulator spells a float
+# constant.
+#   v0.4s = { 1.0, 2.0, 3.0, 4.0 }   v1.4s = { 0.5, 1.5, -2.0, 8.0 }
+FPVEC = ("; ".join([
+    movabs(2, 0x400000003f800000), movabs(3, 0x4080000040400000),
+    "ins v0.d[0], x2", "ins v0.d[1], x3",
+    movabs(2, 0x3fc000003f000000), movabs(3, 0x41000000c0000000),
+    "ins v1.d[0], x2", "ins v1.d[1], x3"]) + "; ")
+#   v0.2d = { 1.0, 2.0 }   v1.2d = { 0.5, 4.0 }
+FPVECD = ("; ".join([
+    movabs(2, 0x3ff0000000000000), movabs(3, 0x4000000000000000),
+    "ins v0.d[0], x2", "ins v0.d[1], x3",
+    movabs(2, 0x3fe0000000000000), movabs(3, 0x4010000000000000),
+    "ins v1.d[0], x2", "ins v1.d[1], x3"]) + "; ")
+BUF = DATA_VA + 0x300       # results buffer
+
+_KS = None
+
+
+_BIG_IMM = re.compile(r"\bmov\s+(x\d+),\s*#(0x[0-9a-fA-F]+|\d+)")
+
+
+def expand_imms(text):
+    """Keystone only accepts a `mov xN, #imm` that fits MOVZ/MOVN or the ORR
+    bitmask form; anything wider has to be spelled out with MOVZ/MOVK."""
+    def repl(m):
+        val = int(m.group(2), 0) & 0xFFFFFFFFFFFFFFFF
+        if val <= 0xFFFF:
+            return m.group(0)
+        return movabs(int(m.group(1)[1:]), val)
+    return _BIG_IMM.sub(repl, text)
+
+
+# The half-precision corpus: h0 = 1.0, h1 = 2.0, h2 = -2.0, as raw patterns.
+H16 = ("; ".join(["mov w2, #0x3c00", "fmov h0, w2", "mov w2, #0x4000",
+                  "fmov h1, w2", "mov w2, #0xc000", "fmov h2, w2"]) + "; ")
+
+
+# The half-precision corpus. keystone's AArch64 assembler has no H-register
+# forms, so the arithmetic, compare and select groups are encoded here as raw
+# words: every one of them is the encoding the ARM ARM gives for the mnemonic
+# in the comment beside it.
+H16 = ("; ".join(["mov w2, #0x3c00", "ins v0.h[0], w2", "mov w2, #0x4000",
+                  "ins v1.h[0], w2", "mov w2, #0xc000", "ins v2.h[0], w2"]) + "; ")
+UM = "umov w0, v0.h[0]"
+
+
+def h2(opc, rm, rn, rd):  # FP data-processing (2 source), half: FMUL..FNMUL
+    return 0x1E000000 | 3 << 22 | 1 << 21 | rm << 16 | opc << 12 | 2 << 10 | rn << 5 | rd
+
+
+def h1(opc, rn, rd):  # FP data-processing (1 source), half: FMOV..FRINT*
+    return 0x1E000000 | 3 << 22 | 1 << 21 | opc << 15 | 1 << 14 | rn << 5 | rd
+
+
+def hcmp(rm, rn, e=0, zero=0):  # FCMP/FCMPE, optionally against 0.0
+    return (0x1E000000 | 3 << 22 | 1 << 21 | rm << 16 | 1 << 13 |
+            e << 4 | zero << 3 | rn << 5)
+
+
+def hsel(rm, rn, rd, cond):  # FCSEL
+    return (0x1E000000 | 3 << 22 | 1 << 21 | rm << 16 | cond << 12 |
+            3 << 10 | rn << 5 | rd)
+
+
+def hmovi(imm8, rd):  # FMOV Hd, #imm
+    return 0x1E000000 | 3 << 22 | 1 << 21 | imm8 << 13 | 1 << 12 | rd
+
+
+def hmovg(opcode, rn, rd):  # FMOV Wd,Hn (6) / FMOV Hd,Wn (7)
+    return 0x1E000000 | 3 << 22 | 1 << 21 | opcode << 16 | rn << 5 | rd
+
+
+def hcvt(opcode, rn, rd):  # SCVTF (2) / UCVTF (3): int -> half
+    return 0x1E000000 | 3 << 22 | 1 << 21 | opcode << 16 | rn << 5 | rd
+
+
+def hcvtz(rmode, rn, rd, sf):  # FCVT{N,P,M,Z}{S,U}: half -> int
+    return (0x1E000000 | 3 << 22 | 1 << 21 | rmode << 19 | rn << 5 | rd |
+            (sf << 31))
 
 
 def S(*items):
@@ -679,6 +744,98 @@ SNIPPETS = {
         S(movabs(2, 0x0807060504030201), "mov v0.d[0], x2; dup s1, v0.s[1]; fmov w0, s1"),
     ],
 
+    # Vector floating point (FP three-same): .2s, .4s and .2d lanes. Lane
+    # values are built with the FMOV immediate so the exact bits are known, and
+    # read back through UMOV/FMOV.
+    #   v0 = { 1.0, 2.0, 3.0, 4.0 }      v1 = { 0.5, 1.5, -2.0, 8.0 }
+    "simdfp": [
+        S(FPVEC, "fadd v0.4s, v0.4s, v1.4s; umov w0, v0.s[0]"),
+        S(FPVEC, "fadd v0.4s, v0.4s, v1.4s; umov w0, v0.s[3]"),
+        S(FPVEC, "fadd v0.2s, v0.2s, v1.2s; umov w0, v0.s[1]"),
+        S(FPVEC, "fsub v0.4s, v0.4s, v1.4s; umov w0, v0.s[2]"),
+        S(FPVEC, "fmul v0.4s, v0.4s, v1.4s; umov w0, v0.s[1]"),
+        S(FPVEC, "fdiv v0.4s, v0.4s, v1.4s; umov w0, v0.s[0]"),
+        S(FPVEC, "fmla v0.4s, v0.4s, v1.4s; umov w0, v0.s[2]"),
+        S(FPVEC, "fmls v0.4s, v0.4s, v1.4s; umov w0, v0.s[2]"),
+        S(FPVEC, "fmax v0.4s, v0.4s, v1.4s; umov w0, v0.s[1]"),
+        S(FPVEC, "fmin v0.4s, v0.4s, v1.4s; umov w0, v0.s[3]"),
+        S(FPVEC, "fmaxnm v0.2s, v0.2s, v1.2s; umov w0, v0.s[0]"),
+        S(FPVEC, "fminnm v0.2s, v0.2s, v1.2s; umov w0, v0.s[1]"),
+        S(FPVEC, "faddp v0.4s, v0.4s, v1.4s; umov w0, v0.s[0]"),
+        S(FPVEC, "fmaxp v0.4s, v0.4s, v1.4s; umov w0, v0.s[1]"),
+        S(FPVEC, "fminp v0.2s, v0.2s, v1.2s; umov w0, v0.s[0]"),
+        S(FPVEC, "fmaxnmp v0.4s, v0.4s, v1.4s; umov w0, v0.s[3]"),
+        S(FPVEC, "fmulx v0.4s, v0.4s, v1.4s; umov w0, v0.s[1]"),
+        S(FPVEC, "fabd v0.4s, v0.4s, v1.4s; umov w0, v0.s[2]"),
+        S(FPVEC, "frecps v0.4s, v0.4s, v1.4s; umov w0, v0.s[0]"),
+        S(FPVEC, "frsqrts v0.4s, v0.4s, v1.4s; umov w0, v0.s[1]"),
+        S(FPVEC, "fcmeq v0.4s, v0.4s, v1.4s; umov w0, v0.s[0]"),
+        S(FPVEC, "fcmge v0.4s, v0.4s, v1.4s; umov w0, v0.s[2]"),
+        S(FPVEC, "fcmgt v0.4s, v0.4s, v1.4s; umov w0, v0.s[3]"),
+        S(FPVEC, "facge v0.4s, v0.4s, v1.4s; umov w0, v0.s[2]"),
+        S(FPVEC, "facgt v0.4s, v0.4s, v1.4s; umov w0, v0.s[0]"),
+        # double precision lanes
+        S(FPVECD, "fadd v0.2d, v0.2d, v1.2d; umov x0, v0.d[1]"),
+        S(FPVECD, "fmul v0.2d, v0.2d, v1.2d; umov x0, v0.d[0]"),
+        S(FPVECD, "fmla v0.2d, v0.2d, v1.2d; umov x0, v0.d[1]"),
+        S(FPVECD, "fmax v0.2d, v0.2d, v1.2d; umov x0, v0.d[0]"),
+        S(FPVECD, "fdiv v0.2d, v0.2d, v1.2d; umov x0, v0.d[1]"),
+        S(FPVECD, "faddp v0.2d, v0.2d, v1.2d; umov x0, v0.d[0]"),
+        S(FPVECD, "fcmgt v0.2d, v0.2d, v1.2d; umov x0, v0.d[1]"),
+        # a NaN lane: FMAXNM skips it, FMAX propagates it
+        S(FPVEC + "mov w2, #0x7fc00000; ins v0.s[1], w2; "
+          "fmaxnm v0.4s, v0.4s, v1.4s; umov w0, v0.s[1]"),
+        S(FPVEC + "mov w2, #0x7fc00000; ins v0.s[1], w2; "
+          "fmax v0.4s, v0.4s, v1.4s; umov w0, v0.s[1]"),
+        # FPCR.FZ across lanes: a denormal operand flushes to zero
+        S(FPVEC + movabs(4, 1 << 24) + "; msr fpcr, x4; mov w2, #1; "
+          "ins v0.s[0], w2; fadd v0.4s, v0.4s, v1.4s; umov w0, v0.s[0]"),
+    ],
+
+    # Half precision. Operands are materialized as raw 16-bit patterns with
+    # FMOV Hd, Wn, and read back the same way, so the comparison is the
+    # conversion and the arithmetic, not a constant's spelling.
+    #   h0 = 0x3c00 (1.0)   h1 = 0x4000 (2.0)   h2 = 0xc000 (-2.0)
+    "fp16": [
+        S(H16, h2(2, 1, 0, 0), UM),          # fadd  h0, h0, h1
+        S(H16, h2(3, 1, 0, 0), UM),          # fsub  h0, h0, h1
+        S(H16, h2(0, 1, 0, 0), UM),          # fmul  h0, h0, h1
+        S(H16, h2(1, 1, 0, 0), UM),          # fdiv  h0, h0, h1
+        S(H16, h2(8, 1, 0, 0), UM),          # fnmul h0, h0, h1
+        S(H16, h2(4, 1, 0, 0), UM),          # fmax  h0, h0, h1
+        S(H16, h2(5, 1, 0, 0), UM),          # fmin  h0, h0, h1
+        S(H16, h2(6, 2, 0, 0), UM),          # fmaxnm h0, h0, h2
+        S(H16, h2(7, 2, 0, 0), UM),          # fminnm h0, h0, h2
+        S(H16, h1(3, 2, 0), UM),             # fsqrt h0, h2  (of -2.0)
+        S(H16, h1(1, 2, 0), UM),             # fabs  h0, h2
+        S(H16, h1(2, 2, 0), UM),             # fneg  h0, h2
+        S(H16, h1(0, 1, 0), UM),             # fmov  h0, h1
+        S(H16, h1(8, 0, 0), UM),             # frintn h0, h0
+        S(H16, hcmp(1, 0), "cset x0, gt"),   # fcmp h0, h1
+        S(H16, hcmp(1, 2), "cset x0, mi"),   # fcmp h2, h1
+        S(H16, hcmp(1, 0), hsel(1, 0, 0, 12), UM),   # fcsel h0, h0, h1, gt
+        S(H16, hcmp(1, 0), hsel(1, 0, 0, 13), UM),   # fcsel h0, h0, h1, le
+        S(H16, hmovi(0x70, 0), UM),          # fmov h0, #imm
+        S(H16, "fcvt s0, h0; fmov w0, s0"),  # FCVT Sd, Hn
+        S(H16, "fcvt d0, h0; fmov x0, d0"),  # FCVT Dd, Hn
+        S(H16, "fcvt s0, h2; fmov w0, s0"),  # FCVT Sd, Hn of a negative
+        S("mov x2, #0x40490fdb; fmov s0, w2; fcvt h0, s0", UM),   # FCVT Hd, Sn
+        S(movabs(2, 0x400921fb54442d18), "fmov d0, x2; fcvt h0, d0", UM),
+        S(H16, hcvt(2, 0, 0), UM),           # scvtf h0, w0 (int -> half)
+        S(H16, "mov x1, #-7", hcvt(2, 1, 0), UM),
+        S(H16, hcvtz(0, 0, 0, 0), "mov x0, x0"),                  # fcvtzs w0, h0
+        S(H16, hcvtz(0, 2, 0, 1), "mov x0, x0"),                  # fcvtzu x0, h2
+        S(H16, hcvtz(0, 0, 0, 0), "mov x0, x0"),                  # fcvtns w0, h0
+        S(H16, hmovg(6, 0, 0), "mov x0, x0"),                     # fmov w0, h0
+        S("mov w2, #0x4321", hmovg(7, 2, 0), UM),                 # fmov h0, w2
+        # a NaN operand: FMAXNM skips it, FMAX propagates it
+        S(H16, "mov w2, #0x7e00; ", hmovg(7, 2, 1), h2(6, 1, 0, 0), UM),
+        S(H16, "mov w2, #0x7e00; ", hmovg(7, 2, 1), h2(4, 1, 0, 0), UM),
+        # a denormal under FPCR.FZ16
+        S(movabs(4, 1 << 19), "msr fpcr, x4; " + H16 + "mov w2, #1; ",
+          hmovg(7, 2, 0), h2(2, 1, 0, 0), UM),
+    ],
+
     # A loop long enough to go hot: the JIT's reason to exist. One million
     # iterations of an add/compare/branch, which is the shape of every hot
     # loop in real code.
@@ -701,7 +858,8 @@ VOLATILE = {"counter"}
 # docs/PORT.md, "Feature advertisements".
 KNOWN = {
     "sysreg[4]": "ID_AA64ISAR0_EL1: the FP/crypto features are not ported yet",
-    "ids[5]":    "ID_AA64PFR0_EL1: FP and AdvSIMD fields not ported yet",
+    "ids[5]":    "ID_AA64PFR0_EL1: the vector half-precision (FEAT_FP16) groups "
+                "are not ported",
     "ids[9]":    "ID_AA64ISAR0_EL1: the FP/crypto features are not ported yet",
     "ids[10]":   "ID_AA64ISAR1_EL1: JSCVT and FCMA are not ported yet",
     "sysreg[6]": "CNTVCT_EL0: the generic timer's origin is the host's uptime",
