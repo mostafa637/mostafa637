@@ -161,7 +161,7 @@ impl TmpFs {
         const O_EXCL: u32 = 128;
         if (flags & O_CREAT) != 0 {
             let (parent, filename) = self.lookup_parent(path)?;
-            let mut parent_lock = parent.lock().unwrap();
+            let parent_lock = parent.lock().unwrap();
             let mut parent_inner = parent_lock.inner.lock().unwrap();
             if !s_isdir(parent_inner.inode.lock().unwrap().stat.mode) { return Err(-20); }
             if let Some(existing) = parent_inner.children.get(&filename) {

@@ -244,12 +244,15 @@ impl FakeFs {
     }
 
     pub fn mknod(&mut self, path: &str, mode: u32, dev: u32) -> Result<(), i32> {
+        // Device and fifo nodes are presented as regular files, as iSH's devfs does;
+        // this normalisation used to be computed and then dropped on the floor, with
+        // the raw S_IFCHR/S_IFBLK/S_IFIFO mode going into the inode instead.
         let real_mode = if (mode & 0o170000) == 0o060000 || (mode & 0o170000) == 0o020000 || (mode & 0o170000) == 0o140000 {
             0o100000 | 0o666
         } else {
             mode
         };
-        let stat = IshStat::new(mode, 0, 0, if (mode & 0o170000) == 0o060000 || (mode & 0o170000) == 0o020000 { dev } else { 0 });
+        let stat = IshStat::new(real_mode, 0, 0, if (mode & 0o170000) == 0o060000 || (mode & 0o170000) == 0o020000 { dev } else { 0 });
         self.path_create(path, stat);
         Ok(())
     }

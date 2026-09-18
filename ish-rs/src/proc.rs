@@ -180,7 +180,10 @@ impl ProcFs {
             }
             return None;
         }
-        if let Some(pid) = parse_proc_pid(path) {
+        // Only the *shape* of the path matters in this arm: every pid directory
+        // advertises the same file list, so there is nothing to bind the pid to.
+        // (lookup() above is the one that needs the value.)
+        if parse_proc_pid(path).is_some() {
             let pid_files = ["status", "cmdline", "maps", "stat", "exe", "fd"];
             if offset < pid_files.len() {
                 return Some(ProcEntry::new(pid_files[offset], ProcEntryType::File, 0o444));

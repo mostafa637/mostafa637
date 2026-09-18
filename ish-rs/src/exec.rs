@@ -226,7 +226,11 @@ pub fn find_hole_for_elf(phdrs: &[ProgramHeader]) -> u32 {
         }
     }
     if let (Some(f), Some(l)) = (first, last) {
-        let size = page_round_up(l.vaddr + l.memsz) - page_align(f.vaddr);
+        // The span a real pt_find_hole() would have to find room for.  Kept as a
+        // named `_` binding rather than deleted because this function is a stub: the
+        // day it stops being one, the size is the argument it needs.  Until then the
+        // return value below is a constant, and pretending otherwise would be a lie.
+        let _size = page_round_up(l.vaddr + l.memsz) - page_align(f.vaddr);
         // Simulate pt_find_hole: return 0x40000000 for PIE
         if f.vaddr == 0 { 0x40000000 } else { 0 }
     } else {
@@ -235,7 +239,13 @@ pub fn find_hole_for_elf(phdrs: &[ProgramHeader]) -> u32 {
 }
 
 /// Load entry, matching `load_entry` in C — returns loaded segment
-pub fn load_entry(ph: &ProgramHeader, bias: u32, file_data: &[u8]) -> Result<LoadedSegment, i32> {
+///
+/// NOT YET PORTED: C maps each PT_LOAD at `bias + ph.vaddr`.  `LoadedSegment::new`
+/// keeps the bare `ph.vaddr`, and neither caller adds the bias afterwards (only the
+/// brk high-water mark at the call site below does), so a PIE binary ends up with
+/// unbiased segment addresses.  The parameter is named `_bias` to keep that gap
+/// visible at the call sites instead of deleting the argument and hiding it.
+pub fn load_entry(ph: &ProgramHeader, _bias: u32, file_data: &[u8]) -> Result<LoadedSegment, i32> {
     if !ph.is_load() { return Err(EINVAL); }
     Ok(LoadedSegment::new(ph, file_data))
 }

@@ -2075,7 +2075,9 @@ impl AltIconViewController {
         let k_min_spacer = 20.0;
         let k_ratio = 0.75;
         let mut count = (total_width / item_width) as usize;
-        let mut inset = 0.0;
+        // The loop's first statement assigns this before any path reaches the read
+        // after it, so an initial 0.0 was dead code that looked like a default.
+        let mut inset;
         loop {
             let slack = total_width - (item_width * count as f32);
             let spacer = slack / (2.0 * k_ratio + count as f32 - 1.0);

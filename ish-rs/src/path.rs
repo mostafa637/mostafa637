@@ -86,7 +86,7 @@ pub fn path_normalize<R: SymlinkResolver>(at_fd_path: &str, path_raw: &str, out:
     if path_raw.len() >= MAX_PATH { return -36; }
     if path_raw.contains('\0') { return -22; }
 
-    let mut path = if path_raw.starts_with('/') {
+    let path = if path_raw.starts_with('/') {
         path_raw.to_string()
     } else {
         if at_fd_path == "/" { format!("/{}", path_raw) } else { format!("{}/{}", at_fd_path.trim_end_matches('/'), path_raw) }
