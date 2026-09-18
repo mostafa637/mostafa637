@@ -85,7 +85,7 @@ impl Mount {
     pub fn new(point: &str, fs_name: &str) -> Self { Self { point: point.to_string(), fs_name: fs_name.to_string() } }
 }
 
-pub fn find_mount_and_trim_path<'a>(mounts: &[Mount], path: &'a mut String) -> Option<Mount> {
+pub fn find_mount_and_trim_path(mounts: &[Mount], path: &mut String) -> Option<Mount> {
     let mut best: Option<&Mount> = None;
     let mut best_len = 0;
     for mount in mounts {
@@ -116,10 +116,16 @@ pub fn find_mount_and_trim_path<'a>(mounts: &[Mount], path: &'a mut String) -> O
 pub fn contains_mount_point(mounts: &[Mount], path: &str) -> bool {
     for mount in mounts {
         let n = path.len();
-        if path.len() >= mount.point.len() && path.starts_with(&mount.point) {
-            if mount.point.len() == n || path.as_bytes().get(mount.point.len()) == Some(&b'/') || mount.point == "/" {
-                return true;
-            }
+        // One condition, not nested ifs (clippy::collapsible_if): the prefix has to fit and
+        // match, and then either it *is* the whole path, or the next byte is a separator, or
+        // the mount point is the root, which is a prefix of everything.
+        if path.len() >= mount.point.len()
+            && path.starts_with(&mount.point)
+            && (mount.point.len() == n
+                || path.as_bytes().get(mount.point.len()) == Some(&b'/')
+                || mount.point == "/")
+        {
+            return true;
         }
     }
     false

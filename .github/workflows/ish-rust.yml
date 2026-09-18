@@ -135,7 +135,13 @@ jobs:
           sed -i -e 's/\x1b\[[0-9;]*m//g' /tmp/clippy.log || true
           grep -E '^[^ ]+\.rs:[0-9]+:[0-9]+: error: ' /tmp/clippy.log | sed 's/^ *//' | sort -u > /tmp/clippy-errors.txt
           grep -E '^[^ ]+\.rs:[0-9]+:[0-9]+: warning: ' /tmp/clippy.log | sed 's/^ *//' | sort -u > /tmp/clippy-lints.txt
-          LINT_BASELINE=66
+          # Measured by the run before this one (66), minus the 12 warnings these edits
+          # removed: 4 needless_range_loop/manual_slice_copy in fifo.rs (two of them allowed
+          # with the reason, one rewritten as a real slice copy), exit.rs unused `options`,
+          # fix_path.rs manual strip, generic.rs elided lifetime + collapsible_if, gui.rs
+          # doc list / identical-if / needless-return / two new_without_default.  The
+          # `&-masking with zero` error in real.rs was in the error bucket, not this one.
+          LINT_BASELINE=46
           errors=$(wc -l < /tmp/clippy-errors.txt | tr -d ' ')
           lints=$(wc -l < /tmp/clippy-lints.txt | tr -d ' ')
           echo "clippy exit=$rc; errors=$errors; distinct warnings=$lints (baseline $LINT_BASELINE)"

@@ -13,6 +13,7 @@
 //! - All remaining: AppGroup, CurrentRoot, BarButton, ArrowBarButton, DelayedUITask, ExceptionExfiltrator,
 //!   FontPicker, LocationDevice, PasteboardDevice, SceneDelegate, ScrollbarView, ProgressReport,
 //!   AltIcon, About*, AccessibilityFixes, IOSCalls, etc.
+//!
 //! This file is intentionally NOT simplified — every original method is represented.
 
 use std::collections::HashMap;
@@ -1670,8 +1671,10 @@ impl TerminalView {
         let prefs = UserPreferences::default();
         if modifier_flags == 0 {
             let mut key = input.to_string();
+            // The Escape pass-through arm used to be a second branch assigning the same
+            // string ("\u{1b}" *is* "\x1b"), which is what clippy::if_same_then_else was
+            // pointing at.  It was a no-op, so it is gone rather than merged into a ||.
             if key == "`" && prefs.backtick_map_escape { key = "\x1b".to_string(); }
-            else if key == "\u{1b}" { key = "\x1b".to_string(); }
             else if key == "UIKeyInputUpArrow" { key = self.terminal_arrow('A'); }
             else if key == "UIKeyInputDownArrow" { key = self.terminal_arrow('B'); }
             else if key == "UIKeyInputLeftArrow" { key = self.terminal_arrow('D'); }
@@ -1736,9 +1739,10 @@ impl TerminalView {
 
     pub fn presses_began(&mut self, key_code: u32, modifier_flags: u32) {
         let prefs = UserPreferences::default();
+        // Last statement of the fn, so the `return;` clippy::needless_return complained
+        // about was carrying no control flow.
         if prefs.override_control_space && key_code == 44 && modifier_flags & 1 != 0 {
             self.insert_control_char(' ');
-            return;
         }
     }
 
@@ -1752,6 +1756,12 @@ impl TerminalView {
             println!("[TerminalView] clearScrollback terminal {}", term_arc.lock().unwrap().uuid);
         }
     }
+}
+
+// clippy::new_without_default: `new()` takes no arguments; the fields are UI defaults
+// that a derive would leave wrong, so Default forwards to it.
+impl Default for TerminalView {
+    fn default() -> Self { Self::new() }
 }
 
 // ============================================================================
@@ -1857,6 +1867,12 @@ impl TerminalViewController {
             println!("[TerminalViewController] hide extra keys (external keyboard)");
         }
     }
+}
+
+// clippy::new_without_default: `new()` takes no arguments; the fields are UI defaults
+// that a derive would leave wrong, so Default forwards to it.
+impl Default for TerminalViewController {
+    fn default() -> Self { Self::new() }
 }
 
 // ============================================================================

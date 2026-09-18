@@ -91,6 +91,11 @@ impl Fifo {
     /// The first-copy length deliberately uses `self.start` (the original
     /// FIFO start) rather than the adjusted `start` for `FIFO_LAST`, matching
     /// the C quirk that `log.rs` also preserves.
+    // needless_range_loop is left allowed on this one function: the destination is indexed
+    // linearly while the source wraps modulo capacity, which is exactly the shape clippy's
+    // copy_from_slice() suggestion cannot express.  The contiguous second half *is* a slice
+    // copy and has been rewritten as one below.
+    #[allow(clippy::needless_range_loop)]
     pub fn read(&mut self, out: &mut [u8], flags: u8) -> i32 {
         let size = out.len();
         if size > self.size {
@@ -107,9 +112,9 @@ impl Fifo {
         for i in 0..first_copy_size {
             out[i] = self.buf[(start + i) % self.capacity];
         }
-        for i in first_copy_size..size {
-            out[i] = self.buf[i - first_copy_size];
-        }
+        // Contiguous on both ends, so the loop becomes one copy: destination
+        // [first_copy_size..size] from source [..size - first_copy_size].
+        out[first_copy_size..size].copy_from_slice(&self.buf[..size - first_copy_size]);
 
         if flags & FIFO_PEEK == 0 {
             self.start = (start + size) % self.capacity;
@@ -124,6 +129,7 @@ impl Fifo {
     }
 
     /// For testing: return the logical contents in order without consuming.
+    #[allow(clippy::needless_range_loop)] // same wrapping source as read() above
     pub fn snapshot(&self) -> Vec<u8> {
         let mut out = vec![0u8; self.size];
         for i in 0..self.size {

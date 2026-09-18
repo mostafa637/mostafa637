@@ -64,7 +64,11 @@ pub const O_NONBLOCK_: u32 = 2048;
 
 pub fn open_flags_real_from_fake(flags: u32) -> u32 {
     let mut real = 0;
-    if (flags & O_RDONLY_) == O_RDONLY_ && (flags & 3) == 0 { real |= 0; } // O_RDONLY is 0
+    // O_RDONLY is 0 on both sides, so "read-only" is already `real == 0`: the access mode
+    // is `flags & 3` and no bit needs setting for it.  This line used to be
+    // `if (flags & O_RDONLY_) == O_RDONLY_ && (flags & 3) == 0 { real |= 0; }`, which
+    // clippy::bad_bit_mask flags as an error because `flags & 0` is constant-true and
+    // `|= 0` writes nothing - it was deleted, not allowed, because it never did anything.
     if (flags & O_WRONLY_) != 0 { real |= 1; }
     if (flags & O_RDWR_) != 0 { real |= 2; }
     if (flags & O_CREAT_) != 0 { real |= 64; }

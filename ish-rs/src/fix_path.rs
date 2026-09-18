@@ -18,13 +18,9 @@ pub fn fix_path(path: &str) -> &str {
     if path.is_empty() {
         return ".";
     }
-    if path.starts_with('/') {
-        // SAFETY: stripping one byte from a valid UTF-8 string that starts
-        // with '/' (ASCII) is still valid UTF-8.
-        &path[1..]
-    } else {
-        path
-    }
+    // '/' is one byte and ASCII, so strip_prefix keeps the result valid UTF-8 - and it is
+    // the documented way to say "drop this prefix if it is there" (clippy::manual_strip).
+    path.strip_prefix('/').unwrap_or(path)
 }
 
 /// Byte-slice version, for `&[u8]` paths that may not be UTF-8 (iSH uses

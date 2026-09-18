@@ -76,7 +76,7 @@ pub enum WaitResult {
     Pid(u32, i32),
 }
 
-pub fn wait_for_child(children: &[(u32, ExitState)], pid: i32, options: u32) -> WaitResult {
+pub fn wait_for_child(children: &[(u32, ExitState)], pid: i32, _options: u32) -> WaitResult {
     let mut found_any = false;
     for (child_pid, state) in children {
         if pid != -1 && *child_pid as i32 != pid { continue; }
@@ -90,7 +90,9 @@ pub fn wait_for_child(children: &[(u32, ExitState)], pid: i32, options: u32) -> 
     }
     // WNOHANG is the only option this port can distinguish.  A real waitpid() without it
     // sleeps until a child changes state, and there is no scheduler here to sleep on, so
-    // the blocking case is reported exactly like "would block".  The two identical branches
+    // the blocking case is reported exactly like "would block".  `_options` is named that
+    // way for the same reason: the argument is part of the waitpid() shape and callers do
+    // pass WNOHANG, it just has no observable effect here yet.  The two identical branches
     // clippy::if_same_then_else complained about were that approximation, not a copy-paste
     // bug; it is now written once instead of deleted, so the meaning survives.
     WaitResult::WouldBlock
