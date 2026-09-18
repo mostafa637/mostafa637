@@ -61,7 +61,10 @@ fn build_ui() -> AppWindow {
         if let Some(window) = weak_window.upgrade() {
             window.set_terminal_text(delegate.get_terminal_text().into());
         }
-        println!("[Android-RS] extra key: {} -> {}", key_str, delegate.get_terminal_text().lines().last().unwrap_or(""));
+        // report(), not println!: this ran under NativeActivity where stdout goes
+        // nowhere, so the one line that could prove a keypress reached the app was
+        // invisible - and the smoke test could not tell "no input" from "no log".
+        report(&format!("[Android-RS] extra key: {} -> {}", key_str, delegate.get_terminal_text().lines().last().unwrap_or("")));
     });
 
     let app_delegate_clone = app_delegate.clone();
@@ -79,7 +82,10 @@ fn build_ui() -> AppWindow {
     app_window.on_input_submitted(move |input| {
         let mut delegate = app_delegate_clone.lock().unwrap();
         let cmd = input.as_str();
-        println!("[Android-RS] command: {}", cmd);
+        // The CI smoke test waits for this exact line after typing into the running app:
+        // it is the only proof that key events reached the focused TextInput, and println!
+        // cannot provide it on Android.
+        report(&format!("[Android-RS] command: {}", cmd));
         delegate.handle_command(cmd);
         if let Some(window) = weak_window.upgrade() {
             window.set_terminal_text(delegate.get_terminal_text().into());

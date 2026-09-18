@@ -2,7 +2,7 @@
 // Full port of 36 app/*.m files to Slint (replaces UIKit)
 // Matches gui.rs: Terminal, TerminalView, TerminalViewController, Theme, UserPreferences, Roots, AppDelegate
 
-import { Button, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
 
 export struct ThemeInfo {
     name: string,
@@ -15,6 +15,11 @@ export struct ThemeInfo {
 export component AppWindow inherits Window {
     title: "iSH Emulator - Pure Rust (Slint + Servo + KVM)";
     background: #000000;
+    // Without this the TextInput never receives key events: the emulator job types with
+    // `adb shell input text` and presses ENTER, and the frame came back byte-identical
+    // seven times over because nothing had focus to consume them. Forwarding focus to the
+    // command line at window level is what makes hardware keys arrive without a tap.
+    forward-focus: command-line;
     default-font-family: "monospace";
 
     // Properties matching gui.rs AppDelegate + TerminalBuffer + SlintUi
@@ -102,21 +107,20 @@ export component AppWindow inherits Window {
             border-color: #333333;
             border-width: 1px;
             VerticalBox {
-                ScrollView {
-                    viewport-height: 800px;
-                    // A plain Text, not TextEdit: `TextEdit` is a *styled widget*, so which
-                    // properties it forwards depends on the style picked for the platform
-                    // (and `read-only`/`background` are not ones every style exposes). The
-                    // terminal here is output-only - the input line below is the editable part.
-                    Text {
-                        text: root.terminal-text;
-                        font-family: "monospace";
-                        font-size: 12px;
-                        color: #ffffff;
-                        wrap: word-wrap;
-                        horizontal-alignment: left;
-                        vertical-alignment: top;
-                    }
+                // A plain Text laid out by the enclosing VerticalBox, not a ScrollView
+                // holding it: with a fixed viewport-height the Text got its *preferred*
+                // width instead of the available one, so long lines were drawn wider than
+                // the screen and the emulator screenshots came back with every line cut off
+                // at the left edge. Inside the box it is width-constrained, so wrap works.
+                // The terminal here is output-only; the input line below is the editable part.
+                Text {
+                    text: root.terminal-text;
+                    font-family: "monospace";
+                    font-size: 12px;
+                    color: #ffffff;
+                    wrap: word-wrap;
+                    horizontal-alignment: left;
+                    vertical-alignment: top;
                 }
                 // Input line for commands
                 HorizontalBox {
@@ -129,7 +133,9 @@ export component AppWindow inherits Window {
                     Rectangle {
                         background: #111111;
                         height: 32px;
-                        TextInput {
+                        command-line := TextInput {
+                            // named so the Window can hand it keyboard focus (see forward-focus)
+                            height: 100%;
                             text: root.input-text;
                             color: #ffffff;
                             font-family: "monospace";

@@ -30,11 +30,14 @@
 #   SCREENSHOT_DIR where evidence goes (default android-rs/screenshots)
 #   BOOT_SETTLE    seconds to let System UI idle (default 15)
 #   LOG_TIMEOUT    seconds to wait for the hterm log markers (default 90)
-#   UI_COMMANDS    'label:command' pairs typed into the terminal, ';' separated
+#   UI_COMMANDS    'command:label' pairs typed into the terminal, ';' separated
+#   FRAME_TIMEOUT  seconds to wait for the first *painted* frame (default 90) -
+#                  swiftshader_indirect needs seconds per frame on a 2-core runner
 
 set -u -o pipefail
 
 OUT_DIR="${SCREENSHOT_DIR:-android-rs/screenshots}"
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BOOT_SETTLE="${BOOT_SETTLE:-15}"
 LOG_TIMEOUT="${LOG_TIMEOUT:-90}"
 PKG=""
@@ -65,6 +68,41 @@ shot() { # <name>
     # A missing screencap is an emulator/GPU flake, not an app failure: warn, do not redden the run.
     note "screenshot $1.png is missing or empty ($(wc -c < "$f" 2>/dev/null || echo 0) bytes)"
   fi
+}
+
+# Pixels, not log lines, are what separates "the app painted" from "the window exists".
+# This check was added after a run reported 19/19 green while screen-boot.png was the
+# black window plus the system gesture pill: android_main had run, the markers had been
+# logged, and nothing had been drawn yet. Counting colours alone is not enough either -
+# that frame measures 2 colours - so the test is colours *and* the share of lit pixels.
+frame_detail() { # <png> -> 0 rendered, 1 blank, 2 cannot judge
+  [ -f "$1" ] || { echo "missing file"; return 1; }
+  if ! command -v python3 > /dev/null 2>&1; then
+    echo "no python3 to judge the frame"
+    return 2
+  fi
+  python3 "$REPO_ROOT/.github/scripts/png-detail-check.py" "$1"
+}
+
+# Capture repeatedly until a frame contains UI, and keep that frame as the boot shot.
+shot_rendered() { # <name>
+  local deadline=$(( SECONDS + ${FRAME_TIMEOUT:-90} )) last="" f="$OUT_DIR/$1.png" rc
+  while :; do
+    adb exec-out screencap -p < /dev/null > "$f" 2>/dev/null || true
+    last="$(frame_detail "$f")"; rc=$?
+    if [ "$rc" = "0" ]; then
+      ok "screenshot $1.png shows a painted frame ($last)"
+      return 0
+    elif [ "$rc" = "2" ]; then
+      # Not a pass: say out loud that the frame was never judged.
+      note "screenshot $1.png was captured but not judged: $last"
+      return 0
+    fi
+    [ "$SECONDS" -lt "$deadline" ] || break
+    sleep 3
+  done
+  bad "no visible frame within ${FRAME_TIMEOUT:-90}s (last reading: $last) - markers alone are not UI"
+  return 1
 }
 
 collect_evidence() {
@@ -103,9 +141,13 @@ report_and_exit() {
     printf 'apk: %s (%s bytes)\npackage: %s\npassed: %s\nfailed: %s\n\nFAILURES:\n' \
       "${SELECTED_APK:-none}" "$( [ -n "${SELECTED_APK:-}" ] && wc -c < "$SELECTED_APK" 2>/dev/null || echo 0 )" \
       "${PKG:-unresolved}" "${#PASS[@]}" "${#FAIL[@]}"
-    for c in "${FAIL[@]:-}"; do printf '  - %s\n' "$c"; done
+    if [ "${#FAIL[@]}" -gt 0 ]; then
+      for c in "${FAIL[@]}"; do printf '  - %s\n' "$c"; done
+    else
+      printf '  (none)\n'
+    fi
     printf '\nNOTES:\n'
-    for c in "${INFO[@]:-}"; do printf '  %s\n' "$c"; done
+    for c in "${INFO[@]}"; do printf '  %s\n' "$c"; done
   } > "$OUT_DIR/smoke-result.txt" 2>/dev/null || true
   if [ "${#FAIL[@]}" -gt 0 ]; then
     MSG="$(printf '%s\n' "${FAIL[@]}" | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')"
@@ -298,7 +340,7 @@ fi
 # ---------------------------------------------------------------------------
 # 5. drive the terminal and screenshot every state (the visual proof)
 # ---------------------------------------------------------------------------
-shot screen-boot
+shot_rendered screen-boot
 UI_COMMANDS="${UI_COMMANDS:-apk add python3:apk;python3 --version:python;help:help;about:about;roots:roots;theme:theme;prefs:prefs}"
 mapfile -t UI_PAIRS < <(printf '%s\n' "$UI_COMMANDS" | tr ';' '\n')
 for pair in "${UI_PAIRS[@]}"; do
@@ -310,7 +352,15 @@ for pair in "${UI_PAIRS[@]}"; do
   printf '  $ adb shell input text "%s" ; keyevent 66 (ENTER)\n' "$cmd"
   try "adb shell input text '$encoded'"
   try "adb shell input keyevent 66"
-  sleep 3
+  # on_input_submitted reports every command through android_logger, so this is what
+  # distinguishes "the UI processed the keys" from "nothing had focus" - seven identical
+  # screenshots could not tell the two apart, which is how the previous run stayed quiet.
+  if wait_for_log "\[Android-RS\] command: $cmd" 20; then
+    ok "typed input reached the focused input: '$cmd'"
+  else
+    bad "typing '$cmd' never reached the app - hardware keys are not driving the UI"
+  fi
+  sleep 2
   shot "screen-$label"
 done
 
@@ -326,9 +376,16 @@ else
 fi
 
 collect_evidence
-if [ "$(wc -c < "$OUT_DIR/logcat.txt" 2>/dev/null || echo 0)" -gt 2000 ]; then
-  ok "logcat captured ($(wc -l < "$OUT_DIR/logcat.txt") lines)"
+# This check is about evidence existing, nothing more: the *meaning* of the log was
+# already asserted above (boot markers, per-command echoes, no FATAL EXCEPTION).  It
+# used to demand 2000 bytes and then call anything shorter "empty", which is simply
+# untrue of a short but genuine log.
+log_bytes="$(wc -c < "$OUT_DIR/logcat.txt" 2>/dev/null | tr -d ' ' || echo 0)"
+log_lines="$(grep -c . "$OUT_DIR/logcat.txt" 2>/dev/null || echo 0)"
+case "$log_bytes" in ''|*[!0-9]*) log_bytes=0 ;; esac
+if [ "${log_bytes:-0}" -gt 0 ]; then
+  ok "logcat captured as evidence ($log_bytes bytes, $log_lines lines)"
 else
-  bad "logcat.txt is empty - nothing can be proven about this run"
+  bad "logcat.txt is empty - the device logged nothing, so this run proves nothing"
 fi
 report_and_exit
