@@ -112,7 +112,11 @@ jobs:
           echo "cargo-apk and cargo-ndk resolve on PATH: $(command -v cargo-apk) $(command -v cargo-ndk)"
 
       - name: Set up Rust with the Android target
-        uses: dtolnay/rust-toolchain@1.89.0
+        # 1.97, not 1.89: android-rs depends on Slint, whose workspace rust-version is
+        # 1.92, and cargo refuses to even resolve under an older rustc. (The first
+        # attempt at this bump was a silent no-op: the replace needle used the
+        # `- uses:` form, which only exists in the other workflow file.)
+        uses: dtolnay/rust-toolchain@1.97.0
         with:
           targets: x86_64-linux-android
 

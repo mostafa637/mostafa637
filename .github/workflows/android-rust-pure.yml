@@ -110,6 +110,10 @@ jobs:
           exit 0
 
       - name: Test android-rs logic ONLINE (fast-test, no heavy Slint compile)
+        # Runs regardless of the core test above: ish-emu's own `cargo test --lib` has a
+        # known hang and used to hide every android-rs result behind a skipped step.
+        # The job still fails - only the visibility of these checks changed.
+        if: always()
         working-directory: android-rs
         run: |
           echo "=== android-rs fast-test: skips Slint so this stays quick ==="
@@ -117,6 +121,10 @@ jobs:
           cargo test --lib --no-default-features --features fast-test 2>&1 | tail -n 60
 
       - name: Test android-rs with SlintUi (best effort, bounded)
+        # Runs regardless of the core test above: ish-emu's own `cargo test --lib` has a
+        # known hang and used to hide every android-rs result behind a skipped step.
+        # The job still fails - only the visibility of these checks changed.
+        if: always()
         working-directory: android-rs
         continue-on-error: true
         run: |
@@ -125,6 +133,10 @@ jobs:
             || echo "Slint test timed out or failed - fast-test already covered the logic"
 
       - name: Run desktop binary (same UI logic the Android shell drives)
+        # Runs regardless of the core test above: ish-emu's own `cargo test --lib` has a
+        # known hang and used to hide every android-rs result behind a skipped step.
+        # The job still fails - only the visibility of these checks changed.
+        if: always()
         working-directory: android-rs
         run: |
           cargo run --bin ish-android-rs --no-default-features --features fast-test 2>&1 | tail -n 60
