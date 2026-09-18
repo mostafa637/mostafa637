@@ -18,7 +18,11 @@ fn main() {
     
     println!("{}", app.init_hterm_as_ios());
     println!();
-    println!("{}", app.init_slint_servo());
+    // There is no init_slint_servo(): the Slint/Servo state is two flags set by
+    // AndroidPureRustApp::new(), so report those instead of calling a method that never
+    // existed. cargo-apk compiles this bin too, so a dangling call here blocks the APK.
+    println!("[SlintUi+Servo] slint_ui_initialized={} servo_webview_initialized={}",
+        app.slint_ui_initialized, app.servo_webview_initialized);
     println!();
     println!("[boot] {}", app.boot_sequence());
     
@@ -69,8 +73,8 @@ fn main() {
     println!("GitHub Actions steps (as requested: ترجمة على GitHub action + تهيئة xterm.js كما يفعلة ish ios):");
     println!("  1. git clone https://github.com/ish-app/libapps --depth 1 /tmp/libapps");
     println!("  2. cd /tmp/libapps && ./hterm/bin/mkdist (Xcode build phase: shellScript = cd $SRCROOT/deps/libapps && ./hterm/bin/mkdist)");
-    println!("  3. cp hterm/dist/js/hterm_all.js android/app/src/main/assets/terminal/ (as iOS Resources)");
-    println!("  4. cp app/terminal/term.html, term.css, term.js to assets/terminal/");
+    println!("  3. cp hterm/dist/js/hterm_all.js android-rs/assets/terminal/ (packaged as APK assets by cargo-apk)");
+    println!("  4. keep term.html, term.css, term.js next to it in android-rs/assets/terminal/");
     println!("  5. cargo apk build --release (pure Rust APK with Slint + Servo + hterm)");
     println!("  6. android-emulator-runner api-level 34 target google_apis arch x86_64 KVM -accel on -gpu swiftshader_indirect");
     println!("  7. adb install -r app-release.apk && adb exec-out screencap -p > screenshot.png (فحص الواجهة ب screenshot)");
