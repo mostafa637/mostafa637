@@ -113,6 +113,11 @@ jobs:
             PANIC=$(grep -A1 -E "panicked at|error\[E" /tmp/alpine.log | head -n 8 || true)
             if [ -z "$PANIC" ]; then PANIC=$(tail -n 4 /tmp/alpine.log || true); fi
             MSG=$(printf '%s' "$PANIC" | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
+            # Printed on its own line deliberately: workflow commands are only recognised at the
+            # start of a log line, and the step has just tailed a log whose final line may have no
+            # newline (that is exactly what a hung test looks like) - gluing onto it silently loses
+            # the annotation, which cost two debugging rounds here.
+            echo ""
             echo "::error::alpine_real_test failed (exit $rc): %0A${MSG}"
             exit "$rc"
           fi

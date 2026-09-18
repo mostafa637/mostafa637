@@ -69,8 +69,18 @@ jobs:
               echo "- timeout used: 25m (exit 124 means it was still running)"
             } >> "$GITHUB_STEP_SUMMARY"
             if [ "$rc" = "124" ]; then
+              # Printed on its own line deliberately: workflow commands are only recognised at the
+              # start of a log line, and the step has just tailed a log whose final line may have no
+              # newline (that is exactly what a hung test looks like) - gluing onto it silently loses
+              # the annotation, which cost two debugging rounds here.
+              echo ""
               echo "::error::cargo test hung for 25m on ${HUNG:-an unidentifiable test} (last completed: ${LAST:-none})"
             else
+              # Printed on its own line deliberately: workflow commands are only recognised at the
+              # start of a log line, and the step has just tailed a log whose final line may have no
+              # newline (that is exactly what a hung test looks like) - gluing onto it silently loses
+              # the annotation, which cost two debugging rounds here.
+              echo ""
               echo "::error::cargo test --all-targets failed (exit $rc): ${FAILED:-${HUNG:-see log tail}}"
             fi
             exit "$rc"
