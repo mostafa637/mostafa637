@@ -1,0 +1,90 @@
+Activity Resolver Table:
+  Non-Data Actions:
+      android.intent.action.MAIN:
+        2c63430 com.ish.emulator.rust/android.app.NativeActivity filter f6b08a9
+          Action: "android.intent.action.MAIN"
+          Category: "android.intent.category.LAUNCHER"
+
+Domain verification status:
+
+Key Set Manager:
+  [com.ish.emulator.rust]
+      Signing KeySets: 56
+
+Packages:
+  Package [com.ish.emulator.rust] (97d57e3):
+    appId=10192
+    pkg=Package{8d75496 com.ish.emulator.rust}
+    codePath=/data/app/~~CYexnf9tj1Jsir37iAJVCA==/com.ish.emulator.rust-5Ps6j_VA7E-dPNG27gdUpw==
+    resourcePath=/data/app/~~CYexnf9tj1Jsir37iAJVCA==/com.ish.emulator.rust-5Ps6j_VA7E-dPNG27gdUpw==
+    legacyNativeLibraryDir=/data/app/~~CYexnf9tj1Jsir37iAJVCA==/com.ish.emulator.rust-5Ps6j_VA7E-dPNG27gdUpw==/lib
+    extractNativeLibs=true
+    primaryCpuAbi=x86_64
+    secondaryCpuAbi=null
+    cpuAbiOverride=null
+    versionCode=16777472 minSdk=26 targetSdk=34
+    minExtensionVersions=[]
+    versionName=0.1.0
+    usesNonSdkApi=false
+    splits=[base]
+    apkSigningVersion=4
+    flags=[ DEBUGGABLE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    forceQueryable=false
+    dataDir=/data/user/0/com.ish.emulator.rust
+    supportsScreens=[small, medium, large, xlarge, resizeable, anyDensity]
+    timeStamp=2026-09-18 18:22:25
+    lastUpdateTime=2026-09-18 18:22:26
+    installerPackageName=null
+    installerPackageUid=-1
+    initiatingPackageName=com.android.shell
+    originatingPackageName=null
+    packageSource=1
+    loadingProgress=100%
+    loadingCompletedTime=2026-09-18 18:22:26
+    appMetadataFilePath=null
+    signatures=PackageSignatures{178e817 version:4, signatures:[bd4cc07], past signatures:[]}
+    installPermissionsFixed=true
+    pkgFlags=[ DEBUGGABLE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]
+    privatePkgFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    apexModuleName=null
+    requested permissions:
+      android.permission.INTERNET
+      android.permission.ACCESS_NETWORK_STATE
+    install permissions:
+      android.permission.INTERNET: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+    User 0: ceDataInode=320629 installed=true hidden=false suspended=false distractionFlags=0 stopped=false notLaunched=false enabled=0 instant=false virtual=false
+      installReason=0
+      firstInstallTime=2026-09-18 18:22:26
+      uninstallReason=0
+      overlay paths:
+        /product/overlay/EmulationPixel6/EmulationPixel6Overlay.apk
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+      legacy overlay paths:
+        /product/overlay/EmulationPixel6/EmulationPixel6Overlay.apk
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+      gids=[3003]
+      runtime permissions:
+
+Queries:
+  system apps queryable: false
+  queries via forceQueryable:
+  queries via package name:
+  queries via component:
+    com.google.android.settings.intelligence:
+      com.ish.emulator.rust
+  queryable via interaction:
+    User 0:
+      [com.android.wallpaperbackup,com.android.providers.settings,com.android.inputdevices,com.android.emulator.multidisplay,com.android.localtransport,android,com.android.settings,com.android.keychain,com.android.location.fused,com.android.server.telecom,com.android.dynsystem]:
+        com.ish.emulator.rust
+      com.google.android.inputmethod.latin:
+        com.ish.emulator.rust
+  queryable via uses-library:
+
+Dexopt state:
+  [com.ish.emulator.rust]
+
+Compiler stats:
+  [com.ish.emulator.rust]
+    (No recorded stats)

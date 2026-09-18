@@ -1,0 +1,13 @@
+apk: /home/runner/work/mostafa637/mostafa637/android-rs/target/debug/apk/ish-android-rs.apk (234861326 bytes)
+package: com.ish.emulator.rust
+passed: 26
+failed: 0
+
+FAILURES:
+  (none)
+
+NOTES:
+  ANDROID_SERIAL=emulator-5554  EMULATOR_PORT=5554
+  letting System UI settle for 15s
+  installing with: adb install -r -g -t /home/runner/work/mostafa637/mostafa637/android-rs/target/debug/apk/ish-android-rs.apk
+  launcher activity: com.ish.emulator.rust/android.app.NativeActivity
