@@ -132,11 +132,7 @@ jobs:
           timeout 900 cargo test --lib --features slint-ui 2>&1 | tail -n 60 \
             || echo "Slint test timed out or failed - fast-test already covered the logic"
 
-      - name: Run desktop binary (same UI logic the Android shell drives)
-        # Runs regardless of the core test above: ish-emu's own `cargo test --lib` has a
-        # known hang and used to hide every android-rs result behind a skipped step.
-        # The job still fails - only the visibility of these checks changed.
-        if: always()
-        working-directory: android-rs
-        run: |
-          cargo run --bin ish-android-rs --no-default-features --features fast-test 2>&1 | tail -n 60
+      # (No desktop `cargo run --bin` step any more: android-rs has no bin target on
+      #  purpose - cargo-apk builds one APK per artifact and only knows how to take a
+      #  cdylib, so any executable target makes it panic - and the emulator job installs
+      #  and drives the signed APK, which is what that stdout narration was standing in for.)
