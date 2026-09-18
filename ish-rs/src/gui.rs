@@ -2344,7 +2344,7 @@ impl AppDelegate {
                 let pkg = s.strip_prefix("apk add").unwrap().trim();
                 self.terminal_buffer.write_str(&format!("\napk: installing {}... (apk add simulation)\n", pkg));
                 self.terminal_buffer.write_str(&format!("(1/1) Installing {} ({}-r0)...\n", pkg, pkg));
-                self.terminal_buffer.write_str("Executing busybox-1.35.0-r29.trigger\nOK: 10 MiB in 20 packages\n\n$ ");;
+                self.terminal_buffer.write_str("Executing busybox-1.35.0-r29.trigger\nOK: 10 MiB in 20 packages\n\n$ ");
             },
             s if s.contains("python3") && s.contains("--version") => {
                 self.terminal_buffer.write_str("\nPython 3.12.3 (Alpine)\n[GCC 13.2.1]\n\n$ ");

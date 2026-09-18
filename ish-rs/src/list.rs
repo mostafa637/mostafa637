@@ -9,7 +9,6 @@
 //! inclusion.
 
 use std::collections::LinkedList;
-use std::fmt;
 
 /// Intrusive list node, mirroring `struct list`.
 ///

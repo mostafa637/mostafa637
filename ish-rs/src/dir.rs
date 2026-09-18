@@ -129,7 +129,9 @@ where F: Fn(u64, u64, &str, u8) -> (Vec<u8>, usize) {
     let orig_count = count;
     let mut remaining = count;
     let mut result = Vec::new();
-    let mut ptr = dir_fd.telldir();
+    // Assigned by the first statement of the loop below, which is the only path to
+    // the read after it; seeding it here would call telldir() for nothing.
+    let mut ptr;
 
     loop {
         ptr = dir_fd.telldir();

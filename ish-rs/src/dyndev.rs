@@ -1,6 +1,6 @@
 //! `fs/dyndev.h` — dynamic device registration.
 
-use crate::dev::{DEV_CHAR, DevT};
+use crate::dev::DEV_CHAR;
 
 /// Dynamic device registration result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

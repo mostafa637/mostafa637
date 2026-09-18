@@ -3,7 +3,6 @@
 //! Now uses real MmapMut instead of Vec<u8> simulation.
 
 use std::fs::{File, OpenOptions};
-use std::path::Path;
 use memmap2::{MmapMut, MmapOptions};
 
 #[derive(Debug)]
@@ -266,6 +265,7 @@ impl RamManager {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::Path;
 
     #[test]
     fn ram_anonymous_read_write() {

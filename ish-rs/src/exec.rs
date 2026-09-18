@@ -377,7 +377,7 @@ impl ExecContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fake::{FakeFs, IshStat};
+    use crate::fake::FakeFs;
 
     #[test]
     fn align_stack_matches_c() {

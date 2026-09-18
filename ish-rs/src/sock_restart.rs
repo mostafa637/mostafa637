@@ -1,7 +1,7 @@
 //! `fs/sockrestart.c` — socket restart full port for interrupted syscalls.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SockRestartType {
