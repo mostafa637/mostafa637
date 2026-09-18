@@ -105,7 +105,10 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$rc" -ne 0 ]; then
-            PANIC=$(grep -E "panicked at|error\[E" /tmp/alpine.log | head -n 6 || true)
+            # -A1 because libtest puts the payload ("called `Result::unwrap()` on an
+            # `Err` value: -22") on the line AFTER "panicked at", which is the only part
+            # that says why. Without it the annotation names a line number and nothing else.
+            PANIC=$(grep -A1 -E "panicked at|error\[E" /tmp/alpine.log | head -n 8 || true)
             if [ -z "$PANIC" ]; then PANIC=$(tail -n 4 /tmp/alpine.log || true); fi
             MSG=$(printf '%s' "$PANIC" | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
             echo "::error::alpine_real_test failed (exit $rc): %0A${MSG}"
