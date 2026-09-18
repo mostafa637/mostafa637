@@ -55,10 +55,12 @@ assets = "assets"
 build_targets = ["x86_64-linux-android"]
 
 [package.metadata.android.sdk]
+# Only min/target/max exist here (ndk-build's Sdk struct); a compile_sdk_version key is
+# silently ignored by serde, so the platform to compile against is whatever
+# `sdkmanager platforms;android-34` puts in $ANDROID_HOME - which the CI job installs.
 # API 26 is the floor for Slint's android-activity backend; 24 was not runnable.
 min_sdk_version = 26
 target_sdk_version = 34
-compile_sdk_version = 34
 
 [package.metadata.android.application]
 label = "iSH Emulator (Pure Rust)"

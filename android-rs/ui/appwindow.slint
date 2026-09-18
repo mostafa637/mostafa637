@@ -16,7 +16,7 @@ export component AppWindow inherits Window {
     title: "iSH Emulator - Pure Rust (Slint + Servo + KVM)";
     background: #000000;
     default-font-family: "monospace";
-    
+
     // Properties matching gui.rs AppDelegate + TerminalBuffer + SlintUi
     in-out property <string> terminal-text: "iSH - Alpine Linux shell (Rust + Slint + Servo + KVM)\nTerminal: WKWebView(xterm.js) -> Servo WebView (CustomWebView)\nUI: UIKit -> Slint (TerminalViewController + BarButton + ArrowBarButton + ScrollbarView)\n[boot] Mounting rootfs at /tmp/alpine_real...\n[boot] RAM: 4096 pages of 4096 bytes (real MmapMut via memmap2 0.9.11)\n[boot] Asbestos JIT hash_size=1024 page_hash_size=1024\n[boot] ELF entry: 0x08048000, phdrs: 1\n[boot] Theme: Default (6 themes) dir=/tmp/ish_documents/themes\n[boot] Font: ui-monospace 12.0px (System), cursor: BLOCK\n[boot] KVM acceleration: ENABLED (linux + kvm)\n\nType 'help' for help\n$ ";
     in-out property <string> status-text: "iSH - Alpine Linux 3.18 | Default theme | ui-monospace 12px | BLOCK | KVM | Pure Rust";
@@ -26,67 +26,77 @@ export component AppWindow inherits Window {
     in-out property <int> cursor-x: 0;
     in-out property <int> cursor-y: 23;
     in-out property <[ThemeInfo]> themes: [
-        { name: "Default", fg: "#000", bg: "#fff", light_override: false, dark_override: false },
-        { name: "1337", fg: "#0f0", bg: "#000", light_override: true, dark_override: false },
-        { name: "Solarized", fg: "#657b83", bg: "#fdf6e3", light_override: false, dark_override: false },
-        { name: "Hot Dog Stand", fg: "#ff0", bg: "#f00", light_override: false, dark_override: false },
-        { name: "Light", fg: "#000", bg: "#fff", light_override: false, dark_override: true },
-        { name: "Dark", fg: "#fff", bg: "#000", light_override: true, dark_override: false },
+    { name: "Default", fg: "#000", bg: "#fff", light_override: false, dark_override: false },
+    { name: "1337", fg: "#0f0", bg: "#000", light_override: true, dark_override: false },
+    { name: "Solarized", fg: "#657b83", bg: "#fdf6e3", light_override: false, dark_override: false },
+    { name: "Hot Dog Stand", fg: "#ff0", bg: "#f00", light_override: false, dark_override: false },
+    { name: "Light", fg: "#000", bg: "#fff", light_override: false, dark_override: true },
+    { name: "Dark", fg: "#fff", bg: "#000", light_override: true, dark_override: false },
     ];
-    
+
     // Callbacks matching Terminal.m + TerminalView.m + TerminalViewController.m
     callback extra-key-clicked(string);
     callback clear-clicked();
     callback input-submitted(string);
     callback theme-selected(string);
     callback root-selected(string);
-    
+
     // Layout matching activity_main.xml but in Slint (replaces UIKit)
     VerticalBox {
         spacing: 0px;
         padding: 0px;
-        
+
         // Extra keys bar - matches BarButton.m (91) + ArrowBarButton.m (238)
-        HorizontalBox {
-            spacing: 4px;
-            padding: 4px;
-            height: 56px;
+        // Slint box layouts are layout-only elements: `background` is not one of
+        // their properties and the compiler rejects the file outright (this is what
+        // broke the first cargo-apk build: "Unknown property background in
+        // HorizontalBox"). Colour and the fixed height therefore go on a Rectangle,
+        // with the box inside it laying out the buttons - identical appearance.
+        Rectangle {
             background: #222222;
-            
-            Button {
-                text: "Tab";
-                clicked => { root.extra-key-clicked("Tab"); }
-            }
-            Button {
-                text: "Ctrl";
-                checkable: true;
-                checked: root.ctrl-pressed;
-                clicked => { root.extra-key-clicked("Ctrl"); }
-            }
-            Button {
-                text: "Esc";
-                clicked => { root.extra-key-clicked("Esc"); }
-            }
-            Button {
-                text: "↑";
-                clicked => { root.extra-key-clicked("↑"); }
-            }
-            Button {
-                text: "↓";
-                clicked => { root.extra-key-clicked("↓"); }
-            }
-            Button {
-                text: "←";
-                clicked => { root.extra-key-clicked("←"); }
-            }
-            Button {
-                text: "→";
-                clicked => { root.extra-key-clicked("→"); }
+            height: 56px;
+            // A VerticalBox stretches children from their preferred height, so without
+            // this the fixed height above is only a suggestion and the bar eats the view.
+            vertical-stretch: 0;
+            HorizontalBox {
+                spacing: 4px;
+                padding: 4px;
+
+                Button {
+                    text: "Tab";
+                    clicked => { root.extra-key-clicked("Tab"); }
+                }
+                Button {
+                    text: "Ctrl";
+                    checkable: true;
+                    checked: root.ctrl-pressed;
+                    clicked => { root.extra-key-clicked("Ctrl"); }
+                }
+                Button {
+                    text: "Esc";
+                    clicked => { root.extra-key-clicked("Esc"); }
+                }
+                Button {
+                    text: "↑";
+                    clicked => { root.extra-key-clicked("↑"); }
+                }
+                Button {
+                    text: "↓";
+                    clicked => { root.extra-key-clicked("↓"); }
+                }
+                Button {
+                    text: "←";
+                    clicked => { root.extra-key-clicked("←"); }
+                }
+                Button {
+                    text: "→";
+                    clicked => { root.extra-key-clicked("→"); }
+                }
             }
         }
-        
+
         // Terminal view - matches Terminal.m WKWebView + TerminalView.m + ScrollbarView.m
-        // Servo WebView would render xterm.js, here Slint TextEdit renders TerminalBuffer
+        // Servo WebView would render xterm.js; here a Slint Text shows the TerminalBuffer
         Rectangle {
             background: #000000;
             border-color: #333333;
@@ -94,14 +104,18 @@ export component AppWindow inherits Window {
             VerticalBox {
                 ScrollView {
                     viewport-height: 800px;
-                    TextEdit {
+                    // A plain Text, not TextEdit: `TextEdit` is a *styled widget*, so which
+                    // properties it forwards depends on the style picked for the platform
+                    // (and `read-only`/`background` are not ones every style exposes). The
+                    // terminal here is output-only - the input line below is the editable part.
+                    Text {
                         text: root.terminal-text;
-                        read-only: true;
                         font-family: "monospace";
                         font-size: 12px;
                         color: #ffffff;
-                        background: transparent;
                         wrap: word-wrap;
+                        horizontal-alignment: left;
+                        vertical-alignment: top;
                     }
                 }
                 // Input line for commands
@@ -131,40 +145,48 @@ export component AppWindow inherits Window {
                 }
             }
         }
-        
+
         // Status bar - matches AppDelegate + UserPreferences + Theme
-        HorizontalBox {
-            spacing: 8px;
-            padding: 6px;
-            height: 40px;
+        // Same treatment for the status bar: the build stops at the first error, so
+        // fixing only one bar would just have bought another failing run.
+        Rectangle {
             background: #111111;
-            
-            Text {
-                text: root.status-text;
-                color: #cccccc;
-                font-size: 10px;
-                font-family: "monospace";
-                vertical-alignment: center;
-                horizontal-stretch: 1;
-                overflow: elide;
-            }
-            
-            Button {
-                text: "Clear";
-                clicked => { root.clear-clicked(); }
-            }
-            Button {
-                text: "Help";
-                clicked => { root.input-submitted("help"); }
-            }
-            Button {
-                text: "About";
-                clicked => { root.input-submitted("about"); }
+            height: 40px;
+            // A VerticalBox stretches children from their preferred height, so without
+            // this the fixed height above is only a suggestion and the bar eats the view.
+            vertical-stretch: 0;
+            HorizontalBox {
+                spacing: 8px;
+                padding: 6px;
+
+                Text {
+                    text: root.status-text;
+                    color: #cccccc;
+                    font-size: 10px;
+                    font-family: "monospace";
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+
+                Button {
+                    text: "Clear";
+                    clicked => { root.clear-clicked(); }
+                }
+                Button {
+                    text: "Help";
+                    clicked => { root.input-submitted("help"); }
+                }
+                Button {
+                    text: "About";
+                    clicked => { root.input-submitted("about"); }
+                }
             }
         }
     }
-    
+
     // Floating cursor sensitivity - matches TerminalView.m
     // rowcolFromPoint, beginFloatingCursorAtPoint, updateFloatingCursorAtPoint
     // Handled via touch events in Rust code
 }
+
