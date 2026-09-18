@@ -135,13 +135,19 @@ jobs:
           sed -i -e 's/\x1b\[[0-9;]*m//g' /tmp/clippy.log || true
           grep -E '^[^ ]+\.rs:[0-9]+:[0-9]+: error: ' /tmp/clippy.log | sed 's/^ *//' | sort -u > /tmp/clippy-errors.txt
           grep -E '^[^ ]+\.rs:[0-9]+:[0-9]+: warning: ' /tmp/clippy.log | sed 's/^ *//' | sort -u > /tmp/clippy-lints.txt
-          # Measured by the run before this one (66), minus the 12 warnings these edits
-          # removed: 4 needless_range_loop/manual_slice_copy in fifo.rs (two of them allowed
-          # with the reason, one rewritten as a real slice copy), exit.rs unused `options`,
-          # fix_path.rs manual strip, generic.rs elided lifetime + collapsible_if, gui.rs
-          # doc list / identical-if / needless-return / two new_without_default.  The
-          # `&-masking with zero` error in real.rs was in the error bucket, not this one.
-          LINT_BASELINE=46
+          # Measured, not guessed.  The history matters, because it is the reason this is a
+          # number at all: 66 was the count with `-D`-style early abort still in force, and
+          # the 12 lints this file's commits removed should have left 54 - which is exactly
+          # what the next run reported, *not* the 46 I had written here.  Clearing real.rs's
+          # `&-masking with zero` error let clippy reach the integration tests at all, so
+          # tests/*.rs added eight lints nobody had ever seen.  A baseline lowered on an
+          # estimate would have hidden that; instead the gate said "backlog grew from 46 to
+          # 54" and the number moved to what the tool actually counts.
+          #
+          # So: 54 known lints, every one listed below and in the step summary, zero of them
+          # allowed to be joined by a new one, and any `error:` level lint failing the run
+          # regardless of this number.
+          LINT_BASELINE=54
           errors=$(wc -l < /tmp/clippy-errors.txt | tr -d ' ')
           lints=$(wc -l < /tmp/clippy-lints.txt | tr -d ' ')
           echo "clippy exit=$rc; errors=$errors; distinct warnings=$lints (baseline $LINT_BASELINE)"
@@ -156,13 +162,16 @@ jobs:
           head -n 20 /tmp/clippy-errors.txt
           head -n 20 /tmp/clippy-lints.txt
           if [ "$rc" -ne 0 ] || [ "$errors" -gt 0 ]; then
-            MSG=$( { cat /tmp/clippy-errors.txt; head -n 12 /tmp/clippy-lints.txt; } | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
+            # 40 lines, not 12: the annotation is the only channel this repo's CI output can
+            # be read through from here, and truncating it is what made the estimate above
+            # possible in the first place.
+            MSG=$( { cat /tmp/clippy-errors.txt; head -n 40 /tmp/clippy-lints.txt; } | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
             echo ""
             echo "::error::clippy found $errors error(s) and $lints warning(s) (exit $rc): %0A${MSG}"
             exit 1
           fi
           if [ "$lints" -gt "$LINT_BASELINE" ]; then
-            MSG=$(tail -n 12 /tmp/clippy-lints.txt | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
+            MSG=$(head -n 40 /tmp/clippy-lints.txt | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
             echo ""
             echo "::error::lint backlog grew from $LINT_BASELINE to $lints; last 12 alphabetically: %0A${MSG}"
             exit 1
