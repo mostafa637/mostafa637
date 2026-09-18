@@ -113,20 +113,28 @@ jobs:
 
       - name: Lint, naming every denial
         run: |
-          # Same treatment as the test step: -D warnings fails the job on lint output that
-          # nobody outside the run can read, and this step only became reachable once the
-          # test deadlock was fixed. De-colour first - the '^error' patterns are otherwise
-          # matched against lines that start with escape codes.
+          # Zero-warning policy, but *enumerated*: `-D warnings` was the obvious way to
+          # enforce it and it has a cost - rustc stops promoting later passes once the
+          # first batch of denials has turned into errors, so each push revealed about
+          # seven more lints and burned a CI cycle per batch.  Running clippy without -D
+          # lets the whole crate graph report everything, and the *count* below is what
+          # fails the job, so nothing is silenced.  De-colour first: the '^error'/'^warning'
+          # patterns would otherwise be matched against lines that begin with escape codes.
           set +e
-          CARGO_TERM_COLOR=never cargo clippy --all-targets -- -D warnings > /tmp/clippy.log 2>&1
+          CARGO_TERM_COLOR=never cargo clippy --all-targets --message-format=short > /tmp/clippy.log 2>&1
           rc=$?
           set -e
           sed -i -e 's/\x1b\[[0-9;]*m//g' /tmp/clippy.log || true
-          grep -E '^(error|warning)(\[|:)' /tmp/clippy.log | sort | uniq -c | sort -rn | head -n 12
-          if [ "$rc" -ne 0 ]; then
-            MSG=$(grep -A2 -E '^(error|warning)(\[|:)' /tmp/clippy.log | grep -E '^(error|warning| +-->)' | head -n 14 | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
+          # --message-format=short renders one lint per line as `src/x.rs:1:5: warning: msg [lint::name]`
+          grep -E '^[^ ]+\.rs:[0-9]+:[0-9]+: (warning|error): ' /tmp/clippy.log | sed 's/^ *//' | sort -u > /tmp/clippy-lints.txt
+          lints=$(wc -l < /tmp/clippy-lints.txt | tr -d ' ')
+          echo "clippy exit=$rc, distinct lints=$lints"
+          head -n 40 /tmp/clippy-lints.txt
+          if [ "$rc" -ne 0 ] || [ "$lints" -gt 0 ]; then
+            MSG=$(head -n 14 /tmp/clippy-lints.txt | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
             echo ""
-            echo "::error::cargo clippy --all-targets -- -D warnings failed (exit $rc): %0A${MSG}"
-            { printf '\n### clippy (exit %s)\n\n```\n' "$rc"; grep -E '^(error|warning)(\[|:)|^ +-->' /tmp/clippy.log | head -n 40 | sed 's/>/>/'; printf '\n```\n'; } >> "$GITHUB_STEP_SUMMARY"
-            exit "$rc"
+            echo "::error::cargo clippy --all-targets reports $lints distinct lint(s) (exit $rc; zero warnings is the policy): %0A${MSG}"
+            { printf '\n### clippy (exit %s, %s distinct lints)\n\n```\n' "$rc" "$lints"; cat /tmp/clippy-lints.txt; printf '\n```\n'; } >> "$GITHUB_STEP_SUMMARY"
+            [ "$rc" -ne 0 ] && exit "$rc"
+            exit 1
           fi

@@ -52,7 +52,7 @@ impl AlpineRunner {
                 *count += 1;
             } else if file_type.is_dir() {
                 self.fakefs.path_create(&guest_path, IshStat::new(0o040755, 0, 0, 0));
-                self.load_dir_recursive(base, &rel_path.trim_start_matches('/'), count)?;
+                self.load_dir_recursive(base, rel_path.trim_start_matches('/'), count)?;
             } else if file_type.is_file() {
                 let data = std::fs::read(entry.path()).unwrap_or_default();
                 let mode = if guest_path.contains("/bin/") || guest_path.contains("/sbin/") { 0o100755 } else { 0o100644 };

@@ -195,7 +195,7 @@ impl TmpFs {
 
     pub fn mkdir(&self, path: &str, mode: u32) -> Result<(), i32> {
         let (parent, filename) = self.lookup_parent(path)?;
-        let mut parent_lock = parent.lock().unwrap();
+        let parent_lock = parent.lock().unwrap();
         let mut parent_inner = parent_lock.inner.lock().unwrap();
         if parent_inner.children.contains_key(&filename) { return Err(-17); }
         if !s_isdir(parent_inner.inode.lock().unwrap().stat.mode) { return Err(-20); }
@@ -224,8 +224,10 @@ impl TmpFs {
     }
 
     pub fn write(&self, node: &Arc<Mutex<TmpDirNode>>, offset: usize, buf: &[u8]) -> Result<usize, i32> {
-        let mut node_lock = node.lock().unwrap();
-        let mut inner = node_lock.inner.lock().unwrap();
+        let node_lock = node.lock().unwrap();
+        // Not `mut`: the only thing taken from this guard is the inner inode Mutex, and
+        // the mutation below happens through that.  (`inode` itself does need `mut`.)
+        let inner = node_lock.inner.lock().unwrap();
         let mut inode = inner.inode.lock().unwrap();
         if s_isdir(inode.stat.mode) { return Err(-21); }
         let needed = offset + buf.len();
@@ -263,7 +265,7 @@ impl TmpFs {
 
     pub fn unlink(&self, path: &str) -> Result<(), i32> {
         let (parent, filename) = self.lookup_parent(path)?;
-        let mut parent_lock = parent.lock().unwrap();
+        let parent_lock = parent.lock().unwrap();
         let mut parent_inner = parent_lock.inner.lock().unwrap();
         if parent_inner.children.remove(&filename).is_some() { Ok(()) } else { Err(-2) }
     }

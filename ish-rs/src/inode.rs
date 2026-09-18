@@ -46,7 +46,8 @@ impl InodeData {
 
 pub struct InodeCache {
     buckets: Vec<Vec<InodeData>>,
-    lock: Lock,
+    // C's inode_cache has a `mutex_locker_t lock`; the port gets its exclusivity from
+    // `&mut self`, so a field here would only ever be initialised and dropped.
     mount_refcounts: HashMap<MountId, usize>,
 }
 
@@ -56,7 +57,7 @@ impl InodeCache {
     pub fn new() -> Self {
         let mut buckets = Vec::with_capacity(Self::HASH_SIZE);
         for _ in 0..Self::HASH_SIZE { buckets.push(Vec::new()); }
-        Self { buckets, lock: Lock::new(), mount_refcounts: HashMap::new() }
+        Self { buckets, mount_refcounts: HashMap::new() }
     }
 
     fn hash(ino: Ino) -> usize { (ino as usize) % Self::HASH_SIZE }

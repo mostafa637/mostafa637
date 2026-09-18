@@ -215,6 +215,12 @@ pub mod jit {
     impl JitInfo {
         pub fn new() -> Self { Self { host_arch: std::env::consts::ARCH.to_string(), num_gadgets: 166 } }
     }
+    // clippy::new_without_default: `new()` takes no arguments, so the type is expected to
+    // be constructible through Default as well; it cannot be derived (num_gadgets is 166,
+    // host_arch a constant), so it forwards to new().
+    impl Default for JitInfo {
+        fn default() -> Self { Self::new() }
+    }
 }
 
 #[cfg(test)]
