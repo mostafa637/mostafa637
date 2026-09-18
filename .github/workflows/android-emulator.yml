@@ -100,16 +100,16 @@ jobs:
             echo "::error::cargo install failed (exit $rc): %0A${TAIL}"
             exit "$rc"
           fi
-          cargo apk --version > /tmp/tools2.log 2>&1; rc2=$?
-          cargo ndk --version >> /tmp/tools2.log 2>&1; rc3=$?
-          if [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ]; then
-            # The crates built but the subcommands do not resolve - usually a
-            # ~/.cargo/bin that is not on PATH for later steps, or a binary that
-            # renamed its CLI. Say which, instead of dying with a bare exit code.
-            echo "::error::cargo-apk/cargo-ndk installed but are not callable (apk=$rc2 ndk=$rc3): %0A$(cat /tmp/tools2.log | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')%0Ainstall log:%0A${TAIL}"
+          # Do NOT probe with `cargo apk --version`: cargo-apk's CLI rejects a bare
+          # --version in the forwarded position and clap exits 2, which - with errexit
+          # back on - killed this step *after* a successful install and printed nothing.
+          # That false failure is what hid the fact that the tooling installs fine.
+          # Resolving the binaries is enough; the build step is the real proof.
+          if ! command -v cargo-apk > /dev/null 2>&1 || ! command -v cargo-ndk > /dev/null 2>&1; then
+            echo "::error::cargo install reported success but cargo-apk/cargo-ndk are not on PATH: %0A${TAIL}"
             exit 1
           fi
-          echo "cargo-apk and cargo-ndk are on PATH and answering"
+          echo "cargo-apk and cargo-ndk resolve on PATH: $(command -v cargo-apk) $(command -v cargo-ndk)"
 
       - name: Set up Rust with the Android target
         uses: dtolnay/rust-toolchain@1.89.0
