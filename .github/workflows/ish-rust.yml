@@ -37,17 +37,39 @@ jobs:
           src/cpu.rs src/user.rs src/task.rs src/group.rs src/getset.rs src/tls.rs src/misc.rs src/ipc.rs src/log.rs src/fake_db.rs src/resource.rs src/random.rs src/uname.rs tests/fpu_differential.rs
       - name: Test all targets (names the offender if it hangs)
         run: |
+          # Not a plain `cargo test --all-targets`: that hung for hours and the log said
+          # nothing. With output redirected libtest prints a test line only once the test
+          # FINISHES, so a hung test leaves no trace whatsoever - the earlier "last line
+          # without a verdict" heuristic matched nothing. Forcing a single thread makes the
+          # run order equal the --list order, so the first listed test that never reported
+          # is the one that was executing when the timeout fired. Same tests, same exit
+          # code, just identifiable.
           set +e
-          timeout 1500 cargo test --all-targets > /tmp/all.log 2>&1
+          timeout 1500 cargo test --all-targets -- --test-threads=1 > /tmp/all.log 2>&1
           rc=$?
+          cargo test --all-targets -- --list --format terse > /tmp/list.log 2>&1 || true
           set -e
           tail -n 25 /tmp/all.log
+          FAILED=$(grep -E '^test .* \.\.\. FAILED$' /tmp/all.log | head -5 | awk '{print $2}' | paste -sd ' ' - || true)
+          LAST=$(grep -E '^test .* \.\.\. ok$' /tmp/all.log | tail -1 | awk '{print $2}' || true)
+          HUNG=$(awk -v last="$LAST" 'index($0, last ": test")==1 {p=1; next} p && /: test$/ {sub(/: test.*/,""); print; exit}' /tmp/list.log || true)
+          if [ -z "$HUNG" ] && [ -z "$LAST" ]; then
+            HUNG=$(grep -m1 ': test$' /tmp/list.log | sed 's/: test$//' || true)
+          fi
           if [ "$rc" -ne 0 ]; then
-            # sequential harness prints 'test <name> ...' before running it, so the
-            # last such line without a verdict is the test that hung.
-            SUSPECT=$(grep -E '^test [^ ]+ \.\.\.$' /tmp/all.log | tail -1 | awk '{print $2}' || true)
-            FAILED=$(grep -E '^test .* \.\.\. FAILED$' /tmp/all.log | head -5 | awk '{print $2}' | paste -sd ' ' - || true)
-            echo "::error::cargo test --all-targets failed (exit $rc): ${FAILED:-${SUSPECT:-see log tail}}"
+            {
+              echo "### cargo test --all-targets (exit $rc)"
+              echo "- failed: ${FAILED:-none reported}"
+              echo "- last test that completed: ${LAST:-none}"
+              echo "- test that was running when it stopped: ${HUNG:-unknown}"
+              echo "- timeout used: 25m (exit 124 means it was still running)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            if [ "$rc" = "124" ]; then
+              echo "::error::cargo test hung for 25m on ${HUNG:-an unidentifiable test} (last completed: ${LAST:-none})"
+            else
+              echo "::error::cargo test --all-targets failed (exit $rc): ${FAILED:-${HUNG:-see log tail}}"
+            fi
             exit "$rc"
           fi
+
       - run: cargo clippy --all-targets -- -D warnings

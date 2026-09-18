@@ -18,6 +18,8 @@ jobs:
   alpine-test:
     name: Test Alpine rootfs loading and apk
     runs-on: ubuntu-latest
+    # Was uncapped: a hung test here burned the full 6h workflow timeout instead of failing.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: ish-rs
@@ -88,7 +90,27 @@ jobs:
               println!("\n=== All Alpine tests PASSED on GitHub Actions ===");
           }
           RS
-          cargo run --bin alpine_real_test
+          # Diagnostics only - the test itself is untouched, so a green run here means
+          # the same thing it did before. Its failure used to be a bare "exit 101": a
+          # chain of twelve unwraps, with no way to tell which one panicked, because the
+          # panic text stayed in a log this session cannot read. Surface it.
+          set +e
+          cargo run --bin alpine_real_test 2>&1 | tee /tmp/alpine.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          {
+            echo '### alpine_real_test (exit '"$rc"')'
+            echo '```'
+            tail -n 30 /tmp/alpine.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -ne 0 ]; then
+            PANIC=$(grep -E "panicked at|error\[E" /tmp/alpine.log | head -n 6 || true)
+            if [ -z "$PANIC" ]; then PANIC=$(tail -n 4 /tmp/alpine.log || true); fi
+            MSG=$(printf '%s' "$PANIC" | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')
+            echo "::error::alpine_real_test failed (exit $rc): %0A${MSG}"
+            exit "$rc"
+          fi
 
       - name: Run all differential tests (C vs Rust)
         run: |
