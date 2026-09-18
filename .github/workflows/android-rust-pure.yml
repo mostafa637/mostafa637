@@ -49,9 +49,30 @@ jobs:
   rust-core-test-online:
     name: Rust core + android-rs logic ONLINE (no --offline)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Both test steps compile the ish-emu dependency tree in *separate* target dirs
+    # (ish-rs/target and android-rs/target), so a cold runner needs the whole hour.
+    # 60 minutes used to mean the job was killed mid-step and the run read simply
+    # "cancelled" with no step name and no reason; 90 plus a per-step bound below
+    # means the step that is too slow is the thing that reports itself.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+
+      - name: Cache cargo home and both target dirs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ish-rs/target
+            android-rs/target
+          # Scoped to this workflow: the emulator job builds the same crates for
+          # x86_64-linux-android and must not trade dirs with these host profiles.
+          key: pure-${{ runner.os }}-${{ hashFiles('ish-rs/Cargo.lock', 'android-rs/Cargo.lock') }}-${{ github.ref_name }}
+          restore-keys: |
+            pure-${{ runner.os }}-${{ hashFiles('ish-rs/Cargo.lock', 'android-rs/Cargo.lock') }}-
+            pure-${{ runner.os }}-
+          save-always: true
 
       - name: Install system deps for Slint
         run: |
@@ -114,12 +135,28 @@ jobs:
         # Runs regardless of the core test above: ish-emu's own `cargo test --lib` has a
         # known hang and used to hide every android-rs result behind a skipped step.
         # The job still fails - only the visibility of these checks changed.
+        #
+        # "fast-test" is honest about one thing only: android-rs/Cargo.toml makes slint
+        # and slint-build `optional = true` and this step turns `--no-default-features`
+        # on, so Slint is not in the graph.  It still has to compile ish-emu from
+        # scratch in android-rs/target, which is the part that needs the cache above and
+        # is why the run below is bounded instead of open-ended.
         if: always()
         working-directory: android-rs
         run: |
-          echo "=== android-rs fast-test: skips Slint so this stays quick ==="
+          echo "=== android-rs fast-test: skips Slint, still builds ish-emu ==="
           cargo fetch 2>&1 | tail -n 10
-          cargo test --lib --no-default-features --features fast-test 2>&1 | tail -n 60
+          rc=0
+          timeout 2400 cargo test --lib --no-default-features --features fast-test > /tmp/fast-test.log 2>&1 || rc=$?
+          tail -n 60 /tmp/fast-test.log
+          if [ "$rc" = 124 ]; then
+            echo "::error::android-rs fast-test hit its 2400s bound after $(wc -l < /tmp/fast-test.log) log lines - the build did not finish, which is not the same as the tests passing"
+            exit 1
+          fi
+          if [ "$rc" != 0 ]; then
+            echo "::error::android-rs fast-test failed with exit $rc: $(tr '\n' '|' < /tmp/fast-test.log | tail -c 600)"
+            exit 1
+          fi
 
       - name: Test android-rs with SlintUi (best effort, bounded)
         # Runs regardless of the core test above: ish-emu's own `cargo test --lib` has a
@@ -130,8 +167,14 @@ jobs:
         continue-on-error: true
         run: |
           echo "=== Slint build can take 10-20m; fast-test above is the gate ==="
-          timeout 900 cargo test --lib --features slint-ui 2>&1 | tail -n 60 \
-            || echo "Slint test timed out or failed - fast-test already covered the logic"
+          timeout 1500 cargo test --lib --features slint-ui > /tmp/slint-test.log 2>&1
+          rc=$?
+          tail -n 60 /tmp/slint-test.log
+          if [ "$rc" = 124 ]; then
+            echo "::warning::Slint host test timed out at 1500s - the same code is built for aarch/x86_64-android and driven on a device by android-emulator.yml, which is the stronger check"
+          elif [ "$rc" != 0 ]; then
+            echo "::warning::Slint host test exited $rc - fast-test above remains the gate for this job"
+          fi
 
       # (No desktop `cargo run --bin` step any more: android-rs has no bin target on
       #  purpose - cargo-apk builds one APK per artifact and only knows how to take a
