@@ -189,8 +189,11 @@ pub fn read_header(data: &[u8]) -> Result<ElfHeader, i32> {
         shoff: u32::from_le_bytes([data[32], data[33], data[34], data[35]]),
         flags: u32::from_le_bytes([data[36], data[37], data[38], data[39]]),
         ehsize: u16::from_le_bytes([data[40], data[41]]),
-        phentsize: u16::from_le_bytes([data[42+0], data[42+1]]),
-        phnum: u16::from_le_bytes([data[42+2], data[42+3]]),
+        // e_phentsize @ 0x2a, e_phnum @ 0x2c.  These used to be spelled 42+0 / 42+1 /
+        // 42+2 / 42+3, which clippy::identity_op is right to reject: the +0 was noise
+        // around a byte offset that is already an absolute constant.
+        phentsize: u16::from_le_bytes([data[42], data[43]]),
+        phnum: u16::from_le_bytes([data[44], data[45]]),
         shentsize: 0, shnum: 0, shstrndx: 0,
     })
 }

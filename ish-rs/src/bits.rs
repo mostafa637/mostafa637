@@ -95,6 +95,12 @@ impl Bits {
     pub fn len(&self) -> usize {
         self.bits
     }
+
+    /// clippy::len_without_is_empty - and unlike the usual "is len() == 0" answer this one
+    /// is meaningful: a Bits of 0 is a degenerate set where every set()/clear() asserts.
+    pub fn is_empty(&self) -> bool {
+        self.bits == 0
+    }
 }
 
 #[cfg(test)]

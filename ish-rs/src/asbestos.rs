@@ -299,7 +299,9 @@ mod tests {
         elf_data[4] = 1; elf_data[5] = 1;
         elf_data[16] = 2; elf_data[17] = 0;
         elf_data[18] = 3; elf_data[19] = 0;
-        let block = asbestos.compile_block(0x08048000, &elf_data);
+        // The compile call is what is under test (the assert below checks its effect on
+        // the cache); the returned handle is deliberately not inspected here.
+        let _block = asbestos.compile_block(0x08048000, &elf_data);
         assert!(asbestos.lookup(0x08048000).is_some());
         let exit_code = interp.run_hello32();
         assert_eq!(exit_code, 42);

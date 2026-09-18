@@ -1047,7 +1047,7 @@ impl Roots {
         } else { Err("not found".to_string()) }
     }
     pub fn upgrade_root(&mut self, name: &str) -> Result<(), String> {
-        println!("[Roots] upgradeRoot {} to {}", name, "latest");
+        println!("[Roots] upgradeRoot {name} to latest");
         Ok(())
     }
     pub fn fs_is_managed(&self) -> bool { true }
@@ -1068,6 +1068,12 @@ impl AppGroup {
     pub fn new() -> Self { Self { container_url: "/tmp/ish_app_group".to_string(), group_identifier: "group.ish.app".to_string() } }
     pub fn container_url() -> String { "/tmp/ish_app_group".to_string() }
     pub fn container_url_for_security() -> String { "/tmp/ish_app_group".to_string() }
+}
+// clippy::new_without_default: `new()` takes no arguments, so the type is expected to be
+// buildable through Default too.  A derive cannot express these two non-default strings,
+// hence a forwarding impl.
+impl Default for AppGroup {
+    fn default() -> Self { Self::new() }
 }
 
 // ============================================================================
@@ -1216,6 +1222,12 @@ impl FontPicker {
     pub fn font_picker_configuration() -> Self { Self::new() }
     pub fn select_font(&mut self, name: &str) { self.selected_font = name.to_string(); }
     pub fn reset_font(&mut self) { self.selected_font = "ui-monospace".to_string(); }
+}
+
+// clippy::new_without_default: a derive would give an empty font list and shows_reset=false,
+// which is not what a FontPicker is; forward to new() instead.
+impl Default for FontPicker {
+    fn default() -> Self { Self::new() }
 }
 
 // ============================================================================

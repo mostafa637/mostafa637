@@ -58,8 +58,7 @@ impl ExitState {
     pub fn set_exit_code(&mut self, code: i32) { self.exit_code = code; }
     pub fn become_zombie(&mut self) { self.is_zombie = true; }
     pub fn reparent_children(&mut self, _new_parent: u32) -> Vec<u32> {
-        let old = std::mem::take(&mut self.children);
-        old
+        std::mem::take(&mut self.children)
     }
     pub fn add_child(&mut self, pid: u32) { self.children.push(pid); }
     pub fn remove_child(&mut self, pid: u32) { self.children.retain(|&c| c != pid); }
@@ -86,7 +85,15 @@ pub fn wait_for_child(children: &[(u32, ExitState)], pid: i32, options: u32) -> 
             return WaitResult::Pid(*child_pid, state.exit_code);
         }
     }
-    if !found_any { WaitResult::NoChild } else if (options & WNOHANG) != 0 { WaitResult::WouldBlock } else { WaitResult::WouldBlock }
+    if !found_any {
+        return WaitResult::NoChild;
+    }
+    // WNOHANG is the only option this port can distinguish.  A real waitpid() without it
+    // sleeps until a child changes state, and there is no scheduler here to sleep on, so
+    // the blocking case is reported exactly like "would block".  The two identical branches
+    // clippy::if_same_then_else complained about were that approximation, not a copy-paste
+    // bug; it is now written once instead of deleted, so the meaning survives.
+    WaitResult::WouldBlock
 }
 
 #[cfg(test)]
