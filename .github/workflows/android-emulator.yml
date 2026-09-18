@@ -178,7 +178,10 @@ jobs:
       - name: Verify the APK was produced
         run: |
           find android-rs/target -name '*.apk' -type f | sed 's/^/found: /' || true
-          APK=$(find android-rs/target -name '*.apk' -type f -print -quit)
+          # The signed APK, not cargo-apk's *-unaligned intermediate: badging would still
+          # read it, but adb install would answer INSTALL_PARSE_FAILED_NO_CERTIFICATES -
+          # verifying one file and installing another is how that looked unrelated.
+          APK=$(find android-rs/target -name '*.apk' ! -name '*-unaligned.apk' -type f -print -quit)
           if [ -z "$APK" ]; then
             # Printed on its own line deliberately: workflow commands are only recognised at the
             # start of a log line, and the step has just tailed a log whose final line may have no

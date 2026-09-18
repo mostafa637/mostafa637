@@ -185,7 +185,10 @@ if [ -z "$SELECTED_APK" ]; then
   for dir in android-rs/target/debug/apk android-rs/target/release/apk \
              android-rs/target/android-artifacts/debug/apks android-rs/target/android-artifacts/release/apks; do
     [ -d "$dir" ] || continue
-    SELECTED_APK="$(find "$dir" -name '*.apk' -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | sed 's/^[^ ]* //' | head -n 1)"
+    # *-unaligned.apk is cargo-apk's *intermediate*, before zipalign and apksigner: it is
+    # written last, so a newest-first search picks it and adb answers
+    # INSTALL_PARSE_FAILED_NO_CERTIFICATES. Only the signed APK is installable.
+    SELECTED_APK="$(find "$dir" -name '*.apk' ! -name '*-unaligned.apk' -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | sed 's/^[^ ]* //' | head -n 1)"
     [ -n "$SELECTED_APK" ] && break
   done
 fi
