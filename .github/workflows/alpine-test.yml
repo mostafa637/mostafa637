@@ -69,12 +69,18 @@ jobs:
               use ish_emu::fake::IshStat;
               let mut python_elf = vec![0u8; 100];
               python_elf[0..4].copy_from_slice(b"\x7fELF");
-              python_elf[4]=1; python_elf[5]=1;
+              python_elf[4]=1; python_elf[5]=1; python_elf[6]=1;
               python_elf[16]=2; python_elf[17]=0;
               python_elf[18]=3; python_elf[19]=0;
               python_elf[24]=0x00; python_elf[25]=0x80; python_elf[26]=0x04; python_elf[27]=0x08;
               python_elf[28]=52;
-              python_elf[42]=1;
+              // Two wrong bytes in this fixture, checked against read_header in src/exec.rs and
+              // the unit test exec::tests::read_header_and_phdrs, which passes with exactly this
+              // layout: e_version (byte 6) must be 1 or read_header answers ENOEXEC(-8) before it
+              // looks at anything else, and e_phentsize is at 42 while e_phnum is at 44 - writing
+              // 1 at 42 therefore asked for zero program headers.
+              python_elf[42]=32; // e_phentsize
+              python_elf[44]=1;  // e_phnum
               python_elf[52]=1;
               python_elf[60]=0x00; python_elf[61]=0x80; python_elf[62]=0x04; python_elf[63]=0x08;
               python_elf[68]=100; python_elf[72]=100; python_elf[76]=5;
