@@ -134,24 +134,32 @@ jobs:
         working-directory: android-rs
         run: |
           set +e
-          cargo apk build 2>&1 | tee "$GITHUB_WORKSPACE/cargo-apk.log"
+          CARGO_TERM_COLOR=never cargo apk build 2>&1 | tee "$GITHUB_WORKSPACE/cargo-apk.log"
           rc=${PIPESTATUS[0]}
           set -e
+          # Strip ANSI before anything greps or publishes this log. cargo colourises even
+          # when piped, so the previous run's ^error pattern matched NOTHING - every line
+          # really does start with \x1b[1m\x1b[31merror - and the annotation quoted only
+          # cargo-apk's wrapper text while the compiler's own words sat unread in the file.
+          # The plain copy is also what the evidence branch gets, so it stays readable.
+          sed -e 's/\x1b\[[0-9;]*m//g' "$GITHUB_WORKSPACE/cargo-apk.log" > "$GITHUB_WORKSPACE/cargo-apk.plain.log" || true
           mkdir -p "$GITHUB_WORKSPACE/$SCREENSHOT_DIR"
-          tail -n 400 "$GITHUB_WORKSPACE/cargo-apk.log" > "$GITHUB_WORKSPACE/$SCREENSHOT_DIR/cargo-apk.txt" || true
+          tail -n 400 "$GITHUB_WORKSPACE/cargo-apk.plain.log" > "$GITHUB_WORKSPACE/$SCREENSHOT_DIR/cargo-apk.txt" || true
           if [ "$rc" -ne 0 ]; then
+            rm -f /tmp/ctx.txt
             {
-              grep -E '^error(\[|:)|^error: |undefined reference|No such file|error: could not compile' "$GITHUB_WORKSPACE/cargo-apk.log" | head -n 15
-              grep -E 'cargo-apk|keystore|SDK|NDK' "$GITHUB_WORKSPACE/cargo-apk.log" | head -n 8
+              grep -E '^error(\[|:)|^warning: .*generated .* error|undefined reference|No such file|could not compile' "$GITHUB_WORKSPACE/cargo-apk.plain.log" | head -n 20
+              grep -nE '^error' "$GITHUB_WORKSPACE/cargo-apk.plain.log" | head -n 3 | sed 's/:.*//' | while read -r n; do sed -n "${n},$((n+6))p" "$GITHUB_WORKSPACE/cargo-apk.plain.log"; done >> /tmp/ctx.txt || true
+              cat /tmp/ctx.txt 2>/dev/null || true
+              grep -E 'cargo-apk|keystore|SDK|NDK' "$GITHUB_WORKSPACE/cargo-apk.plain.log" | head -n 8
             } > /tmp/err.txt || true
-            [ -s /tmp/err.txt ] || tail -n 25 "$GITHUB_WORKSPACE/cargo-apk.log" > /tmp/err.txt
+            [ -s /tmp/err.txt ] || tail -n 25 "$GITHUB_WORKSPACE/cargo-apk.plain.log" > /tmp/err.txt
             MSG=$(head -c 4500 /tmp/err.txt | sed 's/%/%25/g' | awk '{printf "%s%s", (NR > 1 ? "%0A" : ""), $0}')
             echo "::error::cargo apk build failed (exit $rc): %0A${MSG}"
-            { printf '\n### cargo apk build failed\n\n```\n'; head -c 4500 /tmp/err.txt; printf '\n```\n'; } >> "$GITHUB_STEP_SUMMARY"
+            { printf '\n### cargo apk build failed\n\n```\n'; head -c 6000 /tmp/err.txt; printf '\n```\n'; } >> "$GITHUB_STEP_SUMMARY"
           fi
           exit "$rc"
 
-      # Fail here, not 30 emulator-minutes later, when nothing is installable.
       - name: Verify the APK was produced
         run: |
           find android-rs/target -name '*.apk' -type f | sed 's/^/found: /' || true

@@ -95,9 +95,11 @@ jobs:
           # chain of twelve unwraps, with no way to tell which one panicked, because the
           # panic text stayed in a log this session cannot read. Surface it.
           set +e
-          cargo run --bin alpine_real_test 2>&1 | tee /tmp/alpine.log
+          CARGO_TERM_COLOR=never cargo run --bin alpine_real_test 2>&1 | tee /tmp/alpine.raw
           rc=${PIPESTATUS[0]}
           set -e
+          # colour stripped before grepping, same reason as the other jobs
+          sed -e 's/\x1b\[[0-9;]*m//g' /tmp/alpine.raw > /tmp/alpine.log || true
           {
             echo '### alpine_real_test (exit '"$rc"')'
             echo '```'

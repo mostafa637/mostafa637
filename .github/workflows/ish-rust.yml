@@ -45,10 +45,14 @@ jobs:
           # is the one that was executing when the timeout fired. Same tests, same exit
           # code, just identifiable.
           set +e
-          timeout 1500 cargo test --all-targets -- --test-threads=1 > /tmp/all.log 2>&1
+          # CARGO_TERM_COLOR=never matters: libtest colourises its verdicts even when
+          # piped, and the pattern 'test ... ok$' silently failed to match an escaped
+          # line - which is why a previous run printed "see log tail" instead of a name.
+          CARGO_TERM_COLOR=never timeout 1500 cargo test --all-targets -- --test-threads=1 > /tmp/all.log 2>&1
           rc=$?
-          cargo test --all-targets -- --list --format terse > /tmp/list.log 2>&1 || true
+          CARGO_TERM_COLOR=never cargo test --all-targets -- --list --format terse > /tmp/list.log 2>&1 || true
           set -e
+          for f in all list; do sed -i -e 's/\x1b\[[0-9;]*m//g' /tmp/$f.log 2>/dev/null || true; done
           tail -n 25 /tmp/all.log
           FAILED=$(grep -E '^test .* \.\.\. FAILED$' /tmp/all.log | head -5 | awk '{print $2}' | paste -sd ' ' - || true)
           LAST=$(grep -E '^test .* \.\.\. ok$' /tmp/all.log | tail -1 | awk '{print $2}' || true)
