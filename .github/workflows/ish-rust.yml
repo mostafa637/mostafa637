@@ -86,4 +86,29 @@ jobs:
             exit "$rc"
           fi
 
+      # One-off isolation probe, informational only (it always exits 0 so it cannot
+      # soften the verdict above). cargo test --all-targets has to be killed at 25m and
+      # the annotation now names gui::tests::terminal_manager_maps; what decides the fix
+      # is whether that test hangs on its own or only after another test has run, since
+      # both share the static OnceLock<Mutex<TerminalManager>> in src/gui.rs.
+      - name: Isolate the hanging test
+        if: always()
+        run: |
+          set +e
+          CARGO_TERM_COLOR=never timeout 300 cargo test --lib gui::tests::terminal_manager_maps -- --exact > /tmp/alone.log 2>&1
+          alone=$?
+          CARGO_TERM_COLOR=never timeout 300 cargo test --lib -- --test-threads=1 gui::tests::terminal_create_pseudo gui::tests::terminal_manager_maps > /tmp/pair.log 2>&1
+          pair=$?
+          MSG="terminal_manager_maps alone exit=$alone (124=hung, 0=passed); after terminal_create_pseudo exit=$pair (124=hung => interaction through the shared static)"
+          echo "$MSG"
+          echo "::notice::$MSG"
+          {
+            echo '### isolation probe'
+            echo '```'
+            echo "alone (124 = hung):"; tail -n 6 /tmp/alone.log
+            echo; echo "pair (124 = hung):"; tail -n 6 /tmp/pair.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
       - run: cargo clippy --all-targets -- -D warnings
