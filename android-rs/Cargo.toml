@@ -11,9 +11,17 @@ name = "ish_android_rs"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
-[[bin]]
-name = "ish-android-rs"
-path = "src/main.rs"
+# No [[bin]] here, and deliberately no src/main.rs either - and not because a desktop
+# build is unwanted, but because cargo-apk builds one APK per *artifact* it finds
+# (main.rs: `for artifact in cmd.artifacts() { builder.build(artifact)? }`) and always
+# asks cargo-subcommand for a *cdylib* filename (apk.rs: artifact(.., CrateType::Cdylib)).
+# That is fine for this lib and a hard panic for any executable target:
+#   thread 'main' panicked at cargo-subcommand-0.12.0/src/artifact.rs:51:23:
+#   Bin is not compatible with Cdylib
+# which is exactly what happened right after this crate's APK had already been built,
+# aligned and signed - so the pipeline failed for a reason unrelated to the app.
+# Examples are enumerated the same way, so the desktop demo does not move there either:
+# the emulator job runs the real APK on a device, which is the better smoke test.
 
 [dependencies]
 ish-emu = { path = "../ish-rs" }
