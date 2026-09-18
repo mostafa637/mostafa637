@@ -95,6 +95,26 @@ report_and_exit() {
   } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
   printf '\n=== summary ===\npassed: %s\nfailed: %s\n' "${#PASS[@]}" "${#FAIL[@]}"
+  # Two extra channels for the verdict, because the step log is not always readable from
+  # outside the run: an annotation (shown on the run page and through the API), and a text
+  # copy inside the evidence directory, which the workflow publishes to a branch. Without
+  # these, a run that died before any screenshot looked identical to a build failure.
+  {
+    printf 'apk: %s (%s bytes)\npackage: %s\npassed: %s\nfailed: %s\n\nFAILURES:\n' \
+      "${SELECTED_APK:-none}" "$( [ -n "${SELECTED_APK:-}" ] && wc -c < "$SELECTED_APK" 2>/dev/null || echo 0 )" \
+      "${PKG:-unresolved}" "${#PASS[@]}" "${#FAIL[@]}"
+    for c in "${FAIL[@]:-}"; do printf '  - %s\n' "$c"; done
+    printf '\nNOTES:\n'
+    for c in "${INFO[@]:-}"; do printf '  %s\n' "$c"; done
+  } > "$OUT_DIR/smoke-result.txt" 2>/dev/null || true
+  if [ "${#FAIL[@]}" -gt 0 ]; then
+    MSG="$(printf '%s\n' "${FAIL[@]}" | sed 's/%/%25/g' | awk '{printf "%s%s", (NR>1?"%0A":""), $0}')"
+    # %%0A, not %0A: printf eats the latter as a hex-float conversion (it printed
+    # "0X0P+0" and swallowed the message in testing), while GitHub needs the literal
+    # four characters %0A to render a newline inside an annotation.
+    printf '\n::error::emulator smoke test failed %d of %d checks (apk=%s)%%0A%s\n' \
+      "${#FAIL[@]}" "$(( ${#PASS[@]} + ${#FAIL[@]} ))" "${SELECTED_APK:-none}" "$MSG"
+  fi
   local status=0
   if [ "${#FAIL[@]}" -gt 0 ]; then
     printf 'FAILURES:\n'
@@ -151,25 +171,27 @@ fi
 # cargo-apk writes target/android-artifacts/<profile>/apks/<apk_name>-<profile>.apk.
 # The exact layout has moved between cargo-apk versions, so this is a preference
 # list with a find-based fallback rather than one hardcoded path.
-CANDIDATES="
-android-rs/target/android-artifacts/debug/apks/ish-android-rs-debug.apk
-android-rs/target/android-artifacts/release/apks/ish-android-rs-release.apk
-android-rs/target/android-artifacts/app/build/outputs/apk/debug/app-debug.apk
-android-rs/target/android-artifacts/app/build/outputs/apk/release/app-release.apk
-"
+# Where cargo-apk actually writes the APK. It is target/<profile>/apk/<apk_name>.apk for
+# the version this job installs (its own log says so: "Signing
+# .../android-rs/target/debug/apk/ish-android-rs.apk"); the android-artifacts/... layout
+# belongs to an older cargo-apk and is kept only as a fallback, because a wrong list here
+# is indistinguishable from "the build produced nothing".
 SELECTED_APK="${APK_PATH:-}"
 if [ -n "$SELECTED_APK" ] && [ ! -f "$SELECTED_APK" ]; then
   bad "APK_PATH=$SELECTED_APK does not exist"
   report_and_exit
 fi
 if [ -z "$SELECTED_APK" ]; then
-  for c in $CANDIDATES; do
-    [ -f "$c" ] && { SELECTED_APK="$c"; break; }
+  for dir in android-rs/target/debug/apk android-rs/target/release/apk \
+             android-rs/target/android-artifacts/debug/apks android-rs/target/android-artifacts/release/apks; do
+    [ -d "$dir" ] || continue
+    SELECTED_APK="$(find "$dir" -name '*.apk' -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | sed 's/^[^ ]* //' | head -n 1)"
+    [ -n "$SELECTED_APK" ] && break
   done
 fi
 [ -z "$SELECTED_APK" ] && SELECTED_APK="$(find . -name '*.apk' -type f 2>/dev/null | head -1)"
 if [ -z "$SELECTED_APK" ]; then
-  note "APK candidates searched: $(printf '%s ' $CANDIDATES)"
+  note "no APK found in: android-rs/target/{debug,release}/apk and android-rs/target/android-artifacts/{debug,release}/apks (APK_PATH was: ${APK_PATH:-unset})"
   bad "no APK was produced by the build steps - nothing to install"
   report_and_exit
 fi

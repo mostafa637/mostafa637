@@ -1,7 +1,8 @@
 name: iSH Android Pure Rust (Rust core + Slint logic)
 
-# Scope: the pure-Rust side only - ish-emu core tests, android-rs logic, the desktop
-# binary that exercises the same UI code paths.
+# Scope: the pure-Rust side only - ish-emu core tests and android-rs logic. There is no
+# desktop binary target in android-rs any more (cargo-apk panics on any non-lib artifact),
+# so the UI code paths get exercised on a device by android-emulator.yml instead.
 #
 # The APK build and the Android emulator run now live in android-emulator.yml
 # ("Android Emulator Smoke Test"). They used to be duplicated here, which meant two

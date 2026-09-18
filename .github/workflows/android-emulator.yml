@@ -193,6 +193,9 @@ jobs:
           AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt | head -n 1)
           "$AAPT" dump badging "$APK" | grep -E "package: name|launchable-activity|native-code|sdkVersion" | sed 's/^/  /'
           "$AAPT" dump badging "$APK" | grep -q "x86_64" || { echo "::error::APK has no x86_64 native code - the emulator cannot run it"; exit 1; }
+          # Absolute, because APK_PATH travels through $GITHUB_ENV into another step's
+          # cwd; a relative path only resolved by luck.
+          APK="$(readlink -f "$APK")"
           echo "APK_PATH=$APK" >> "$GITHUB_ENV"
 
       # --- AVD snapshot cache ----------------------------------------------
