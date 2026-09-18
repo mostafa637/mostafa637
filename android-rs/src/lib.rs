@@ -113,8 +113,12 @@ pub fn run_desktop() {
 #[no_mangle]
 fn android_main(app: slint::android::AndroidApp) {
     android_logger::init_once(
+        // android_logger 0.13 has with_max_level(LevelFilter), not with_min_level -
+        // rustc said so ("no method named `with_min_level` found for struct `Config`"),
+        // and the name matters: it is a ceiling, so Info keeps our log::info! markers and
+        // drops Slint's trace spam. with_tag takes anything Into<Vec<u8>>.
         android_logger::Config::default()
-            .with_min_level(log::Level::Info)
+            .with_max_level(log::LevelFilter::Info)
             .with_tag("iSH"),
     );
     slint::android::init(app).expect("slint::android::init failed");
@@ -200,8 +204,8 @@ impl AndroidPureRustApp {
     pub fn get_screenshot_info(&self) -> String {
         format!(
             "iSH Android Pure Rust Screenshot (Slint + Servo + hterm + KVM) ONLINE ONLY\n\
-            Terminal: {} chars, {}x{} winsize\n\
-            Themes: {} default + {} user\n\
+            Terminal: {} chars, {}x{} winsize, {} scrollback\n\
+            Themes: {} default + {} user, dir={}\n\
             Roots: {} roots container={} default={}\n\
             Font: {} {:.1}px userFacing={} cursor={} blink={}\n\
             KVM: {} API: {} hterm: {} slint: {} servo: {}\n\
